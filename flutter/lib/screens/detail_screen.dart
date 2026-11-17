@@ -558,18 +558,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     });
   }
 
-  /// 桌面起播前：等拆机门闩；无实例则 [kotvAcquireMpvPlayer] 再建。
+  /// 桌面起播前：等拆机门闩；无实例则 [kotvTakeDesktopMpvPlayer] 再建。
   Future<void> _primeDesktopMpv() async {
-    if (kotvIsAndroid()) return;
-    if (_mk != null && _mkPlayer != null) {
-      await kotvAwaitMpvTeardown();
-      return;
-    }
-    final player = await kotvAcquireMpvPlayer();
-    if (!mounted) {
-      await kotvDisposeMpvPlayer(player);
-      return;
-    }
+    final player = await kotvTakeDesktopMpvPlayer(
+      alreadyBound: _mk != null && _mkPlayer != null,
+      isMounted: () => mounted,
+    );
+    if (player == null) return;
     if (_mk != null) {
       await kotvDisposeMpvPlayer(player);
       return;

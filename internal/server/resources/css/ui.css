@@ -56,11 +56,10 @@ body {
 .brand { display: flex; align-items: center; gap: 12px; }
 .brand-mark {
   width: 44px; height: 44px; border-radius: 14px;
-  background: linear-gradient(135deg, rgba(255,255,255,0.22), rgba(255,255,255,0.06));
+  object-fit: cover; display: block; flex-shrink: 0;
   border: 1px solid var(--glass-border);
-  display: grid; place-items: center;
-  font-weight: 800; letter-spacing: -0.04em;
   box-shadow: var(--shadow);
+  background: rgba(255,255,255,0.08);
 }
 .brand-title { font-size: 18px; font-weight: 700; }
 .brand-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
@@ -257,10 +256,52 @@ body {
 .file-icon svg { display: block; fill: currentColor; }
 .file-icon.dir { background: rgba(36,61,208,0.35); }
 .file-meta { min-width: 0; flex: 1; }
-.file-name { font-size: 14px; font-weight: 600; word-break: break-all; }
-.file-time { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.file-name { font-size: 14px; font-weight: 600; word-break: break-word; }
+.file-time { font-size: 11px; color: var(--muted); margin-top: 2px; word-break: break-all; }
 .file-empty { text-align: center; color: var(--muted); padding: 28px 8px; font-size: 13px; }
-.repo-item { cursor: default; }
+.repo-item {
+  cursor: default;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
 .repo-item.repo-current { border-color: rgba(207,66,116,0.45); }
-.repo-actions { display: flex; flex-wrap: wrap; gap: 6px; flex-shrink: 0; }
+.repo-item-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+  width: 100%;
+}
+.repo-item .file-name,
+.repo-item .file-time {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  word-break: normal;
+}
+.repo-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  vertical-align: middle;
+  color: #fbcfe8;
+  background: rgba(207, 66, 116, 0.28);
+  border: 1px solid rgba(207, 66, 116, 0.35);
+}
+.repo-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+  width: 100%;
+}
+.repo-actions .chip {
+  flex: 1 1 0;
+  text-align: center;
+  min-width: 0;
+  padding: 8px 6px;
+}
 .chip.danger { color: #fca5a5; border-color: rgba(185,28,28,0.45); }

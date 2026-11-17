@@ -89,6 +89,25 @@ Future<Player> kotvAcquireMpvPlayer() async {
   return kotvCreateMpvPlayer();
 }
 
+/// 桌面起播前取 Player：已有实例只等门闩并返回 null；否则 acquire。
+/// 详情/直播 [_primeDesktopMpv] 共用；调用方负责 bind，若期间已有实例须自行 dispose 返回值。
+Future<Player?> kotvTakeDesktopMpvPlayer({
+  required bool alreadyBound,
+  required bool Function() isMounted,
+}) async {
+  if (kotvIsAndroid()) return null;
+  if (alreadyBound) {
+    await kotvAwaitMpvTeardown();
+    return null;
+  }
+  final player = await kotvAcquireMpvPlayer();
+  if (!isMounted()) {
+    await kotvDisposeMpvPlayer(player);
+    return null;
+  }
+  return player;
+}
+
 String _trackLabel(dynamic t) {
   if (t.title?.isNotEmpty == true) return t.title! as String;
   if (t.language?.isNotEmpty == true) return t.language! as String;

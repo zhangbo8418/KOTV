@@ -47,10 +47,11 @@ func webRoutes(remote fs.FS) []route {
 	remoteServer := http.FileServer(http.FS(remote))
 	webRoot := resolveWebappDir()
 	if webRoot == "" {
-		// 无 Flutter webapp 时 / 仍为遥控；同时挂 /css/、/js/，供遥控/管理页用绝对路径。
+		// 无 Flutter webapp 时 / 仍为遥控；同时挂 /css/、/js/、/img/，供遥控/管理页用绝对路径。
 		return []route{
 			{"/css/", needPublic, remoteServer.ServeHTTP},
 			{"/js/", needPublic, remoteServer.ServeHTTP},
+			{"/img/", needPublic, remoteServer.ServeHTTP},
 			{"/admin/", needPublic, remoteServer.ServeHTTP},
 			{"/", needPublic, func(w http.ResponseWriter, r *http.Request) {
 				serveLocalAssetOr(w, r, remoteServer)
@@ -65,10 +66,11 @@ func webRoutes(remote fs.FS) []route {
 		{"/remote", needPublic, func(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, "/remote/", http.StatusFound)
 		}},
-		// 管理页与遥控共享的 css/js（admin 用绝对路径 /css/…）
+		// 管理页与遥控共享的 css/js/img（admin 用绝对路径 /css/…）
 		{"/admin/", needPublic, remoteServer.ServeHTTP},
 		{"/css/", needPublic, remoteServer.ServeHTTP},
 		{"/js/", needPublic, remoteServer.ServeHTTP},
+		{"/img/", needPublic, remoteServer.ServeHTTP},
 		{"/", needPublic, func(w http.ResponseWriter, r *http.Request) {
 			if r.Method != http.MethodGet && r.Method != http.MethodHead {
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

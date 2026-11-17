@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:window_manager/window_manager.dart';
@@ -352,6 +353,16 @@ class _KotvAppState extends ConsumerState<KotvApp> with WindowListener, WidgetsB
       title: 'KO影视',
       debugShowCheckedModeBanner: false,
       navigatorKey: rootNavigatorKey,
+      locale: const Locale('zh', 'CN'),
+      supportedLocales: const [
+        Locale('zh', 'CN'),
+        Locale('en', 'US'),
+      ],
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
       theme: buildKotvTheme(palette),
       // 桌面端默认不把鼠标当拖动设备；芯片/分类栏过长时需可拖拽横滚
       scrollBehavior: const KotvScrollBehavior(),

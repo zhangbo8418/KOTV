@@ -28,11 +28,15 @@
     const repos = Array.isArray(data.repos) ? data.repos : [];
     return {
       current,
-      items: repos.map((r) => ({
-        url: String(r.url || '').trim(),
-        name: String(r.title || r.name || '').trim(),
-        current: !!r.current || String(r.url || '').trim() === current,
-      })).filter((r) => r.url),
+      items: repos.map((r) => {
+        const url = String(r.url || '').trim();
+        return {
+          url,
+          // title=库内备注；name 可能是展示回退（无备注时等于 url），不能当可编辑备注
+          name: String(r.title != null ? r.title : '').trim(),
+          current: !!r.current || url === current,
+        };
+      }).filter((r) => r.url),
     };
   }
 
@@ -46,7 +50,7 @@
         const url = String(c.url || '').trim();
         return {
           url,
-          name: String(c.title || c.name || '').trim(),
+          name: String(c.title != null ? c.title : '').trim(),
           current: !!c.current || url === current,
         };
       }).filter((r) => r.url),
@@ -101,8 +105,8 @@
   }
 
   /**
-   * 把列表渲到 container；onToast(msg) 可选。
-   * @param {{kind:string, container:HTMLElement, onToast?:Function}} opts
+   * 把列表渲到 container。
+   * @param {{kind:string, container:HTMLElement, onToast?:Function, onEdit?:Function}} opts
    */
   async function renderList(opts) {
     const kind = opts.kind === 'live' ? 'live' : 'vod';
@@ -125,14 +129,17 @@
     data.items.forEach((item) => {
       const row = document.createElement('div');
       row.className = 'file-item repo-item' + (item.current ? ' repo-current' : '');
-      const label = item.name || item.url;
+      const title = item.name || item.url;
+      const badge = item.current ? '<span class="repo-badge">当前</span>' : '';
       row.innerHTML = `
-        <div class="file-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-1 9H9V9h10v2zm-4 4H9v-2h6v2zm4-8H9V5h10v2z"/></svg>
-        </div>
-        <div class="file-meta">
-          <div class="file-name">${esc(label)}${item.current ? ' · 当前' : ''}</div>
-          <div class="file-time">${esc(item.url)}</div>
+        <div class="repo-item-main">
+          <div class="file-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-1 9H9V9h10v2zm-4 4H9v-2h6v2zm4-8H9V5h10v2z"/></svg>
+          </div>
+          <div class="file-meta">
+            <div class="file-name" title="${esc(title)}">${esc(title)}${badge}</div>
+            <div class="file-time" title="${esc(item.url)}">${esc(item.url)}</div>
+          </div>
         </div>
         <div class="repo-actions"></div>`;
       const actions = row.querySelector('.repo-actions');
@@ -156,18 +163,12 @@
       btnEdit.type = 'button';
       btnEdit.className = 'chip';
       btnEdit.textContent = '编辑';
-      btnEdit.onclick = async () => {
-        const nextUrl = prompt('地址', item.url);
-        if (nextUrl == null) return;
-        const nextName = prompt('备注名', item.name || '');
-        if (nextName == null) return;
-        try {
-          await edit(kind, item.url, nextUrl.trim(), nextName.trim());
-          toast('已保存');
-          await renderList(opts);
-        } catch (e) {
-          toast(e.message || '保存失败');
+      btnEdit.onclick = () => {
+        if (typeof opts.onEdit === 'function') {
+          opts.onEdit(item);
+          return;
         }
+        toast('无法编辑');
       };
 
       const btnDel = document.createElement('button');
@@ -191,40 +192,76 @@
   }
 
   /**
-   * 绑定一个设置面板：kindSelect、urlInput、nameInput、listEl、addBtn、refreshBtn。
+   * 绑定设置面板：列表 + 上方表单增改（编辑填回表单，可改备注）。
    */
   function bindPanel(cfg) {
     const kindEl = cfg.kindSelect;
     const urlEl = cfg.urlInput;
     const nameEl = cfg.nameInput;
     const listEl = cfg.listEl;
+    const addBtn = cfg.addBtn;
     const toast = typeof cfg.onToast === 'function' ? cfg.onToast : () => {};
+    const addLabel = addBtn ? String(addBtn.textContent || '添加 / 切换') : '添加 / 切换';
+    let editingOldUrl = null;
+
+    function clearEdit() {
+      editingOldUrl = null;
+      if (addBtn) addBtn.textContent = addLabel;
+    }
+
+    function fillForm(item) {
+      editingOldUrl = item.url;
+      if (urlEl) urlEl.value = item.url;
+      if (nameEl) nameEl.value = item.name || '';
+      if (addBtn) addBtn.textContent = '保存修改';
+      if (nameEl) {
+        nameEl.focus();
+        try { nameEl.select(); } catch (_) {}
+      } else if (urlEl) {
+        urlEl.focus();
+      }
+      toast('已填入上方，可改备注或地址后保存');
+    }
 
     const opts = () => ({
       kind: kindEl ? kindEl.value : 'vod',
       container: listEl,
       onToast: toast,
+      onEdit: fillForm,
     });
 
-    const refresh = () => renderList(opts());
+    const refresh = async () => {
+      clearEdit();
+      await renderList(opts());
+    };
 
     if (kindEl) {
-      kindEl.addEventListener('change', () => { refresh(); });
+      kindEl.addEventListener('change', () => {
+        if (urlEl) urlEl.value = '';
+        if (nameEl) nameEl.value = '';
+        refresh();
+      });
     }
     if (cfg.refreshBtn) {
       cfg.refreshBtn.addEventListener('click', () => { refresh(); });
     }
-    if (cfg.addBtn) {
-      cfg.addBtn.addEventListener('click', async () => {
+    if (addBtn) {
+      addBtn.addEventListener('click', async () => {
         const kind = kindEl ? kindEl.value : 'vod';
         const url = urlEl ? urlEl.value.trim() : '';
         const name = nameEl ? nameEl.value.trim() : '';
         try {
-          await addOrSwitch(kind, url, name);
+          if (editingOldUrl) {
+            await edit(kind, editingOldUrl, url, name);
+            toast('已保存');
+          } else {
+            await addOrSwitch(kind, url, name);
+            toast('已保存并切换');
+          }
           if (urlEl) urlEl.value = '';
           if (nameEl) nameEl.value = '';
-          toast('已保存并切换');
-          await refresh();
+          clearEdit();
+          await renderList(opts());
         } catch (e) {
           toast(e.message || '保存失败');
         }

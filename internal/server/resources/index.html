@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
   <meta name="theme-color" content="#243DD0">
   <title>KO影视 · 遥控</title>
+  <link rel="icon" type="image/png" href="/img/favicon.png">
   <link rel="stylesheet" href="/css/ui.css">
   <script src="/js/noble.min.js" defer></script>
   <script src="/js/kotv-auth.js" defer></script>
@@ -18,7 +19,7 @@
   <div id="app" class="locked">
     <header class="topbar">
       <div class="brand">
-        <div class="brand-mark">KO</div>
+        <img class="brand-mark" src="/img/icon.png" width="44" height="44" alt="KO影视">
         <div>
           <div class="brand-title">KO影视</div>
           <div class="brand-sub" id="device_info">连接中…</div>
@@ -156,7 +157,7 @@
       <section id="panel-setting" class="panel">
         <div class="glass card">
           <h2>远程配置</h2>
-          <p class="hint">选择点播或直播，管理后端仓库列表（增删改查、点选切换）</p>
+          <p class="hint">点播 / 直播仓库：添加切换，或点「编辑」填回上方改备注与地址</p>
           <div class="field-row">
             <select id="setting_kind" class="field short" aria-label="配置类型">
               <option value="vod">点播</option>
