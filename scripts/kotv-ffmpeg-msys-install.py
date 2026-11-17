@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""MSYS/MinGW 下安装静态 FFmpeg 前缀（libs / headers / pkg-config）。
+"""MSYS/MinGW：把已编译的静态 FFmpeg 装进前缀（libs / headers / pkg-config）。
 
-`make install` 的 INSTALL_FILES 会把上百个头文件展开进一条 sh -c，
-触顶 ARG_MAX 后在引号处截断。本脚本按文件拷贝，避免长命令行。
-用法（在已编译的 ffmpeg 源码树根目录）：
+`make install` 会把头文件列表展开进一条 sh -c，触顶 ARG_MAX。
+本脚本按文件拷贝。用法（在已 configure+make 的 ffmpeg 树根）：
   python3 kotv-ffmpeg-msys-install.py --prefix /path/to/prefix
 """
 from __future__ import annotations
@@ -14,7 +13,7 @@ import shutil
 import sys
 from pathlib import Path
 
-# 与桌面 AV3A 静态构建一致的库集合（无 libavdevice）。
+# 桌面 AV3A 静态构建启用的库（无 libavdevice）。
 LIBS = (
     "libavutil",
     "libavcodec",
@@ -31,6 +30,16 @@ def parse_make_list(makefile: Path, var: str) -> list[str]:
     if not m:
         return []
     return re.findall(r"[\w./+-]+\.h", m.group(1))
+
+
+def is_ffmpeg_build_tree(root: Path) -> bool:
+    # tip 把 config.h 写在树根（configure: cp_if_changed … config.h），不是 ffbuild/。
+    if (root / "config.h").is_file():
+        return True
+    if (root / "ffbuild" / "config.h").is_file():
+        return True
+    # 兜底：静态库已编出。
+    return (root / "libavutil" / "libavutil.a").is_file()
 
 
 def copy_file(src: Path, dest: Path) -> None:
@@ -50,10 +59,9 @@ def install_lib(root: Path, prefix: Path, lib: str) -> None:
     copy_file(archive, prefix / "lib" / archive.name)
 
     pc = sub / f"{lib}.pc"
-    if pc.is_file():
-        copy_file(pc, prefix / "lib" / "pkgconfig" / pc.name)
-    else:
+    if not pc.is_file():
         raise SystemExit(f"ERROR: missing {pc}")
+    copy_file(pc, prefix / "lib" / "pkgconfig" / pc.name)
 
     makefile = sub / "Makefile"
     headers = parse_make_list(makefile, "HEADERS") + parse_make_list(
@@ -61,21 +69,21 @@ def install_lib(root: Path, prefix: Path, lib: str) -> None:
     )
     if not headers:
         raise SystemExit(f"ERROR: no HEADERS in {makefile}")
+
     inc = prefix / "include" / lib
     copied = 0
-    skipped = []
+    skipped = 0
     for name in headers:
         src = sub / name
         if not src.is_file():
-            # SKIPHEADERS / 未启用后端的头可能不在树里；有则装、无则跳过。
-            skipped.append(name)
+            skipped += 1
             continue
         copy_file(src, inc / name)
         copied += 1
     if copied < 1:
         raise SystemExit(f"ERROR: {lib} installed 0 headers")
     if skipped:
-        print(f"ok {lib}: skipped {len(skipped)} absent headers")
+        print(f"ok {lib}: skipped {skipped} absent headers")
 
 
 def main() -> int:
@@ -85,13 +93,16 @@ def main() -> int:
         "--src",
         type=Path,
         default=Path.cwd(),
-        help="FFmpeg build/source tree (default: cwd)",
+        help="FFmpeg build tree (default: cwd)",
     )
     args = ap.parse_args()
     root = args.src.resolve()
     prefix = args.prefix.resolve()
-    if not (root / "ffbuild" / "config.h").is_file():
-        print(f"ERROR: not an FFmpeg build tree: {root}", file=sys.stderr)
+    if not is_ffmpeg_build_tree(root):
+        print(
+            f"ERROR: not a configured FFmpeg tree (no config.h / libavutil.a): {root}",
+            file=sys.stderr,
+        )
         return 1
     for lib in LIBS:
         install_lib(root, prefix, lib)

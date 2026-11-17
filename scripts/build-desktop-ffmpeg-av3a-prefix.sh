@@ -419,6 +419,18 @@ else
   $MAKE install
 fi
 
+# tip 把 config.h 写在树根；旧布局偶发在 ffbuild/。
+kotv_ffmpeg_config_h() {
+  local cand
+  for cand in config.h ffbuild/config.h; do
+    if [[ -f "$cand" ]]; then
+      printf '%s\n' "$cand"
+      return 0
+    fi
+  done
+  return 1
+}
+
 lib="$PREFIX/lib/libavcodec.a"
 [[ -f "$lib" ]] || lib="$PREFIX/lib/libavcodec.dll.a"
 if ! grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$lib" 2>/dev/null; then
@@ -430,54 +442,58 @@ if ! grep -aqE 'libdav1d|dav1d_data_props' "$lib" 2>/dev/null \
   echo "ERROR: $lib built without libdav1d" >&2
   exit 1
 fi
+
 # lavf：HTTPS + 直播常用 RTSP/RTMP（本树 configure 无 libnghttp2；HTTP/2+3 走 mpv libcurl）。
-if [[ -f ffbuild/config.h ]]; then
-  fail_proto=0
-  if ! grep -qE '^#define CONFIG_HTTPS_PROTOCOL 1$' ffbuild/config.h; then
-    echo "ERROR: FFmpeg missing CONFIG_HTTPS_PROTOCOL=1" >&2
-    fail_proto=1
-  fi
-  if ! grep -qE '^#define CONFIG_HTTP_PROTOCOL 1$' ffbuild/config.h; then
-    echo "ERROR: FFmpeg missing CONFIG_HTTP_PROTOCOL=1" >&2
-    fail_proto=1
-  fi
-  if ! grep -qE '^#define CONFIG_RTSP_(DEMUXER|PROTOCOL) 1$' ffbuild/config.h; then
-    echo "ERROR: FFmpeg missing RTSP demuxer/protocol" >&2
-    fail_proto=1
-  fi
-  if ! grep -qE '^#define CONFIG_RTMP(_PROTOCOL|_DEMUXER)? 1$' ffbuild/config.h \
-    && ! grep -qE '^#define CONFIG_RTMP[A-Z_]*PROTOCOL 1$' ffbuild/config.h; then
-    echo "ERROR: FFmpeg missing RTMP protocol" >&2
-    fail_proto=1
-  fi
-  for feat in LIBDAV1D LIBXML2 LIBARIBCAPTION; do
-    if ! grep -qE "^#define CONFIG_${feat} 1\$" ffbuild/config.h; then
-      echo "ERROR: FFmpeg missing CONFIG_${feat}=1" >&2
-      fail_proto=1
-    fi
-  done
-  if kotv_is_windows_build; then
-    if ! grep -qE '^#define CONFIG_D3D11VA 1$' ffbuild/config.h; then
-      echo "ERROR: FFmpeg missing CONFIG_D3D11VA=1" >&2
-      fail_proto=1
-    fi
-  elif [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
-    if ! grep -qE '^#define CONFIG_VIDEOTOOLBOX 1$' ffbuild/config.h; then
-      echo "ERROR: FFmpeg missing CONFIG_VIDEOTOOLBOX=1" >&2
-      fail_proto=1
-    fi
-  else
-    if ! grep -qE '^#define CONFIG_VAAPI 1$' ffbuild/config.h; then
-      echo "ERROR: FFmpeg missing CONFIG_VAAPI=1" >&2
-      fail_proto=1
-    fi
-  fi
-  if [[ "$fail_proto" != 0 ]]; then
-    grep -E 'CONFIG_(HTTPS|HTTP_PROTOCOL|RTSP|RTMP|OPENSSL|SCHANNEL|SECURETRANSPORT|LIBDAV1D|LIBXML2|LIBARIBCAPTION|D3D11VA|VIDEOTOOLBOX|VAAPI)' ffbuild/config.h | head -80 >&2 || true
-    exit 1
-  fi
-  echo "ok FFmpeg: HTTPS/RTSP/RTMP + dav1d/xml2/arib + hwaccel"
+cfg_h="$(kotv_ffmpeg_config_h)" || {
+  echo "ERROR: missing FFmpeg config.h after build" >&2
+  exit 1
+}
+fail_proto=0
+if ! grep -qE '^#define CONFIG_HTTPS_PROTOCOL 1$' "$cfg_h"; then
+  echo "ERROR: FFmpeg missing CONFIG_HTTPS_PROTOCOL=1" >&2
+  fail_proto=1
 fi
+if ! grep -qE '^#define CONFIG_HTTP_PROTOCOL 1$' "$cfg_h"; then
+  echo "ERROR: FFmpeg missing CONFIG_HTTP_PROTOCOL=1" >&2
+  fail_proto=1
+fi
+if ! grep -qE '^#define CONFIG_RTSP_(DEMUXER|PROTOCOL) 1$' "$cfg_h"; then
+  echo "ERROR: FFmpeg missing RTSP demuxer/protocol" >&2
+  fail_proto=1
+fi
+if ! grep -qE '^#define CONFIG_RTMP(_PROTOCOL|_DEMUXER)? 1$' "$cfg_h" \
+  && ! grep -qE '^#define CONFIG_RTMP[A-Z_]*PROTOCOL 1$' "$cfg_h"; then
+  echo "ERROR: FFmpeg missing RTMP protocol" >&2
+  fail_proto=1
+fi
+for feat in LIBDAV1D LIBXML2 LIBARIBCAPTION; do
+  if ! grep -qE "^#define CONFIG_${feat} 1\$" "$cfg_h"; then
+    echo "ERROR: FFmpeg missing CONFIG_${feat}=1" >&2
+    fail_proto=1
+  fi
+done
+if kotv_is_windows_build; then
+  if ! grep -qE '^#define CONFIG_D3D11VA 1$' "$cfg_h"; then
+    echo "ERROR: FFmpeg missing CONFIG_D3D11VA=1" >&2
+    fail_proto=1
+  fi
+elif [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
+  if ! grep -qE '^#define CONFIG_VIDEOTOOLBOX 1$' "$cfg_h"; then
+    echo "ERROR: FFmpeg missing CONFIG_VIDEOTOOLBOX=1" >&2
+    fail_proto=1
+  fi
+else
+  if ! grep -qE '^#define CONFIG_VAAPI 1$' "$cfg_h"; then
+    echo "ERROR: FFmpeg missing CONFIG_VAAPI=1" >&2
+    fail_proto=1
+  fi
+fi
+if [[ "$fail_proto" != 0 ]]; then
+  grep -E 'CONFIG_(HTTPS|HTTP_PROTOCOL|RTSP|RTMP|OPENSSL|SCHANNEL|SECURETRANSPORT|LIBDAV1D|LIBXML2|LIBARIBCAPTION|D3D11VA|VIDEOTOOLBOX|VAAPI)' "$cfg_h" | head -80 >&2 || true
+  exit 1
+fi
+echo "ok FFmpeg: HTTPS/RTSP/RTMP + dav1d/xml2/arib + hwaccel ($cfg_h)"
+
 mkdir -p "$PREFIX"
 promote_arcdav3a_in_avcodec_pc
 echo "pic+av3a+dav1d+xml2+arib+hw+tls+rtsp+rtmp $(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$STAMP_FILE"
