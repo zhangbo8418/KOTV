@@ -1,130 +1,87 @@
 #!/usr/bin/env bash
-# 页内原生 MPV 完整准备：拉取 libmpv 套件 + 编译 libvulkan stub + libkotv_dl。
-# 套件只进 jniLibs（System.loadLibrary）；assets 仅保留 libvulkan stub（老机链接用）。
-# 勿再把整套 .so 同时打进 assets 与 lib/（APK 会多约 80MB+）。
+# 页内原生 MPV：源码套件 → jniLibs；编 libvulkan stub + libkotv_dl；assets 仅留 stub。
+# 勿把整套 .so 同时打进 assets 与 lib/（APK 会多约 80MB+）。
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=scripts/android-mpv-lib-names.sh
 source "$ROOT/scripts/android-mpv-lib-names.sh"
+
+ASSET="$ROOT/flutter/android/app/src/main/assets/mpv-libs"
+JNI_ROOT="$ROOT/flutter/android/app/src/main/jniLibs"
+
 chmod +x "$ROOT/scripts/build-android-mpv-from-source.sh" \
   "$ROOT/scripts/build-android-libvulkan-stub.sh" \
-  "$ROOT/scripts/build-android-kotv-dl.sh"
+  "$ROOT/scripts/build-android-kotv-dl.sh" \
+  "$ROOT/scripts/verify-android-mpv-libs.sh"
 
-echo "==> prepare Android MPV native (FongMi FFmpeg+mpv → jniLibs; vulkan stub → assets only)"
+echo "==> prepare Android MPV native (source suite → jniLibs; vulkan stub → assets)"
 "$ROOT/scripts/build-android-mpv-from-source.sh"
 
-# FongMi 自带的 libc++ 与 libmpv 配套（含 __from_chars_floating_point）。
-# 勿用本机 NDK28 覆盖：缺该符号 → dlopen(libmpv) 失败。
-sync_libcxx_to_jni() {
+# 构建产出的 libc++ 与 libmpv 配套（含 from_chars）。勿用本机 NDK 另拷一份覆盖。
+ensure_libcxx() {
   local abi="$1"
-  local dest_asset="$ROOT/flutter/android/app/src/main/assets/mpv-libs/$abi/libc++_shared.so"
-  local dest_jni="$ROOT/flutter/android/app/src/main/jniLibs/$abi/libc++_shared.so"
-  mkdir -p "$(dirname "$dest_jni")"
-  # Gradle :prepareKotvMpvNative 会再跑一遍：此时 assets 已 strip，套件只在 jniLibs。
-  if [[ -s "$dest_jni" ]] && grep -a -q 'from_chars_floating' "$dest_jni" 2>/dev/null; then
-    echo "  ok $abi: libc++_shared.so already in jniLibs ($(wc -c <"$dest_jni" | tr -d ' ') bytes)"
+  local src="$ASSET/$abi/libc++_shared.so"
+  local dest="$JNI_ROOT/$abi/libc++_shared.so"
+  mkdir -p "$(dirname "$dest")"
+  if [[ -s "$dest" ]] && kotv_android_libcxx_has_from_chars "$dest"; then
+    echo "  ok $abi: libc++_shared.so in jniLibs ($(wc -c <"$dest" | tr -d ' ') bytes)"
     return 0
   fi
-  if [[ ! -s "$dest_asset" ]]; then
-    echo "ERROR: missing $dest_asset (and jniLibs has no valid libc++; re-run source build)" >&2
+  if [[ ! -s "$src" ]]; then
+    echo "ERROR: missing $src (and jniLibs has no valid libc++; re-run source build)" >&2
     return 1
   fi
-  if ! grep -a -q 'from_chars_floating' "$dest_asset" 2>/dev/null; then
-    echo "ERROR: $dest_asset missing from_chars_floating (corrupt/overwritten?). Re-run FongMi source build." >&2
+  if ! kotv_android_libcxx_has_from_chars "$src"; then
+    echo "ERROR: $src missing from_chars_floating; re-run source build" >&2
     return 1
   fi
-  cp -f "$dest_asset" "$dest_jni"
-  echo "  ok $abi: FongMi libc++_shared.so → jniLibs ($(wc -c <"$dest_asset" | tr -d ' ') bytes)"
+  cp -f "$src" "$dest"
+  echo "  ok $abi: libc++_shared.so → jniLibs ($(wc -c <"$src" | tr -d ' ') bytes)"
 }
 
-for abi in arm64-v8a armeabi-v7a; do
-  echo "==> native stubs: $abi"
-  sync_libcxx_to_jni "$abi"
-  "$ROOT/scripts/build-android-libvulkan-stub.sh" "$abi"
-  "$ROOT/scripts/build-android-kotv-dl.sh" "$abi"
-done
-
-# FFmpeg/libmpv 进 jniLibs：统一 System.loadLibrary（含 API25 / Android 15+）。
-sync_mpv_to_jni() {
+sync_suite_to_jni() {
   local abi="$1"
-  local base="$ROOT/flutter/android/app/src/main/assets/mpv-libs/$abi"
-  local jni="$ROOT/flutter/android/app/src/main/jniLibs/$abi"
+  local base="$ASSET/$abi"
+  local jni="$JNI_ROOT/$abi"
   mkdir -p "$jni"
-  local lib
-  for lib in "${KOTV_ANDROID_MPV_LEGACY_SPLIT[@]}"; do
-    rm -f "$jni/$lib" "$base/$lib"
-  done
-  for lib in libc++_shared.so libffmpeg.so libmpv.so libplayer.so; do
-    if [[ -s "$base/$lib" ]]; then
-      cp -f "$base/$lib" "$jni/$lib"
-    fi
-  done
-  # kotv_dl 由 build-android-kotv-dl 已写入 jniLibs
-  echo "  ok $abi: staging assets → jniLibs"
+  kotv_android_mpv_purge_legacy "$jni"
+  kotv_android_mpv_purge_legacy "$base"
+  # 缓存命中后再跑 prepare 时 assets 已 strip，套件只在 jniLibs。
+  if kotv_android_mpv_has_suite "$ASSET" "$abi"; then
+    kotv_android_mpv_copy_suite "$base" "$jni" 1
+  elif ! kotv_android_mpv_has_suite "$JNI_ROOT" "$abi"; then
+    echo "ERROR: no MPV suite in assets or jniLibs for $abi" >&2
+    return 1
+  fi
+  echo "  ok $abi: suite in jniLibs"
 }
 
-# assets 只留 Vulkan stub；其余 .so 已在 jniLibs，删掉避免 APK 重复。
-strip_assets_keep_vulkan_stub() {
+strip_assets_keep_vulkan() {
   local abi="$1"
-  local base="$ROOT/flutter/android/app/src/main/assets/mpv-libs/$abi"
+  local base="$ASSET/$abi"
   local f name
   [[ -d "$base" ]] || return 0
   for f in "$base"/*; do
     [[ -f "$f" ]] || continue
     name="$(basename "$f")"
-    if [[ "$name" == "libvulkan.so" ]]; then
-      continue
-    fi
+    [[ "$name" == "libvulkan.so" ]] && continue
     rm -f "$f"
   done
   echo "  ok $abi: assets keep libvulkan.so stub only"
 }
 
-sync_mpv_to_jni arm64-v8a
-sync_mpv_to_jni armeabi-v7a
-strip_assets_keep_vulkan_stub arm64-v8a
-strip_assets_keep_vulkan_stub armeabi-v7a
+for abi in "${KOTV_ANDROID_MPV_ABIS[@]}"; do
+  echo "==> native: $abi"
+  ensure_libcxx "$abi"
+  "$ROOT/scripts/build-android-libvulkan-stub.sh" "$abi"
+  "$ROOT/scripts/build-android-kotv-dl.sh" "$abi"
+  sync_suite_to_jni "$abi"
+  strip_assets_keep_vulkan "$abi"
+  if [[ -s "$JNI_ROOT/$abi/libvulkan.so" ]]; then
+    echo "WARN: removing jniLibs/$abi/libvulkan.so (stub must not ship in APK lib/)" >&2
+    rm -f "$JNI_ROOT/$abi/libvulkan.so"
+  fi
+done
 
-verify_abi() {
-  local abi="$1"
-  local base="$ROOT/flutter/android/app/src/main/assets/mpv-libs/$abi"
-  local jni="$ROOT/flutter/android/app/src/main/jniLibs/$abi"
-  local missing=0
-  local lib
-  if [[ ! -s "$base/libvulkan.so" ]]; then
-    echo "ERROR: missing assets/mpv-libs/$abi/libvulkan.so (stub)" >&2
-    missing=1
-  fi
-  for lib in "${KOTV_ANDROID_MPV_ASSET_FORBIDDEN[@]}"; do
-    if [[ -s "$base/$lib" ]]; then
-      echo "ERROR: assets/mpv-libs/$abi/$lib must not exist (duplicate of jniLibs)" >&2
-      missing=1
-    fi
-  done
-  if [[ -s "$jni/libvulkan.so" ]]; then
-    echo "WARN: removing jniLibs/$abi/libvulkan.so (must not ship stub in APK lib/)" >&2
-    rm -f "$jni/libvulkan.so"
-  fi
-  for lib in "${KOTV_ANDROID_MPV_JNI_REQUIRED[@]}"; do
-    if [[ ! -s "$jni/$lib" ]]; then
-      echo "ERROR: missing jniLibs/$abi/$lib" >&2
-      missing=1
-    fi
-  done
-  for lib in "${KOTV_ANDROID_MPV_LEGACY_SPLIT[@]}"; do
-    if [[ -s "$jni/$lib" ]]; then
-      echo "ERROR: legacy split $jni/$lib must be removed (FongMi uses libffmpeg.so)" >&2
-      missing=1
-    fi
-  done
-  if [[ "$missing" != 0 ]]; then
-    exit 1
-  fi
-  echo "  ok $abi: suite in jniLibs; vulkan stub in assets only"
-}
-
-verify_abi arm64-v8a
-verify_abi armeabi-v7a
-chmod +x "$ROOT/scripts/verify-android-mpv-libs.sh"
 "$ROOT/scripts/verify-android-mpv-libs.sh"
 echo "==> Android MPV native prepare done"

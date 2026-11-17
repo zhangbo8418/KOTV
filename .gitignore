@@ -44,7 +44,7 @@ internal/spider/qjsinc/
 # Android arm64 Go engine (built by scripts/build-engine-flutter.sh android)
 flutter/android/app/src/main/jniLibs/**/*.so
 flutter/assets/engine/libkotv_engine.so
-# Android Vulkan stub（prepare-android-mpv-native.sh；libmpv 来自 Media3 AAR）
+# Android MPV staging / Vulkan stub（prepare-android-mpv-native.sh；勿入库）
 flutter/android/app/src/main/assets/mpv-libs/
 # 桌面 libmpv 预编译（scripts/fetch-desktop-mpv-libs.sh 拉取，勿入库；Windows dll >100MB）
 flutter/assets/mpv-libs/

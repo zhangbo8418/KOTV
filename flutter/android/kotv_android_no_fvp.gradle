@@ -1,8 +1,7 @@
 // 安卓不编入 fvp/mdk：settings.gradle 在 plugin-loader 前从 deps 去掉 fvp；
 // 此处收拢 packaging 排除与 GeneratedPluginRegistrant 剥离（flutter 仍按 pubspec 写回）。
-// 禁止的 .so 名与 scripts/android-mpv-lib-names.sh 的 KOTV_ANDROID_FVP_APK_FORBIDDEN 一致。
-
-// 自研 MPV 套件的 libffmpeg.so（FongMi 合并核）要打进 APK，不在此列。
+// 排除列表须与 scripts/android-mpv-lib-names.sh 的 KOTV_ANDROID_FVP_APK_FORBIDDEN 一致。
+// 自研套件的 libffmpeg.so 要打进 APK，不在此列。
 ext.kotvAndroidFvpForbiddenSo = [
     "libfvp.so",
     "libmdk.so",

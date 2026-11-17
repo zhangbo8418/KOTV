@@ -236,8 +236,8 @@ dependencies {
     implementation "androidx.media3:media3-database:$media3"
     // Surface/Texture 共用：帧着色器调色（setVideoEffects）
     implementation "androidx.media3:media3-effect:$media3"
-    // 安卓 MPV 走 jniLibs 自研套件（MPVLib / FongMi libffmpeg），不依赖 media3-mpvplayer。
-    // Exo 软解/AV3A 仍用 nextlib（可带残缺 libav*；与自研 libffmpeg 命名不冲突）。
+    // 安卓 MPV 走 jniLibs 自研套件（MPVLib），不依赖 media3-mpvplayer。
+    // Exo 软解/AV3A 仍用 nextlib（可带残缺 libav*；与自研 libffmpeg.so 命名不冲突）。
     implementation "io.github.anilbeesetti:nextlib-media3ext:1.10.0-0.12.1-fongmi-softload-av3a-r1"
     implementation "com.squareup.okhttp3:okhttp-android:5.5.0"
     // CatVodSpider dex jar 内 JS 依赖 QuickJS JNI，须在 App CL load

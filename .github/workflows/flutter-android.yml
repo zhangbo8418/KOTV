@@ -89,7 +89,7 @@ jobs:
             flutter/android/app/src/main/jniLibs/arm64-v8a
             flutter/android/app/src/main/jniLibs/armeabi-v7a
             .build/android-mpv-src
-          key: android-mpv-native-${{ hashFiles('scripts/prepare-android-mpv-native.sh', 'scripts/build-android-mpv-from-source.sh', 'scripts/fetch-android-mpv-libs.sh', 'scripts/build-android-libvulkan-stub.sh', 'scripts/build-android-kotv-dl.sh', 'scripts/android-mpv-lib-names.sh', 'flutter/android/native/vkcompat/vkcompat.c', 'flutter/android/native/kotv_dl/kotv_dl.c') }}
+          key: android-mpv-native-${{ hashFiles('scripts/prepare-android-mpv-native.sh', 'scripts/build-android-mpv-from-source.sh', 'scripts/build-android-libvulkan-stub.sh', 'scripts/build-android-kotv-dl.sh', 'scripts/android-mpv-lib-names.sh', 'scripts/verify-android-mpv-libs.sh', 'flutter/android/native/vkcompat/vkcompat.c', 'flutter/android/native/kotv_dl/kotv_dl.c') }}
           restore-keys: |
             android-mpv-native-
 

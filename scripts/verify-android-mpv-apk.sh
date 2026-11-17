@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
-# 校验 APK：MPV 套件只在 lib/<abi>/；Vulkan stub 只在 assets/mpv-libs（按包内实际 ABI）。
+# 校验 APK：MPV 套件只在 lib/<abi>/；Vulkan stub 只在 assets/mpv-libs。
 set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=scripts/android-mpv-lib-names.sh
+source "$ROOT/scripts/android-mpv-lib-names.sh"
+
 APK="${1:-}"
 if [[ -z "$APK" || ! -f "$APK" ]]; then
   echo "usage: $0 <path-to.apk>" >&2
@@ -20,14 +24,10 @@ while IFS= read -r abi; do
     arm64-v8a|armeabi-v7a) ;;
     *) continue ;;
   esac
-  need+=(
-    "assets/mpv-libs/${abi}/libvulkan.so"
-    "lib/${abi}/libmpv.so"
-    "lib/${abi}/libplayer.so"
-    "lib/${abi}/libffmpeg.so"
-    "lib/${abi}/libkotv_dl.so"
-    "lib/${abi}/libc++_shared.so"
-  )
+  need+=("assets/mpv-libs/${abi}/libvulkan.so")
+  for so in "${KOTV_ANDROID_MPV_JNI_REQUIRED[@]}"; do
+    need+=("lib/${abi}/${so}")
+  done
 done <<<"$abis"
 
 if [[ "${#need[@]}" -eq 0 ]]; then
@@ -42,9 +42,7 @@ for p in "${need[@]}"; do
     missing=1
   fi
 done
-if [[ "$missing" != 0 ]]; then
-  exit 1
-fi
+[[ "$missing" == 0 ]] || exit 1
 
 foreign="$(printf '%s\n' "$listing" | awk -F/ -v have="$(printf '%s' "$abis" | tr '\n' ' ')" '
   $1=="assets" && $2=="mpv-libs" && $3!="" {
@@ -71,29 +69,23 @@ fi
 while IFS= read -r abi; do
   [[ -n "$abi" ]] || continue
   case "$abi" in arm64-v8a|armeabi-v7a) ;; *) continue ;; esac
-  # stub 不得出现在 lib/<abi>/。
-  bad="lib/${abi}/libvulkan.so"
-  if grep -qxF "$bad" <<<"$listing"; then
-    echo "ERROR: APK must not contain $bad (stub steals system Vulkan)" >&2
+  if grep -qxF "lib/${abi}/libvulkan.so" <<<"$listing"; then
+    echo "ERROR: APK must not contain lib/${abi}/libvulkan.so (stub steals system Vulkan)" >&2
     exit 1
   fi
-  # 套件不得再出现在 assets（与 lib/ 重复）。
-  for dup in libmpv.so libplayer.so libffmpeg.so libc++_shared.so libkotv_dl.so; do
-    p="assets/mpv-libs/${abi}/${dup}"
-    if grep -qxF "$p" <<<"$listing"; then
-      echo "ERROR: APK must not contain $p (duplicate of lib/${abi}/)" >&2
+  for so in "${KOTV_ANDROID_MPV_JNI_REQUIRED[@]}"; do
+    if grep -qxF "assets/mpv-libs/${abi}/${so}" <<<"$listing"; then
+      echo "ERROR: APK must not contain assets/mpv-libs/${abi}/${so} (duplicate of lib/)" >&2
       exit 1
     fi
   done
-  # 旧 webhtv 拆库不得再进 APK。
-  for legacy in libmvcodec.so libmvutil.so libmwresample.so libmwscale.so libmvformat.so libmvfilter.so libmvdevice.so; do
-    p="lib/${abi}/${legacy}"
-    if grep -qxF "$p" <<<"$listing"; then
-      echo "ERROR: APK must not contain legacy split $p (use libffmpeg.so)" >&2
+  for so in "${KOTV_ANDROID_MPV_LEGACY_PURGE[@]}"; do
+    if grep -qxF "lib/${abi}/${so}" <<<"$listing"; then
+      echo "ERROR: APK must not contain legacy lib/${abi}/${so}" >&2
       exit 1
     fi
   done
 done <<<"$abis"
 
 echo "ok: APK MPV suite in lib/ only; Vulkan stub in assets only (abis: $(echo "$abis" | tr '\n' ' '))"
-unzip -l "$APK" | awk '/mpv-libs|libvulkan|libkotv_dl|libmpv\.so|libplayer\.so/ {print $1, $4}' | head -30
+unzip -l "$APK" | awk '/mpv-libs|libvulkan|libkotv_dl|libmpv\.so|libplayer\.so|libffmpeg\.so/ {print $1, $4}' | head -40
