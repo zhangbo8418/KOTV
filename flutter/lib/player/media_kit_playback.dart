@@ -16,21 +16,52 @@ import 'player_normalize.dart';
 import 'silent_video_guard.dart';
 import 'video_eq.dart';
 
-/// 安全释放 libmpv [Player]：先 pause 停声，再 stop → 短排空 → dispose。
-/// 各桌面平台共用 [kotvTeardownPlayback]。不设超时：超时丢后台会导致泄漏。
+/// 进行中的桌面 libmpv 拆机。页面 leave 可能先返回，但新建 Player 前必须等它跑完，
+/// 避免与后台 pause/stop/dispose 抢 AO（不在此做「超时弃等待」）。
+Future<void>? _kotvMpvTeardown;
+
+/// 等待上一次 [kotvDisposeMpvPlayer] 结束（含页面超时后仍在跑的那次）。
+Future<void> kotvAwaitMpvTeardown() async {
+  final t = _kotvMpvTeardown;
+  if (t == null) return;
+  try {
+    await t;
+  } catch (_) {}
+}
+
+/// 安全释放 libmpv [Player]：pause → stop → 短排空 → dispose，并登记拆机门闩。
+/// 各桌面平台共用 [kotvTeardownPlayback]。**不设超时**：须跑完；UI 层超时只放开等待。
 Future<void> kotvDisposeMpvPlayer(Player? player) async {
   if (player == null) return;
+  final prev = _kotvMpvTeardown;
+  late final Future<void> mine;
+  mine = () async {
+    if (prev != null) {
+      try {
+        await prev;
+      } catch (_) {}
+    }
+    try {
+      await player.pause();
+    } catch (_) {}
+    await kotvTeardownPlayback(
+      stop: () => player.stop(),
+      dispose: () => player.dispose(),
+      drain: const Duration(milliseconds: 250),
+    );
+  }();
+  _kotvMpvTeardown = mine;
   try {
-    await player.pause();
-  } catch (_) {}
-  await kotvTeardownPlayback(
-    stop: () => player.stop(),
-    dispose: () => player.dispose(),
-    drain: const Duration(milliseconds: 250),
-  );
+    await mine;
+  } finally {
+    if (identical(_kotvMpvTeardown, mine)) {
+      _kotvMpvTeardown = null;
+    }
+  }
 }
 
 /// 按缓冲预算创建 [Player]。点播和直播同一份内存比例。
+/// 起播请先 [kotvAwaitMpvTeardown] / [kotvTakeDesktopMpvPlayer]，勿与拆机并发。
 Player kotvCreateMpvPlayer() {
   final budget = KotvBufferBudget.bytes();
   return Player(
@@ -40,13 +71,14 @@ Player kotvCreateMpvPlayer() {
   );
 }
 
-/// 桌面起播前取 Player：已有实例返回 null；否则 [kotvCreateMpvPlayer]。
+/// 桌面起播前取 Player：先等拆机门闩；已有实例返回 null；否则 [kotvCreateMpvPlayer]。
 /// 详情/直播 [_primeDesktopMpv] 共用；调用方负责 bind，若期间已有实例须自行 dispose 返回值。
 Future<Player?> kotvTakeDesktopMpvPlayer({
   required bool alreadyBound,
   required bool Function() isMounted,
 }) async {
   if (kotvIsAndroid()) return null;
+  await kotvAwaitMpvTeardown();
   if (alreadyBound) return null;
   final player = kotvCreateMpvPlayer();
   if (!isMounted()) {
@@ -759,11 +791,11 @@ class MediaKitPlayback extends KotvPlayback {
 
   @override
   Future<void> release() async {
-    // 离开页：先 pause 停声，再 stop；真正 dispose 由页面 kotvDisposeMpvPlayer 完成。
+    // 只 pause：stop+dispose 由页面 [kotvDisposeMpvPlayer] 独占，
+    // 避免 hardRelease 超时后与 dispose 并发对同一 Player 再 stop。
     try {
       await player.pause();
     } catch (_) {}
-    await stop();
   }
 
   @override

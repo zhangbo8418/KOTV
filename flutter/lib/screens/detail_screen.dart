@@ -148,12 +148,11 @@ class DetailScreen extends ConsumerStatefulWidget {
   }
 
   /// 换源/切 Tab：放开 PopScope，并 await 硬停（含桌面 MPV dispose），避免卸树后仍占 AO/出声。
-  /// 并发调用会挂到同一 Completer，禁止「提前 return 后立刻卸树」。
-  /// 若界面已离开（_active==null）而硬停仍在跑：立刻返回，不挡历史/再开详情。
+  /// 并发调用挂同一 Completer。硬停等待有上限以便 UI 返回；桌面 libmpv 拆机仍跑完，
+  /// 再建前由 [kotvAwaitMpvTeardown] 串行。
   static Future<void> prepareLeave() async {
     final inFlight = _DetailScreenState._leaveDone;
     if (inFlight != null) {
-      if (_DetailScreenState._active == null) return;
       try {
         await inFlight.future.timeout(const Duration(seconds: 5));
       } catch (_) {}
@@ -186,7 +185,7 @@ class DetailScreen extends ConsumerStatefulWidget {
       try {
         active._chromeCover.release(active.ref.read(detailChromeCoverProvider.notifier));
       } catch (_) {}
-      // 与 _leavePage 同一套：短超时 flush/软停，硬停最多等 4s（须 await，勿丢后台）。
+      // 短超时 flush/软停不挡返回；硬停等待有上限，桌面 MPV 拆机由门闩串到下次起播。
       try {
         await active
             ._flushWatchProgress(force: true)
@@ -537,7 +536,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       });
       return _mk!;
     }
-    // 同步创建：异步起播路径先 [_primeDesktopMpv]。
+    // 同步兜底创建；正常起播应已 [_primeDesktopMpv]（内含拆机等待）。
+    // 若拆机仍在跑，调用方须先 await [kotvAwaitMpvTeardown]。
     final player = kotvCreateMpvPlayer();
     _bindDesktopMpv(player);
     return _mk!;
@@ -563,7 +563,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     });
   }
 
-  /// 桌面起播前：无实例则 [kotvTakeDesktopMpvPlayer] 再建。
+  /// 桌面起播前：等拆机门闩；无实例则 [kotvTakeDesktopMpvPlayer] 再建。
   Future<void> _primeDesktopMpv() async {
     final player = await kotvTakeDesktopMpvPlayer(
       alreadyBound: _mk != null && _mkPlayer != null,
@@ -657,8 +657,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     }
   }
 
-  /// 硬停并限时等待；离开页 / 换片 / 停播控件共用。
-  Future<void> _stopHardAwait({bool skipFlush = false, Duration timeout = const Duration(seconds: 4)}) async {
+  /// 硬停并限时等待（便于 UI 返回）。超时不取消底层拆机；桌面再建前等拆机门闩。
+  Future<void> _stopHardAwait({bool skipFlush = false, Duration timeout = const Duration(seconds: 8)}) async {
     try {
       await _stopHard(skipFlush: skipFlush).timeout(timeout);
     } catch (_) {}
@@ -1069,7 +1069,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       await WidgetsBinding.instance.endOfFrame;
     }
 
-    // media_kit Player 由页面持有：走 engine.release()。
+    // media_kit Player 由页面持有：stop+dispose 走 [kotvDisposeMpvPlayer]（登记门闩）。
     await kotvDisposeMpvPlayer(mkPlayer);
     kotvDisposePlaybackWrappers(backends);
     if (_mpvOpts.diskCache && !kotvIsAndroid()) {

@@ -138,7 +138,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
           await active._exitImmersive();
         } catch (_) {}
       }
-      await active._releaseAllBackends().timeout(const Duration(seconds: 4));
+      // 等待有上限以便切 Tab；桌面 MPV 拆机仍跑完，再建前等门闩。
+      await active._releaseAllBackends().timeout(const Duration(seconds: 8));
     } catch (_) {
     } finally {
       if (!done.isCompleted) done.complete();
@@ -230,7 +231,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     );
   }
 
-  /// 桌面起播前：无实例则 [kotvTakeDesktopMpvPlayer] 再建。
+  /// 桌面起播前：等拆机门闩；无实例则 [kotvTakeDesktopMpvPlayer] 再建。
   Future<void> _primeDesktopMpv() async {
     final player = await kotvTakeDesktopMpvPlayer(
       alreadyBound: _mk != null && _mkPlayer != null,
