@@ -16,10 +16,20 @@ import 'player_normalize.dart';
 import 'silent_video_guard.dart';
 import 'video_eq.dart';
 
+/// 桌面 libmpv 卡死恢复：pause / stop / dispose 分段限时。
+/// 页面硬停等待应 ≥ pause+stop+drain+dispose（见 [kotvMpvLeaveTimeout]）。
+const kotvMpvPauseAbandon = Duration(seconds: 1);
+const kotvMpvStopAbandon = Duration(seconds: 2);
+const kotvMpvDisposeAbandon = Duration(seconds: 3);
+const kotvMpvDrain = Duration(milliseconds: 250);
+
+/// 离开页 / prepareLeave 等待拆机的上限（含弃僵尸窗口）。
+const kotvMpvLeaveTimeout = Duration(seconds: 8);
+
 /// 进行中的桌面 libmpv 拆机；新建 Player 前须等待（避免与僵死 stop/dispose 抢 AO）。
 Future<void>? _kotvMpvTeardown;
 
-/// 等待上一次 [kotvDisposeMpvPlayer] 结束（含超时弃僵尸）。
+/// 等待上一次 [kotvDisposeMpvPlayer] 结束（含超时弃等待）。
 Future<void> kotvAwaitMpvTeardown() async {
   final t = _kotvMpvTeardown;
   if (t == null) return;
@@ -28,17 +38,10 @@ Future<void> kotvAwaitMpvTeardown() async {
   } catch (_) {}
 }
 
-/// 安全释放 libmpv [Player]：先 pause 停声，再 stop → 短排空 → dispose。
-/// 各桌面平台（Win / macOS / Linux）共用 [kotvTeardownPlayback]。
-/// 不改 volume：实例即将销毁，禁音反而脏掉包装类音量状态。
-///
-/// [abandonAfter]：桌面卡死恢复——stop/dispose 分别限时，超时后放弃等待并允许再建。
-Future<void> kotvDisposeMpvPlayer(
-  Player? player, {
-  bool abandonAfter = true,
-  Duration stopTimeout = const Duration(seconds: 2),
-  Duration disposeTimeout = const Duration(seconds: 3),
-}) async {
+/// 安全释放 libmpv [Player]：pause → stop → 短排空 → dispose，全程登记门闩。
+/// 各桌面平台共用 [kotvTeardownPlayback]。分段限时：卡住时弃等待以便再建；
+/// 同进程原生线程可能仍存活至进程退出——这是 in-process libmpv 的上限，不是杀进程冒充成功。
+Future<void> kotvDisposeMpvPlayer(Player? player) async {
   if (player == null) return;
   final prev = _kotvMpvTeardown;
   late final Future<void> mine;
@@ -49,14 +52,14 @@ Future<void> kotvDisposeMpvPlayer(
       } catch (_) {}
     }
     try {
-      await player.pause().timeout(const Duration(seconds: 1));
+      await player.pause().timeout(kotvMpvPauseAbandon);
     } catch (_) {}
     await kotvTeardownPlayback(
       stop: () => player.stop(),
       dispose: () => player.dispose(),
-      drain: const Duration(milliseconds: 250),
-      stopTimeout: abandonAfter ? stopTimeout : null,
-      disposeTimeout: abandonAfter ? disposeTimeout : null,
+      drain: kotvMpvDrain,
+      stopTimeout: kotvMpvStopAbandon,
+      disposeTimeout: kotvMpvDisposeAbandon,
     );
   }();
   _kotvMpvTeardown = mine;
@@ -69,8 +72,8 @@ Future<void> kotvDisposeMpvPlayer(
   }
 }
 
-/// 按缓冲预算创建 [Player]。点播和直播都用同一份内存比例，不用库默认的 32MB。
-/// 调用方在异步起播路径须先 [kotvAwaitMpvTeardown]，避免与僵死拆机抢 AO。
+/// 按缓冲预算创建 [Player]。点播和直播同一份内存比例。
+/// 起播请用 [kotvAcquireMpvPlayer]，勿在拆机未完成时直接调用。
 Player kotvCreateMpvPlayer() {
   final budget = KotvBufferBudget.bytes();
   return Player(
@@ -78,6 +81,12 @@ Player kotvCreateMpvPlayer() {
       bufferSize: budget,
     ),
   );
+}
+
+/// 异步取得新 Player：先等拆机门闩，再 [kotvCreateMpvPlayer]。详情/直播起播共用。
+Future<Player> kotvAcquireMpvPlayer() async {
+  await kotvAwaitMpvTeardown();
+  return kotvCreateMpvPlayer();
 }
 
 String _trackLabel(dynamic t) {

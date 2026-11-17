@@ -341,6 +341,7 @@
   let repoPanel = null;
   function bindRepoPanel() {
     if (!window.kotvRepos || !$('#repo_list')) return;
+    if (repoPanel) return;
     repoPanel = kotvRepos.bindPanel({
       kindSelect: $('#setting_kind'),
       urlInput: $('#setting_text'),
@@ -350,11 +351,6 @@
       refreshBtn: $('#btn_repo_refresh'),
       onToast: toast,
     });
-  }
-  function refreshReposIfVisible() {
-    if (repoPanel && $('#panel-setting') && $('#panel-setting').classList.contains('active')) {
-      repoPanel.refresh();
-    }
   }
 
   // Files

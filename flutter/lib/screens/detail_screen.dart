@@ -154,7 +154,7 @@ class DetailScreen extends ConsumerStatefulWidget {
     if (inFlight != null) {
       if (_DetailScreenState._active == null) return;
       try {
-        await inFlight.future.timeout(const Duration(seconds: 5));
+        await inFlight.future.timeout(kotvMpvLeaveTimeout);
       } catch (_) {}
       return;
     }
@@ -532,7 +532,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       });
       return _mk!;
     }
+    // 同步创建：起播路径须先 [kotvAcquireMpvPlayer] / [_primeDesktopMpv] 等过拆机门闩。
     final player = kotvCreateMpvPlayer();
+    _bindDesktopMpv(player);
+    return _mk!;
+  }
+
+  void _bindDesktopMpv(Player player) {
     _mkPlayer = player;
     _mk = MediaKitPlayback(
       player,
@@ -550,7 +556,25 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       if (!mounted || _playUrl.isEmpty || !_useMpv) return;
       _syncPlayStatus();
     });
-    return _mk!;
+  }
+
+  /// 桌面起播前：等拆机门闩；无实例则 [kotvAcquireMpvPlayer] 再建。
+  Future<void> _primeDesktopMpv() async {
+    if (kotvIsAndroid()) return;
+    if (_mk != null && _mkPlayer != null) {
+      await kotvAwaitMpvTeardown();
+      return;
+    }
+    final player = await kotvAcquireMpvPlayer();
+    if (!mounted) {
+      await kotvDisposeMpvPlayer(player);
+      return;
+    }
+    if (_mk != null) {
+      await kotvDisposeMpvPlayer(player);
+      return;
+    }
+    _bindDesktopMpv(player);
   }
 
   /// 释放桌面 media_kit 的包装 + [Player]（Android 原生 MPV 不走这里）。
@@ -633,8 +657,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     }
   }
 
-  /// 硬停并限时等待；离开页 / 换片 / 停播控件共用，避免 Win7 上旧实例占 AO。
-  Future<void> _stopHardAwait({bool skipFlush = false, Duration timeout = const Duration(seconds: 4)}) async {
+  /// 硬停并限时等待；离开页 / 换片 / 停播控件共用。
+  /// 默认 [kotvMpvLeaveTimeout]，覆盖桌面 libmpv 分段弃等待窗口。
+  Future<void> _stopHardAwait({bool skipFlush = false, Duration timeout = kotvMpvLeaveTimeout}) async {
     try {
       await _stopHard(skipFlush: skipFlush).timeout(timeout);
     } catch (_) {}
@@ -1059,7 +1084,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     final inFlight = _leaveDone;
     if (_leaving || inFlight != null) {
       try {
-        await (inFlight ?? _leaveDone)?.future.timeout(const Duration(seconds: 5));
+        await (inFlight ?? _leaveDone)?.future.timeout(kotvMpvLeaveTimeout);
       } catch (_) {}
       afterPop?.call();
       return;
@@ -1071,7 +1096,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     if (_active == this) _active = null;
     _chromeCover.release(ref.read(detailChromeCoverProvider.notifier));
     try {
-      // 进度/软停短超时不挡返回；先 pop，再 await 硬停（最多 4s），避免旧 Player 残留。
+      // 进度/软停短超时不挡返回；先 pop，再 await 硬停（[kotvMpvLeaveTimeout]）。
       try {
         await _flushWatchProgress(force: true)
             .timeout(const Duration(milliseconds: 400));
@@ -2260,8 +2285,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
 
   Future<void> _playAt(int epIdx, {bool fullscreen = false}) async {
     if (_leaving) return;
-    // 桌面：等上一次 libmpv 限时拆机结束，再允许新建 Player（卡死弃僵尸后可再播）。
-    await kotvAwaitMpvTeardown();
+    await _primeDesktopMpv();
     if (_leaving || !mounted) return;
     final d = _detail;
     if (d == null || d.flags.isEmpty) return;

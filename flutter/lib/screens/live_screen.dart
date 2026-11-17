@@ -99,8 +99,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
 
   static Completer<void>? _leaveDone;
 
-  static bool get isActive => _active != null;
-
   /// 选源弹窗关闭后拉回页内焦点（部分盒子 PlatformView 会抢走原生焦点）。
   static void restoreFocusAfterSourcePicker() {
     _active?._restoreFocusAfterSourcePicker();
@@ -125,7 +123,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     final inFlight = _leaveDone;
     if (inFlight != null) {
       try {
-        await inFlight.future.timeout(const Duration(seconds: 5));
+        await inFlight.future.timeout(kotvMpvLeaveTimeout);
       } catch (_) {}
       return;
     }
@@ -139,7 +137,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
           await active._exitImmersive();
         } catch (_) {}
       }
-      await active._releaseAllBackends().timeout(const Duration(seconds: 4));
+      await active._releaseAllBackends().timeout(kotvMpvLeaveTimeout);
     } catch (_) {
     } finally {
       if (!done.isCompleted) done.complete();
@@ -213,15 +211,39 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       _mk ??= NativeMpvPlayback(opts: _mpvOpts.copyWith(decodeMode: _decodeMode));
       return _mk!;
     }
-    // 直播必须带 live 初始化，否则会先打开点播磁盘缓存、不关 cache-pause。
-    _mkPlayer ??= kotvCreateMpvPlayer();
-    _mk ??= MediaKitPlayback(
-      _mkPlayer!,
+    // 同步创建：起播路径须先 [_primeDesktopMpv]。直播须 live:true（关 cache-pause）。
+    if (_mk != null) return _mk!;
+    _bindDesktopMpv(kotvCreateMpvPlayer());
+    return _mk!;
+  }
+
+  void _bindDesktopMpv(Player player) {
+    _mkPlayer = player;
+    _mk = MediaKitPlayback(
+      player,
       opts: _mpvOpts.copyWith(decodeMode: _decodeMode),
       live: true,
       onWin7SoftOnDirect: _onWin7SoftOnDirect,
     );
-    return _mk!;
+  }
+
+  /// 桌面起播前：等拆机门闩；无实例则 [kotvAcquireMpvPlayer] 再建。
+  Future<void> _primeDesktopMpv() async {
+    if (kotvIsAndroid()) return;
+    if (_mk != null && _mkPlayer != null) {
+      await kotvAwaitMpvTeardown();
+      return;
+    }
+    final player = await kotvAcquireMpvPlayer();
+    if (!mounted) {
+      await kotvDisposeMpvPlayer(player);
+      return;
+    }
+    if (_mk != null) {
+      await kotvDisposeMpvPlayer(player);
+      return;
+    }
+    _bindDesktopMpv(player);
   }
 
   /// Win7 直出已软解：会话内关直出并换 D3D11 Player（不落盘）。
@@ -1654,8 +1676,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     /// 超时/无画面恢复：沿用当前会话解码（常为 soft），勿改写 [_prefDecodeMode]。
     String? startDecodeOverride,
   }) async {
-    // 桌面：等上一次 libmpv 限时拆机结束，再允许新建 Player。
-    await kotvAwaitMpvTeardown();
+    await _primeDesktopMpv();
     if (!mounted || serial != _playSerial) return;
     // 热缓存同步 peek，避免每台换台多一次 async。
     var playSettings = KotvSettingsCache.peek();
