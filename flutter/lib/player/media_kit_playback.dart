@@ -780,7 +780,7 @@ class MediaKitPlayback extends KotvPlayback {
   @override
   Future<void> stop() => _stopUnload(reason: 'stop');
 
-  /// 换集/换台：只卸文件。Player 留到离页或换引擎再 dispose。
+  /// 换集/换台：只卸文件（消音由 [kotvStopPlayersForEpisodeSwitch]）。Player 留到离页或换引擎再 dispose。
   @override
   Future<void> stopForEpisodeSwitch() => _stopUnload(reason: 'stopForEpisodeSwitch');
 
@@ -796,10 +796,6 @@ class MediaKitPlayback extends KotvPlayback {
     _completedGate = null;
     _clearVideoSize();
     _speedBps = 0;
-    // 硬切换集/换台：先 pause 消音，再 stop 卸文件（无缝不走本路径）。
-    try {
-      await player.pause();
-    } catch (_) {}
     try {
       await player.stop();
     } catch (_) {}

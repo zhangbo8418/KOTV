@@ -2,7 +2,7 @@
 
 ## v0.3.3
 
-- 硬切换集：先 pause 消音再 stop 卸文件，桌面 media_kit 不每集 dispose；无缝仍走 playlist（不 pause/stop/dispose）。Win7 直出/换引擎/离页仍拆机。
+- 硬切换集：`kotvStopPlayersForEpisodeSwitch` 统一先 pause 再卸文件，桌面 media_kit 不每集 dispose；直播切台复用同一路径；无缝仍走 playlist。Win7 直出/换引擎/离页仍拆机。
 - 桌面 libmpv 拆机门闩等待上限：超时置 stuck，拒再建 Player，提示「播放器异常，请重启应用」。
 - 单桥韧性收拢：SoftCancel / KillUser / HardRestart 门面；切源可打断（loadConfig/setHome soft cancel、JS/Scope HTTP 可取消、按 clientId interrupt `/jar/call` 线程）；HardRestart 后 bump jar 就绪态并水合。
 - 租户隔离：Android HardRestart `/jar/interrupt` 只清 `shared` Chaquopy（与 Go `clearSharedJsPy` 同口径），空 userId 视为 shared，不误伤远端用户桶。

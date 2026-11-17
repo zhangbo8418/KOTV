@@ -742,8 +742,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     }
   }
 
-  /// 硬切换集/换源：只停声、卸当前文件。各后端实例默认保留。
-  /// 无缝切集走 [skipToNext] / [queuedStartStream]，不调用本方法，也不经 [_playAt]。
+  /// 硬切换集/换源：经 [kotvStopPlayersForEpisodeSwitch]（先 pause 消音再卸文件）。实例默认保留。
+  /// 无缝走 [skipToNext] / [queuedStartStream]，不调用本方法，也不经 [_playAt]。
   Future<void> _stopAllBackends() async {
     await kotvStopPlayersForEpisodeSwitch([
       _mk,
@@ -2351,7 +2351,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         await _writeWatchProgress(flushPos, flushDur, force: true, episodeName: prevEpName);
       } catch (_) {}
     }
-    // 硬切：pause 消音 + stop 卸文件，桌面 MPV 实例保留（无缝不进 [_playAt]）。
+    // 硬切：[_stopAllBackends]（pause→卸文件），桌面 MPV 实例保留；无缝不进 [_playAt]。
     await _stopAllBackends();
     if (serial != _playAtSerial || !mounted) return;
     // 先 await 软取消上一集（Java / Python·JS / Node），再 play。

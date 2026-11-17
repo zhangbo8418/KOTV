@@ -125,7 +125,9 @@ abstract class KotvPlayback extends ChangeNotifier {
   Future<void> play();
   Future<void> pause();
   Future<void> stop();
-  /// 换集停播：保留视频层（Surface/Texture），避免卸面闪烁与桌面卡音。
+  /// 硬切换集/换台：只卸当前文件（或 FVP 拆缓冲），保留视频层。
+  /// 消音由 [kotvStopPlayersForEpisodeSwitch] 统一先 [pause]；本方法内勿再 pause。
+  /// 无缝 [skipToNext] 不调用。
   Future<void> stopForEpisodeSwitch() => stop();
   Future<void> seek(Duration d);
   Future<void> setVolume(double v);
@@ -310,10 +312,11 @@ Future<void> kotvSoftPausePlayers(Iterable<KotvPlayback?> players) async {
   await Future.wait<void>(players.map(one));
 }
 
-/// 点播硬切换集：先 soft pause 消音，再 [KotvPlayback.stopForEpisodeSwitch]（FVP 会 dispose 缓冲）。
-/// 无缝 skipToNext 不调用本方法。
+/// 硬切换集/换台停播：先 [kotvSoftPausePlayers] 消音，再各后端 [KotvPlayback.stopForEpisodeSwitch] 卸文件。
+/// 消音只在此做一次；后端不要再 pause。无缝 [skipToNext] 不调用。
 Future<void> kotvStopPlayersForEpisodeSwitch(Iterable<KotvPlayback?> players) async {
-  await kotvSoftPausePlayers(players);
+  final list = players.toList(growable: false);
+  await kotvSoftPausePlayers(list);
   Future<void> one(KotvPlayback? p) async {
     if (p == null) return;
     try {
@@ -321,7 +324,7 @@ Future<void> kotvStopPlayersForEpisodeSwitch(Iterable<KotvPlayback?> players) as
     } catch (_) {}
   }
 
-  await Future.wait<void>(players.map(one));
+  await Future.wait<void>(list.map(one));
 }
 
 /// 页面硬停：先 [KotvPlayback.release]（含 FVP 先卸 PlatformView 再删 mdk），

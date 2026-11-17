@@ -296,9 +296,7 @@ class WebJsPlayback extends KotvPlayback {
         'native' => '$_defaultLabel·HLS',
         _ => _defaultLabel,
       };
-    } catch (e) {
-      // ignore: avoid_print
-      print('$_defaultLabel create failed: $e');
+    } catch (_) {
       _engine = _defaultLabel;
     }
     try {

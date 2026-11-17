@@ -676,10 +676,7 @@ class ExoPlayback extends KotvPlayback {
 
   @override
   Future<void> stopForEpisodeSwitch() async {
-    // 硬切换集：先 pause 消音，再卸文件；ExoPlayer 留着。无缝不走本路径。
-    try {
-      await pause();
-    } catch (_) {}
+    // 只卸文件（消音由 [kotvStopPlayersForEpisodeSwitch]）；ExoPlayer / Surface 留着。
     await _unloadKeepingPlayer();
     notifyListeners();
   }

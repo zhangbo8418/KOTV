@@ -210,9 +210,7 @@ class HtmlPlayback extends KotvPlayback {
         'native' => 'HTML5·HLS',
         _ => 'HTML5',
       };
-    } catch (e) {
-      // ignore: avoid_print
-      print('kotvHls.attach failed: $e');
+    } catch (_) {
       _video.src = url;
       _engine = 'HTML5';
     }

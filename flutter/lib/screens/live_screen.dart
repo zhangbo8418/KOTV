@@ -200,14 +200,14 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     }
   }
 
-  /// 直播切台：FVP 只 pause，其它后端走换集停播。
+  /// 直播切台：FVP 只 pause；其它与点播硬切同走 [kotvStopPlayersForEpisodeSwitch]（先 pause 再卸文件）。
   Future<void> _stopPlaybackForLiveZap() async {
     final p = _playback;
     if (p is FvpPlayback) {
       await p.pauseForLiveZap();
       return;
     }
-    await p.stopForEpisodeSwitch();
+    await kotvStopPlayersForEpisodeSwitch([p]);
   }
 
   KotvPlayback _ensureMpv() {
