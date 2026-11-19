@@ -487,10 +487,10 @@ final class KotvMpvCore {
     let apply: () -> Void = { [weak self] in
       guard let self, let videoLayer = self.videoLayer else { return }
       self.withoutLayerAnimations {
-        // macOS 26+：preferredDynamicRange；更早系统：wantsExtendedDynamicRangeContent。
+        // macOS 26+：preferredDynamicRange；14–25：wantsExtendedDynamicRangeContent。
         if #available(macOS 26.0, *) {
           videoLayer.preferredDynamicRange = shouldEnableEDR ? .high : .standard
-        } else {
+        } else if #available(macOS 14.0, *) {
           videoLayer.wantsExtendedDynamicRangeContent = shouldEnableEDR
         }
       }
