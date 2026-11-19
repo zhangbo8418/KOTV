@@ -16,12 +16,24 @@ final class KotvMpvCore {
   private var wakeup: (() -> Void)?
   private var positionTimer: DispatchSourceTimer?
   private var lastSigPeak = 0.0
+  /// 默认开 HDR/EDR；关则 target-colorspace-hint=no 并由系统压到 SDR。
+  private var hdrEnabled = true
   private var isVisible = false
   private var layerHiddenForOcclusion = false
   private var destroyed = false
 
   var onEvent: (([String: Any]) -> Void)?
   var isReady: Bool { mpv != nil && !destroyed }
+
+  /// 运行期开关 HDR 直出（影响 EDR 与 target-colorspace-hint）。
+  func setHdrEnabled(_ enabled: Bool) {
+    hdrEnabled = enabled
+    asyncMpv { [weak self] in
+      guard let self, let handle = self.mpv else { return }
+      mpv_set_property_string(handle, "target-colorspace-hint", enabled ? "auto" : "no")
+    }
+    updateEDRMode(sigPeak: lastSigPeak)
+  }
 
   /// 主线程建 layer；mpv 初始化见 [startMpv]。
   func prepareLayers(in window: NSWindow) -> Bool {
@@ -108,23 +120,12 @@ final class KotvMpvCore {
     }
   }
 
-  /// Dart 逻辑坐标（原点左上）→ AppKit layer（原点左下）。nil/无效则铺满 contentView。
-  func updateFrame(_ rect: CGRect?) {
+  /// 容器始终铺满 contentView；洞口裁切由 Flutter 黑遮完成，勿按 Dart 矩形缩小 ASBDL。
+  func updateFrame(_ rect: CGRect? = nil) {
     assert(Thread.isMainThread)
     guard let containerLayer else { return }
-    let target: CGRect
-    if let rect, rect.width > 1, rect.height > 1, let bounds = window?.contentView?.bounds {
-      target = CGRect(
-        x: rect.origin.x,
-        y: bounds.height - rect.origin.y - rect.height,
-        width: rect.width,
-        height: rect.height
-      )
-    } else if let contentView = window?.contentView {
-      target = contentView.bounds
-    } else {
-      return
-    }
+    guard let contentView = window?.contentView else { return }
+    let target = contentView.bounds
     withoutLayerAnimations {
       containerLayer.frame = target
       updateContentsScale()
@@ -143,6 +144,18 @@ final class KotvMpvCore {
     if name == "vo" || name == "wid" || name == "gpu-api" || name == "gpu-context"
       || name.hasPrefix("avfoundation-")
     {
+      return
+    }
+    if name == "hdr-enabled" {
+      let on = value == "yes" || value == "true" || value == "1"
+      DispatchQueue.main.async { [weak self] in self?.setHdrEnabled(on) }
+      return
+    }
+    if name == "target-colorspace-hint" {
+      let on = value != "no" && value != "false" && value != "0"
+      hdrEnabled = on
+      mpv_set_property_string(handle, name, value)
+      updateEDRMode(sigPeak: lastSigPeak)
       return
     }
     mpv_set_property_string(handle, name, value)
@@ -220,6 +233,8 @@ final class KotvMpvCore {
     var hwdec = ""
     var hwcur = ""
     var vo = ""
+    var hint = ""
+    var peak = 0.0
     var w: Int64 = 0, h: Int64 = 0
     if let raw = mpv_get_property_string(handle, "hwdec") {
       hwdec = String(cString: raw); mpv_free(raw)
@@ -230,14 +245,23 @@ final class KotvMpvCore {
     if let raw = mpv_get_property_string(handle, "current-vo") {
       vo = String(cString: raw); mpv_free(raw)
     }
+    if let raw = mpv_get_property_string(handle, "target-colorspace-hint") {
+      hint = String(cString: raw); mpv_free(raw)
+    }
+    mpv_get_property(handle, "video-params/sig-peak", MPV_FORMAT_DOUBLE, &peak)
     mpv_get_property(handle, "dwidth", MPV_FORMAT_INT64, &w)
     mpv_get_property(handle, "dheight", MPV_FORMAT_INT64, &h)
+    let edrOn = hdrEnabled && peak > 1.0
     return [
       "hwdec": hwdec,
       "hwdec-current": hwcur.isEmpty ? hwdec : hwcur,
       "current-vo": vo,
       "width": Int(w),
       "height": Int(h),
+      "sig-peak": peak,
+      "hdr-enabled": hdrEnabled,
+      "edr-on": edrOn,
+      "target-colorspace-hint": hint,
     ]
   }
 
@@ -374,11 +398,22 @@ final class KotvMpvCore {
       default:
         break
       }
-    case MPV_EVENT_FILE_LOADED, MPV_EVENT_PLAYBACK_RESTART:
+      case MPV_EVENT_FILE_LOADED, MPV_EVENT_PLAYBACK_RESTART:
       emitSize(ready: true)
       emitPosition()
       emitVideoInfo()
-      DispatchQueue.main.async { [weak self] in self?.setVisible(true) }
+      var peak = 0.0
+      if let handle = mpv {
+        mpv_get_property(handle, "video-params/sig-peak", MPV_FORMAT_DOUBLE, &peak)
+      }
+      updateEDRMode(sigPeak: peak)
+      DispatchQueue.main.async { [weak self] in
+        guard let self else { return }
+        if let contentView = self.window?.contentView, let layer = contentView.layer {
+          self.ensureFlutterSurfacesAllowUnderlay(on: layer)
+        }
+        self.setVisible(true)
+      }
     case MPV_EVENT_END_FILE:
       if let data = event.data?.assumingMemoryBound(to: mpv_event_end_file.self).pointee {
         if data.reason == MPV_END_FILE_REASON_EOF {
@@ -445,17 +480,25 @@ final class KotvMpvCore {
     emit(info)
   }
 
+  /// EDR 开：显示器可出 HDR 白以上；关：系统把 HDR 帧压成 SDR。
   private func updateEDRMode(sigPeak: Double) {
     lastSigPeak = sigPeak
-    guard let videoLayer else { return }
-    let enable = sigPeak > 1.0
-    DispatchQueue.main.async {
-      CATransaction.begin()
-      CATransaction.setDisableActions(true)
-      if #available(macOS 14.0, *) {
-        videoLayer.wantsExtendedDynamicRangeContent = enable
+    let shouldEnableEDR = hdrEnabled && sigPeak > 1.0
+    let apply: () -> Void = { [weak self] in
+      guard let self, let videoLayer = self.videoLayer else { return }
+      self.withoutLayerAnimations {
+        // macOS 26+：preferredDynamicRange；更早系统：wantsExtendedDynamicRangeContent。
+        if #available(macOS 26.0, *) {
+          videoLayer.preferredDynamicRange = shouldEnableEDR ? .high : .standard
+        } else {
+          videoLayer.wantsExtendedDynamicRangeContent = shouldEnableEDR
+        }
       }
-      CATransaction.commit()
+    }
+    if Thread.isMainThread {
+      apply()
+    } else {
+      DispatchQueue.main.async(execute: apply)
     }
   }
 
@@ -475,15 +518,16 @@ final class KotvMpvCore {
   }
 
   @objc private func windowDidChangeBacking(_ notification: Notification) {
-    updateFrame(containerLayer?.frame)
+    updateFrame()
   }
 
-  /// 涂黑 contentView.layer 并插入容器到 index 0（Flutter 之下）。
+  /// 涂黑 contentView.layer 并插入容器到 index 0（Flutter 表面层之下）。
   private func attachContainerLayer(to superlayer: CALayer, frame: CGRect) {
     guard let containerLayer else { return }
     withoutLayerAnimations {
       superlayer.backgroundColor = NSColor.black.cgColor
       superlayer.isOpaque = true
+      containerLayer.zPosition = -1
       let needsReorder = superlayer.sublayers?.first !== containerLayer
       if containerLayer.superlayer !== superlayer || needsReorder {
         containerLayer.removeFromSuperlayer()
@@ -491,6 +535,18 @@ final class KotvMpvCore {
       }
       containerLayer.frame = frame
       updateContentsScale()
+      ensureFlutterSurfacesAllowUnderlay(on: superlayer)
+    }
+  }
+
+  /// Flutter 表面层默认可能按不透明合成；强制可透出下层 ASBDL。
+  private func ensureFlutterSurfacesAllowUnderlay(on superlayer: CALayer) {
+    guard let containerLayer else { return }
+    for layer in superlayer.sublayers ?? [] {
+      if layer === containerLayer { continue }
+      if layer.isOpaque {
+        layer.isOpaque = false
+      }
     }
   }
 

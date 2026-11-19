@@ -70,8 +70,8 @@ class KotvPlaybackFailover {
     if (lockExoForDrm) return null;
     if (!_playerVal.startsWith('innie#')) return null;
 
-    // 自动 = 引擎内部自选；无画面时直接显式软解（勿再插中间档）。
-    if (_decodeMode != 'soft') {
+    // 自动 = 引擎内部自选；无画面时显式软解。macOS underlay 软解 DV 易黑帧，跳过。
+    if (_decodeMode != 'soft' && !kotvIsMacOS()) {
       final from = _decodeMode;
       _decodeMode = 'soft';
       return KotvFailoverStep(

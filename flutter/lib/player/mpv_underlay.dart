@@ -63,8 +63,14 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
     } catch (_) {}
   }
 
-  Future<void> _updateFrame(Rect r) async {
+  Future<void> _updateFrame(Rect? r) async {
     try {
+      if (kotvIsMacOS()) {
+        // macOS：原生层铺满窗口；洞口只负责 Flutter 黑遮，不下发裁切矩形。
+        await _ch.invokeMethod('updateFrame');
+        return;
+      }
+      if (r == null) return;
       await _ch.invokeMethod('updateFrame', {
         'x': r.left,
         'y': r.top,
@@ -80,9 +86,14 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
     if (box == null || !box.hasSize) return;
     final origin = box.localToGlobal(Offset.zero);
     final size = box.size;
-    if (_lastOrigin != origin || _lastSize != size) {
+    final moved = _lastOrigin != origin || _lastSize != size;
+    if (moved) {
       _lastOrigin = origin;
       _lastSize = size;
+    }
+    if (kotvIsMacOS()) {
+      if (moved) _updateFrame(null);
+    } else if (moved) {
       _updateFrame(origin & size);
     }
     // 桌面 underlay/HWND：loadfile 期间藏原生层会丢帧。未就绪只用 Flutter 黑遮。
@@ -104,10 +115,30 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
         return false;
       },
       child: SizeChangedLayoutNotifier(
-        child: ColoredBox(
-          color: cover ? Colors.black : Colors.transparent,
-        ),
+        // 就绪后须清掉同帧已画的壁纸/黑槽像素，否则 Colors.transparent 只是不画、透不出底层 ASBDL。
+        child: cover
+            ? const ColoredBox(color: Colors.black)
+            : const CustomPaint(
+                painter: _KotvUnderlayClearPainter(),
+                child: SizedBox.expand(),
+              ),
       ),
     );
   }
+}
+
+/// 把本矩形清成透明，露出 contentView.layer 下的视频层。
+class _KotvUnderlayClearPainter extends CustomPainter {
+  const _KotvUnderlayClearPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.drawRect(
+      Offset.zero & size,
+      Paint()..blendMode = BlendMode.clear,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

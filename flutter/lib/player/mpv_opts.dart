@@ -299,7 +299,8 @@ class KotvMpvOpts {
       return 'auto';
     }
     if (kotvIsMacOS() || kotvIsIOS()) {
-      return hard ? 'videotoolbox' : 'auto';
+      // macOS avfoundation：自动/硬解都走 videotoolbox（软解已在上方返回 no）。
+      return 'videotoolbox';
     }
     const linuxHw = 'vaapi,vulkan,nvdec,cuda,vdpau';
     return hard ? linuxHw : '$linuxHw,no';

@@ -60,10 +60,9 @@ final class KotvMpvPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
       switch decodeMode {
       case "soft", "no", "sw":
         core.setProperty("hwdec", "no")
-      case "hard", "hw":
-        core.setProperty("hwdec", "videotoolbox")
       default:
-        core.setProperty("hwdec", "auto")
+        // 自动/硬解：videotoolbox（软解 DV 在 avfoundation 上易黑帧）。
+        core.setProperty("hwdec", "videotoolbox")
       }
     }
     switch dolbyVisionPolicy {
@@ -294,17 +293,8 @@ final class KotvMpvPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
       result(nil)
 
     case "updateFrame", "setVideoRect":
-      if let x = (args?["x"] as? NSNumber)?.doubleValue,
-         let y = (args?["y"] as? NSNumber)?.doubleValue,
-         let w = (args?["w"] as? NSNumber)?.doubleValue
-          ?? (args?["width"] as? NSNumber)?.doubleValue,
-         let h = (args?["h"] as? NSNumber)?.doubleValue
-          ?? (args?["height"] as? NSNumber)?.doubleValue
-      {
-        core?.updateFrame(CGRect(x: x, y: y, width: w, height: h))
-      } else {
-        core?.updateFrame(nil)
-      }
+      // macOS：忽略洞口矩形，始终铺满 contentView（Win/Linux 另走 HWND/wid）。
+      core?.updateFrame()
       result(nil)
 
     case "videoInfo":

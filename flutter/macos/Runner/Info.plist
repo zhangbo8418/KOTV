@@ -38,5 +38,10 @@
 	<array>
 		<string>_http._tcp</string>
 	</array>
+	<!-- Flutter 3.47 默认 Impeller：清屏不透明会盖住 contentView 下的视频层；Skia 才透得出。 -->
+	<key>FLTEnableImpeller</key>
+	<false/>
+	<key>FLTEnableMergedPlatformUIThread</key>
+	<false/>
 </dict>
 </plist>
