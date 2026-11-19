@@ -525,9 +525,9 @@
     $('#login_box').classList.toggle('hidden', ok);
     $('#login_form').classList.toggle('hidden', state !== 'login' && state !== 'notAdmin');
     $('#login_hint').textContent = {
-      login: '远端使用遥控需要以管理员登录',
-      notAdmin: '当前账号不是管理员，请换管理员账号登录',
-      denied: '主机未开放远端访问，请在主机「用户管理」中打开远端鉴权',
+      login: '非本机使用遥控须管理员登录',
+      notAdmin: '仅本机或管理员可使用遥控，请换管理员账号登录',
+      denied: '无法访问：请在本机打开，或先在主机开启远端鉴权后再登录',
       offline: '无法连接主机',
     }[state] || '';
     if (!ok) {

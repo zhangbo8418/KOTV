@@ -19,6 +19,7 @@ import (
 	"github.com/bobo/KOTV/internal/config"
 	"github.com/bobo/KOTV/internal/database"
 	"github.com/bobo/KOTV/internal/hostclient"
+	"github.com/bobo/KOTV/internal/hostmetrics"
 	"github.com/bobo/KOTV/internal/localproxy"
 	"github.com/bobo/KOTV/internal/paths"
 	"github.com/bobo/KOTV/internal/playproxy"
@@ -127,7 +128,17 @@ func (s *Server) Start() error {
 	thunder.SetPortFunc(func() int { return localproxy.DefaultPort })
 	spider.SetLocalProxyPort(localproxy.DefaultPort)
 
-	s.http = &http.Server{Handler: cors(s.gate(mux))}
+	s.http = &http.Server{
+		Handler: cors(s.gate(mux)),
+		ConnState: func(_ net.Conn, state http.ConnState) {
+			switch state {
+			case http.StateNew:
+				hostmetrics.IncHTTPConn()
+			case http.StateClosed, http.StateHijacked:
+				hostmetrics.DecHTTPConn()
+			}
+		},
+	}
 	log.Printf("HTTP 遥控服务已启动: http://127.0.0.1:%d", s.port)
 	for _, ln := range listeners {
 		go func() {

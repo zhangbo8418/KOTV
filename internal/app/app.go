@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/bobo/KOTV/internal/auth"
 	"github.com/bobo/KOTV/internal/cast"
@@ -17,6 +18,7 @@ import (
 	"github.com/bobo/KOTV/internal/database"
 	"github.com/bobo/KOTV/internal/dlna"
 	"github.com/bobo/KOTV/internal/download"
+	"github.com/bobo/KOTV/internal/grouppolicy"
 	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/live"
 	"github.com/bobo/KOTV/internal/model"
@@ -30,6 +32,7 @@ import (
 	"github.com/bobo/KOTV/internal/service"
 	"github.com/bobo/KOTV/internal/settings"
 	"github.com/bobo/KOTV/internal/spider"
+	"github.com/bobo/KOTV/internal/usage"
 	"github.com/bobo/KOTV/internal/util"
 )
 
@@ -72,6 +75,79 @@ type App struct {
 	liveLoadCached    map[string]any
 }
 
+// GetDB 供管理台 API 取库。
+func (a *App) GetDB() *database.DB {
+	if a == nil {
+		return nil
+	}
+	return a.DB
+}
+
+// AdminOnlineSessions 在线用户摘要（presence + 媒体态）。
+func (a *App) AdminOnlineSessions() []map[string]any {
+	if a == nil || a.presence == nil {
+		return nil
+	}
+	online := a.presence.Online(90 * time.Second)
+	out := make([]map[string]any, 0, len(online))
+	for _, o := range online {
+		u := auth.GetUser(o.UserID)
+		row := map[string]any{
+			"userId":   o.UserID,
+			"lastPing": o.LastPing.UnixMilli(),
+		}
+		if u != nil {
+			row["username"] = u.Username
+			row["groupId"] = u.GroupID
+		}
+		sid := "u:" + o.UserID
+		if sess := a.sessions.Peek(sid); sess != nil {
+			row["mediaTitle"] = sess.MediaTitle()
+			row["mediaURL"] = sess.MediaURL()
+			row["scopeId"] = sid
+			row["source"] = sess.Source
+		}
+		out = append(out, row)
+	}
+	return out
+}
+
+// AdminPurgeUserCache 清指定用户爬虫缓存。
+func (a *App) AdminPurgeUserCache(userID string) {
+	if a == nil {
+		return
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		a.Sites.DropContentCache()
+		return
+	}
+	sid := "u:" + userID
+	if sess := a.sessions.Peek(sid); sess != nil && sess.Sites != nil {
+		sess.Sites.DropContentCache()
+	}
+}
+
+// AdminKickUser 强制下线并释放运行时。
+func (a *App) AdminKickUser(userID string) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" || a == nil {
+		return
+	}
+	_ = auth.ForceLogout(userID)
+	sid := "u:" + userID
+	if sess := a.sessions.Peek(sid); sess != nil {
+		a.dropSessionRepos(sess)
+		a.dropSessionLives(sess)
+		a.sessions.Remove(sid)
+	}
+	if a.presence != nil {
+		a.presence.Leave(userID)
+	} else {
+		a.releaseUserRuntime(userID)
+	}
+}
+
 func New() (*App, error) {
 	_ = os.MkdirAll(os.TempDir(), 0o755)
 	setupFileLog()
@@ -82,6 +158,8 @@ func New() (*App, error) {
 	}
 	settings.BindDB(db)
 	auth.BindDB(db)
+	grouppolicy.BindDB(db)
+	usage.BindDB(db)
 	if err := settings.Load(); err != nil {
 		log.Printf("加载设置失败: %v", err)
 	}

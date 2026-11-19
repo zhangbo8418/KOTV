@@ -20,6 +20,7 @@ import (
 	"github.com/bobo/KOTV/internal/config"
 	"github.com/bobo/KOTV/internal/database"
 	"github.com/bobo/KOTV/internal/dlna"
+	"github.com/bobo/KOTV/internal/grouppolicy"
 	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/localproxy"
 	"github.com/bobo/KOTV/internal/player/embed"
@@ -265,7 +266,14 @@ func boolParam(m map[string]any, key string, def bool) bool {
 }
 
 func (a *App) toolCheckUpdate() (map[string]any, error) {
-	info, err := update.Check(settings.Get(settings.UpdateURL))
+	updateURL := settings.Get(settings.UpdateURL)
+	if uid := hostclient.DataOwner(); uid != "" {
+		pol := grouppolicy.Resolve(auth.GetUser(uid))
+		if pol.UpdateURL != "" {
+			updateURL = pol.UpdateURL
+		}
+	}
+	info, err := update.Check(updateURL)
 	if err != nil {
 		return nil, err
 	}

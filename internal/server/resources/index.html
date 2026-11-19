@@ -29,12 +29,17 @@
     </header>
 
     <section id="login_box" class="glass card login-box hidden">
-      <h2>登录</h2>
-      <div class="hint" id="login_hint">远端使用遥控需要以管理员登录</div>
-      <div id="login_form">
+      <div class="login-hero">
+        <img class="login-mark" src="/img/icon.png" width="56" height="56" alt="KO影视">
+        <div>
+          <h2>管理员登录</h2>
+          <div class="hint" id="login_hint">使用遥控需要以管理员登录</div>
+        </div>
+      </div>
+      <div id="login_form" class="login-form">
         <input id="login_user" class="field" placeholder="用户名" autocomplete="username">
-        <input id="login_pass" class="field" type="password" placeholder="密码" autocomplete="current-password" style="margin-top:10px">
-        <button class="btn-primary" id="btn_login" type="button">登录</button>
+        <input id="login_pass" class="field" type="password" placeholder="密码" autocomplete="current-password">
+        <button class="btn-primary" id="btn_login" type="button">进入遥控</button>
       </div>
     </section>
 

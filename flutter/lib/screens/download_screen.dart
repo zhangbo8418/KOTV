@@ -8,6 +8,7 @@ import '../remote/local_download.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/layout_scale.dart';
 import '../vod/vod_open.dart';
+import '../policy/group_policy.dart';
 import '../widgets/chrome.dart';
 import '../widgets/h_scroll.dart';
 import '../widgets/kotv_network_image.dart';
@@ -272,7 +273,7 @@ class _DownloadScreenState extends ConsumerState<DownloadScreen> {
           onBack: _onBack,
           onSearch: () => goKotvPage(ref, KotvPage.search),
           onProfile: () => goKotvPage(ref, KotvPage.profile),
-          onNews: () {},
+          onNews: () => showLatestNews(context, ref),
           trailing: AppPill(
             label: _selectMode ? '完成' : '多选',
             width: topAction.w,

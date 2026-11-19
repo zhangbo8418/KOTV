@@ -47,6 +47,7 @@ import '../theme/layout_scale.dart';
 import '../widgets/auth_gate.dart';
 import '../widgets/buffering_overlay.dart';
 import '../widgets/cast_flow.dart';
+import '../policy/group_policy.dart';
 import '../widgets/chrome.dart';
 import '../widgets/h_scroll.dart';
 import '../widgets/kotv_network_image.dart';
@@ -3989,7 +3990,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
             onBack: () => kotvPageBack(ref),
             onSearch: () => goKotvPage(ref, KotvPage.search),
             onProfile: () => goKotvPage(ref, KotvPage.profile),
-            onNews: () => showAppNews(context, remoteHint(ref)),
+            onNews: () => showLatestNews(context, ref),
             title: '直播',
           ),
           Expanded(
@@ -4866,7 +4867,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
             },
             onSearch: () => goKotvPage(ref, KotvPage.search),
             onProfile: () => goKotvPage(ref, KotvPage.profile),
-            onNews: () => showAppNews(context, remoteHint(ref)),
+            onNews: () => showLatestNews(context, ref),
             title: title,
           ),
           AspectRatio(

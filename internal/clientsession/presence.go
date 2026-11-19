@@ -47,6 +47,36 @@ func (p *Presence) Leave(userID string) {
 	}
 }
 
+// Online 返回最近仍有心跳的用户 ID 与最后活跃时间。
+func (p *Presence) Online(within time.Duration) []struct {
+	UserID   string
+	LastPing time.Time
+} {
+	if p == nil {
+		return nil
+	}
+	if within <= 0 {
+		within = 90 * time.Second
+	}
+	deadline := time.Now().Add(-within)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([]struct {
+		UserID   string
+		LastPing time.Time
+	}, 0, len(p.lastPing))
+	for id, ts := range p.lastPing {
+		if ts.Before(deadline) {
+			continue
+		}
+		out = append(out, struct {
+			UserID   string
+			LastPing time.Time
+		}{UserID: id, LastPing: ts})
+	}
+	return out
+}
+
 func (p *Presence) Stop() {
 	select {
 	case <-p.stop:

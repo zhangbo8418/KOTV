@@ -33,7 +33,7 @@ String kotvEngineHealthProblem(Map<String, dynamic>? h) {
   return '';
 }
 
-/// 后端简介「平台 架构 · 版本」，如 android arm64 · 0.3.3。
+/// 后端简介「平台 架构 · 版本」，如 android arm64 · 0.3.4。
 String kotvEngineLabel(Map<String, dynamic> h) {
   final host = ['${h['platform'] ?? ''}', '${h['arch'] ?? ''}'].where((e) => e.isNotEmpty).join(' ');
   final version = '${h['version'] ?? ''}';
@@ -86,7 +86,7 @@ class KotvApi {
 
   /// [withToken] 为 false 时不带登录令牌：确认后端身份前的探测请求不能把令牌交出去。
   Future<Map<String, String>> _headers([Map<String, String>? extra, bool withToken = true]) async {
-    // 有 token 就带上（用户管理/远端租户）；本机内容会话服务端仍只用 clientId。
+    // 有 token 就带上（管理台/远端租户）；本机内容会话服务端仍只用 clientId。
     final token = withToken ? await kotvAuthToken() : '';
     final id = await _ensureClientId();
     final engineBase = kotvNormalizeEngineBaseUrl(baseUrl);
@@ -249,13 +249,26 @@ class KotvApi {
     required String username,
     required String password,
     String role = 'user',
+    String groupId = '',
   }) async =>
       (await _postSealed('/api/v1/admin/users', {
         'username': username,
         'password': password,
         'role': role,
+        if (groupId.trim().isNotEmpty) 'groupId': groupId.trim(),
       }))
           .$1;
+
+  Future<Map<String, dynamic>> adminListGroups() => _get('/api/v1/admin/groups');
+
+  Future<Map<String, dynamic>> adminSetUserGroup(String id, String groupId) =>
+      _post('/api/v1/admin/users/$id/group', {'groupId': groupId});
+
+  Future<Map<String, dynamic>> adminSetUserRole(String id, String role) =>
+      _post('/api/v1/admin/users/$id/role', {'role': role});
+
+  Future<Map<String, dynamic>> adminApproveUser(String id) =>
+      _post('/api/v1/admin/users/$id/approve', {});
 
   Future<Map<String, dynamic>> adminDeleteUser(String id) async {
     final res = await http
@@ -276,14 +289,19 @@ class KotvApi {
   Future<Map<String, dynamic>> adminSetSettings({
     bool? remoteAuth,
     bool? allowRegister,
+    bool? requireApproval,
   }) {
     final body = <String, dynamic>{};
     if (remoteAuth != null) body['remoteAuth'] = remoteAuth;
     if (allowRegister != null) body['allowRegister'] = allowRegister;
+    if (requireApproval != null) body['requireApproval'] = requireApproval;
     return _post('/api/v1/admin/settings', body);
   }
 
   Future<Map<String, dynamic>> sessionPing() => _post('/api/v1/session/ping', {});
+
+  Future<Map<String, dynamic>> ackNotice(String id) =>
+      _post('/api/v1/notice/ack', {'id': id});
 
   Future<Map<String, dynamic>> sessionLeave() async {
     try {

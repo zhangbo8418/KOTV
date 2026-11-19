@@ -6,12 +6,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
-
+import '../api/kotv_admin_launch.dart';
 import '../api/kotv_auth_token.dart';
 import '../api/kotv_client_store.dart';
 import '../api/kotv_api.dart';
 import '../api/kotv_engine_url.dart';
 import '../api/kotv_role.dart';
+import '../nav/kotv_routes.dart';
 import '../engine/engine_launcher.dart';
 import '../player/kotv_playback.dart';
 import '../player/external_player.dart';
@@ -23,9 +24,7 @@ import '../player/video_eq.dart';
 import '../providers.dart';
 import '../api/kotv_settings_cache.dart';
 import '../remote/download_settings.dart';
-import '../remote/engine_tools.dart';
 import '../remote/remote_bridge.dart';
-import '../nav/kotv_routes.dart';
 import '../util/pick_local_file.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/layout_scale.dart';
@@ -41,6 +40,7 @@ import '../util/runtime_info.dart';
 import '../vod/grid_style.dart';
 import '../widgets/auth_gate.dart';
 import '../widgets/spider_check_dialog.dart';
+import '../policy/group_policy.dart';
 import '../widgets/chrome.dart';
 import '../widgets/danmaku_settings_sheet.dart';
 import '../widgets/dialogs.dart';
@@ -1932,12 +1932,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _checkUpdate() async {
-    final data = await _runTool(
-        '检查更新中', () => ref.read(apiProvider).tools('checkUpdate'));
-    if (data == null || !mounted) return;
-    final msg = kotvFormatCheckUpdateResult(data);
-    setState(() => _status = msg);
-    showAppNews(context, msg);
+    setState(() => _status = '检查更新中…');
+    try {
+      final msg = await kotvCheckUpdate(ref);
+      if (!mounted) return;
+      setState(() => _status = msg);
+      showAppNews(context, msg);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _status = '检查失败: $e');
+      showAppNews(context, '检查失败: $e');
+    }
   }
 
   Future<void> _checkSpider() => showSpiderCheckDialog(context, ref);
@@ -2406,8 +2411,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           onBack: () => kotvPageBack(ref),
           onSearch: () => goKotvPage(ref, KotvPage.search),
           onProfile: () => goKotvPage(ref, KotvPage.profile),
-          onNews: () => showAppNews(context,
-              '同一局域网内浏览器打开\nhttp://$lanHintIp:$_port/\n（Web 包为客户端；普通引擎为遥控。遥控见 /remote/）'),
+          onNews: () => showLatestNews(context, ref),
           title: '设置',
         ),
         if (_status.isNotEmpty)
@@ -2899,25 +2903,42 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           onTap: () => _prompt('Assrt Token', 'token',
                               g('assrtToken'), (v) => _set('assrtToken', v)),
                         ),
-                        KotvSettingsCell(
-                          label: 'Web / 遥控',
-                          value: _deviceIp.isNotEmpty
-                              ? '$_deviceIp:$_port'
-                              : ':$_port',
-                          onTap: () => showAppNews(context,
-                              '同一局域网内浏览器打开\nhttp://$lanHintIp:$_port/\n（Web 包有 webapp 时为客户端；否则为遥控。遥控固定 /remote/）'),
-                        ),
-                        if (_canManageShared)
+                        // 本机，或远端已登录管理员才显示；长按用当前引擎地址打开浏览器。
+                        if (_canManageShared) ...[
+                          KotvSettingsCell(
+                            label: 'Web / 遥控',
+                            value: _deviceIp.isNotEmpty
+                                ? '$_deviceIp:$_port'
+                                : ':$_port',
+                            onTap: () => showAppNews(context,
+                                '同一局域网内浏览器打开\n遥控：http://$lanHintIp:$_port/\n管理台：http://$lanHintIp:$_port/admin/\n本机 127.0.0.1 免登录\n长按「Web / 遥控」打开遥控页；长按「用户管理」打开管理台'),
+                            onLongPress: () => unawaited(
+                              kotvOpenRemoteConsole(
+                                context,
+                                engineBaseUrl:
+                                    ref.read(engineLauncherProvider).baseUrl,
+                              ),
+                            ),
+                          ),
                           KotvSettingsCell(
                             label: '用户管理',
-                            value: '管理员',
+                            value: '账号 / 分组 · 长按开管理台',
                             onTap: () {
                               Navigator.of(context).push(
                                 kotvDetailRoute(
-                                    builder: (_) => const UserAdminScreen()),
+                                  builder: (_) => const UserAdminScreen(),
+                                ),
                               );
                             },
+                            onLongPress: () => unawaited(
+                              kotvOpenAdminConsole(
+                                context,
+                                engineBaseUrl:
+                                    ref.read(engineLauncherProvider).baseUrl,
+                              ),
+                            ),
                           ),
+                        ],
                       ]),
                     ]),
                     const KotvSettingsSectionTitle('界面'),
@@ -2963,15 +2984,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     const KotvSettingsSectionTitle('更多'),
                     KotvSettingsCard(children: [
                       KotvSettingsGrid(columns: 4, children: [
-                        if (_canManageShared)
-                          KotvSettingsCell(
-                            label: '更新地址',
-                            value: g('updateUrl').isEmpty
-                                ? '未配置'
-                                : g('updateUrl'),
-                            onTap: () => _prompt('更新地址', 'version.json URL',
-                                g('updateUrl'), (v) => _set('updateUrl', v)),
-                          ),
                         if (_canManageShared) ...[
                           KotvSettingsCell(
                               label: '数据备份', onTap: _backupExport),
@@ -2993,8 +3005,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         KotvSettingsCell(
                           label: '关于',
                           value: 'KO影视',
-                          onTap: () => showAppNews(
-                              context, 'KO影视 Flutter $_version\n引擎端口 $_port'),
+                          onTap: () => showKotvAbout(context, ref),
                         ),
                       ]),
                     ]),

@@ -25,6 +25,8 @@
   }
 
   // 带协议号与登录令牌请求引擎；登录失效（401）时清掉令牌，并通知页面回到登录。
+  // 注意：静态遥控/管理页不要带 X-Kotv-Client-Platform: web。
+  // 该头专给 Flutter Web：非本机时始终需登录；本机 127.0.0.1 静态页应免登。
   async function request(path, opts = {}) {
     const headers = Object.assign({ 'X-Kotv-Protocol': PROTOCOL }, opts.headers || {});
     if (token) headers.Authorization = 'Bearer ' + token;
@@ -89,22 +91,30 @@
     setToken('');
   }
 
-  // 进入页面前的检查：本机直接可用；远端须主机开启远端访问并已登录，[adminOnly] 时还须是管理员。
-  // 返回 'ok' / 'login' / 'denied'（主机未开放远端访问）/ 'notAdmin'。
+  // 进入页面前的检查（遥控/管理台）：
+  //   - 本机 127.0.0.1：免登录
+  //   - 非本机：须管理员登录（adminOnly）；无远端鉴权时普通页仍 denied，管理面可先登录
+  // 返回 'ok' / 'login' / 'denied' / 'notAdmin'
   async function check(adminOnly) {
     const st = await json('/api/v1/auth/status');
     if (st.loopback) return 'ok';
-    if (!st.remoteAccess) return 'denied';
-    if (!token) return 'login';
+    if (!token) {
+      if (adminOnly) return 'login';
+      if (!st.remoteAccess) return 'denied';
+      return 'login';
+    }
     let me;
     try {
       me = await json('/api/v1/auth/me');
     } catch (_) {
       return 'login';
     }
-    if (adminOnly && (!me.user || me.user.role !== 'admin')) return 'notAdmin';
+    if (adminOnly && (!me.user || me.user.role !== 'admin')) {
+      setToken('');
+      return 'notAdmin';
+    }
     return 'ok';
   }
 
-  window.kotvAuth = { request, json, postSealed, login, logout, check, hasToken: () => !!token };
+  window.kotvAuth = { request, json, postSealed, login, logout, check, hasToken: () => !!token, clearToken: () => setToken('') };
 })();

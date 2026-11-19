@@ -13,6 +13,7 @@ import '../providers.dart';
 import '../player/play_headers.dart';
 import '../api/kotv_engine_url.dart';
 import '../api/kotv_settings_cache.dart';
+import '../policy/group_policy.dart';
 import '../remote/postmsg_host.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/layout_scale.dart';
@@ -83,11 +84,27 @@ class _AppShellState extends ConsumerState<AppShell> {
       if (kotvSettingsMapFlag(map, 'bootLive')) {
         if (mounted) goKotvPage(ref, KotvPage.live);
       }
+      final pol = GroupPolicy.fromJson(
+        Map<String, dynamic>.from((map['policy'] as Map?) ?? const {}),
+      );
+      if (mounted) {
+        await kotvApplyGroupPolicyUI(context, ref, pol, clientVersion: kotvClientVersion);
+      }
+    }).catchError((_) {});
+    // config 就绪后再应用一次（公告/强更可能只在 config.policy）
+    ref.read(configProvider.future).then((cfg) async {
+      final pol = GroupPolicy.fromJson(
+        Map<String, dynamic>.from((cfg['policy'] as Map?) ?? const {}),
+      );
+      if (mounted) {
+        await kotvApplyGroupPolicyUI(context, ref, pol, clientVersion: kotvClientVersion);
+      }
     }).catchError((_) {});
   }
 
   Future<void> _handleRemoteOpen(Map<String, dynamic> open) async {
     if (!mounted) return;
+    if (!ref.read(groupPolicyProvider).cap('allowRemoteControl')) return;
     final kind = '${open['kind'] ?? ''}'.trim().toLowerCase();
     final name = '${open['name'] ?? ''}'.trim();
     final pic = '${open['pic'] ?? ''}'.trim();
@@ -153,12 +170,21 @@ class _AppShellState extends ConsumerState<AppShell> {
   }
 
   void _onBottomTap(int i) {
+    final pol = ref.read(groupPolicyProvider);
     final next = switch (i) {
       0 => KotvPage.video,
       1 => KotvPage.live,
       2 => KotvPage.search,
       _ => KotvPage.profile,
     };
+    if (next == KotvPage.live && !pol.cap('allowLive')) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('当前分组未开放直播')));
+      return;
+    }
+    if (next == KotvPage.search && !pol.cap('allowSearch')) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('当前分组未开放搜索')));
+      return;
+    }
     // 底栏切主 Tab：清空返回栈，避免从深层页「返回」跳到已离开的 Tab
     ref.read(kotvPageStackProvider.notifier).state = <KotvPage>[];
     goKotvPage(ref, next, recordHistory: false);

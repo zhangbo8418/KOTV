@@ -65,7 +65,7 @@ func (s *Server) gate(next http.Handler) http.Handler {
 			writeAPIError(w, http.StatusUpgradeRequired, "客户端与后端版本不匹配，请升级到相同版本")
 			return
 		}
-		local := isLoopbackRequest(r) && !isWebClient(r)
+		local := isLocalNative(r)
 		need := s.routeNeed(r)
 		rootAlias := spider.NodeRootAliasKnown(r.URL.Path)
 		if rootAlias {
@@ -98,8 +98,20 @@ func (s *Server) gate(next http.Handler) http.Handler {
 		case need == needPublic:
 			level = accessPublic
 		case !remoteAccessAllowed(r):
-			writeAPIError(w, http.StatusForbidden, "未开启远端鉴权")
-			return
+			// 管理面（needAdmin：遥控写操作、/admin API）：即使未开远端鉴权，也允许走「登录→管理员」校验。
+			// 普通内容面仍拒绝，避免局域网在关闭远端鉴权时裸奔。
+			if need != needAdmin {
+				writeAPIError(w, http.StatusForbidden, "未开启远端鉴权")
+				return
+			}
+			if token != "" && user == nil {
+				writeAPIError(w, http.StatusUnauthorized, "登录已失效")
+				return
+			}
+			if user == nil {
+				writeAPIError(w, http.StatusUnauthorized, "需要登录")
+				return
+			}
 		case token != "":
 			writeAPIError(w, http.StatusUnauthorized, "登录已失效")
 			return
@@ -140,6 +152,11 @@ func (s *Server) gate(next http.Handler) http.Handler {
 		}
 		r = r.WithContext(ctx)
 
+		// 分组策略闸门（维护/IP/时段/账号状态）；admin 与本机豁免。
+		if level == accessFull && need == needUser && enforceGroupPolicy(w, r) {
+			return
+		}
+
 		// OPENWEB 登记的根别名：反代 ActivePkg（不硬编码业务路径名）。
 		if rootAlias {
 			stripQueryToken(r)
@@ -153,9 +170,18 @@ func (s *Server) gate(next http.Handler) http.Handler {
 	})
 }
 
-// isAdmin 本机，或已登录的管理员。
+// isLocalNative 本机且非 Flutter Web。
+// 静态遥控/管理页不带 platform=web，本机免登；Flutter Web 带 platform=web，即使 127.0.0.1 也要登录。
+func isLocalNative(r *http.Request) bool {
+	return isLoopbackRequest(r) && !isWebClient(r)
+}
+
+// isAdmin 本机静态/原生免登管理，或已登录的管理员。Flutter Web 必须管理员令牌。
 func isAdmin(r *http.Request, user *auth.User) bool {
-	return isLoopbackRequest(r) || (user != nil && user.Role == auth.RoleAdmin)
+	if isLocalNative(r) {
+		return true
+	}
+	return user != nil && user.Role == auth.RoleAdmin
 }
 
 // rejectUnlessAdmin 共享仓/直播列表删改用；非管理员写 403 并返回 true。
@@ -167,9 +193,9 @@ func rejectUnlessAdmin(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
-// protocolMismatch 非本机的 /api/v1 请求协议号与后端不一致。
+// protocolMismatch 非本机原生的 /api/v1 请求协议号与后端不一致。
 func protocolMismatch(r *http.Request) bool {
-	if isLoopbackRequest(r) || !strings.HasPrefix(r.URL.Path, "/api/v1/") || r.URL.Path == "/api/v1/health" {
+	if isLocalNative(r) || !strings.HasPrefix(r.URL.Path, "/api/v1/") || r.URL.Path == "/api/v1/health" {
 		return false
 	}
 	return strings.TrimSpace(r.Header.Get("X-Kotv-Protocol")) != strconv.Itoa(ProtocolVersion)
@@ -193,13 +219,15 @@ func isLoopbackRequest(r *http.Request) bool {
 
 // remoteAccessAllowed 是否允许该客户端连入（再谈是否要登录）。
 //   - 本机：始终允许。
-//   - Web：同源本站入口，始终允许，但必须登录。
+//   - Flutter Web（X-Kotv-Client-Platform: web）：始终允许，但必须登录。
 //   - 其它远端：主机须开启远端鉴权。
 func remoteAccessAllowed(r *http.Request) bool {
 	return isLoopbackRequest(r) || isWebClient(r) || auth.RemoteAuthEnabled()
 }
 
-// loginRequired 该客户端是否必须登录：Web 总要；其它远端在开启远端鉴权时要；本机不要。
+// loginRequired 该客户端是否必须登录。
+//   - Flutter Web：始终要（含本机浏览器打开的 Flutter Web）。
+//   - 静态遥控/管理页不带 platform=web：本机不要，远端随 remoteAuth。
 func loginRequired(r *http.Request) bool {
 	if isWebClient(r) {
 		return true

@@ -19,6 +19,7 @@ import (
 	"github.com/bobo/KOTV/internal/danmaku"
 	"github.com/bobo/KOTV/internal/database"
 	"github.com/bobo/KOTV/internal/download"
+	"github.com/bobo/KOTV/internal/grouppolicy"
 	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/live"
 	"github.com/bobo/KOTV/internal/localproxy"
@@ -89,9 +90,18 @@ func (a *App) APIGetConfig() map[string]any {
 			source = sess.Source
 		}
 	}
+	uid := hostclient.DataOwner()
+	user := auth.GetUser(uid)
+	pol := grouppolicy.Resolve(user)
+	if currentRequestIsAdmin() {
+		pol.IsAdmin = true
+	}
+	apiCopy := cfg.API()
+	pol.InjectLives(&apiCopy)
 	home := cfg.Home()
+	filtered := pol.FilterSites(cfg.Sites())
 	sites := make([]map[string]any, 0)
-	for _, s := range cfg.Sites() {
+	for _, s := range filtered {
 		sites = append(sites, map[string]any{
 			"key":        s.Key,
 			"name":       s.Name,
@@ -108,7 +118,20 @@ func (a *App) APIGetConfig() map[string]any {
 		homeName = home.Key
 	}
 	spiderOk, spiderErr := spider.HostSpiderReady()
-	return map[string]any{
+	// 品牌图：分组 brand（已回落全局）优先于站点 config 字段。
+	wallpaper := exposeResourceURL(pol.Brand["wallpaper"])
+	if wallpaper == "" {
+		wallpaper = exposeResourceURL(apiCopy.Wallpaper)
+	}
+	logo := exposeResourceURL(pol.Brand["logo"])
+	if logo == "" {
+		logo = exposeResourceURL(apiCopy.Logo)
+	}
+	banner := exposeResourceURL(pol.Brand["banner"])
+	if banner == "" {
+		banner = exposeResourceURL(apiCopy.Banner)
+	}
+	out := map[string]any{
 		"ok":          true,
 		"loading":     a.configLoading(),
 		"ready":       ready,
@@ -117,12 +140,14 @@ func (a *App) APIGetConfig() map[string]any {
 		"home":        home.Key,
 		"homeName":    homeName,
 		"sites":       sites,
-		"wallpaper":   exposeResourceURL(cfg.API().Wallpaper),
-		"logo":        exposeResourceURL(cfg.API().Logo),
-		"banner":      exposeResourceURL(cfg.API().Banner),
+		"wallpaper":   wallpaper,
+		"logo":        logo,
+		"banner":      banner,
 		"spiderOk":    spiderOk,
 		"spiderError": spiderErr,
+		"policy":      pol.PolicyDTO(),
 	}
+	return out
 }
 
 func (a *App) APILoadConfig(source string) error {
@@ -180,6 +205,12 @@ func (a *App) finishConfigLoad(cfg *config.Manager, sess *clientsession.Session,
 	if u == "" {
 		u = strings.TrimSpace(source)
 	}
+	// 分组专属直播注入：覆盖仓 JSON 内 lives，再 SyncFromConfig。
+	uid := hostclient.DataOwner()
+	pol := grouppolicy.Resolve(auth.GetUser(uid))
+	apiSnap := cfg.API()
+	pol.InjectLives(&apiSnap)
+	cfg.ReplaceLives(apiSnap.Lives)
 	homeKey := strings.TrimSpace(cfg.Home().Key)
 	if sess != nil {
 		sess.Ready = true
@@ -1052,6 +1083,7 @@ func (a *App) APIListRepos() map[string]any {
 		}
 		name := config.ConfigLabel(c.Name, url)
 		list = append(list, map[string]any{
+			"id":      c.ID,
 			"url":     url,
 			"name":    name,
 			"title":   strings.TrimSpace(c.Name),
@@ -1059,6 +1091,12 @@ func (a *App) APIListRepos() map[string]any {
 			"current": url == current,
 		})
 	}
+	uid := hostclient.DataOwner()
+	pol := grouppolicy.Resolve(auth.GetUser(uid))
+	if currentRequestIsAdmin() {
+		pol.IsAdmin = true
+	}
+	list = pol.FilterRepoMaps(list)
 	return map[string]any{"ok": true, "current": current, "repos": list}
 }
 
@@ -1227,6 +1265,12 @@ func (a *App) APIGetSettings() map[string]any {
 	out["version"] = update.CurrentVersion
 	out["runtime"] = appruntime.Status()
 	out["crawlerEnabled"] = !localCrawlerDisabled()
+	pol := grouppolicy.Resolve(auth.GetUser(hostclient.DataOwner()))
+	out["policy"] = pol.PolicyDTO()
+	if pol.UpdateURL != "" {
+		vals[string(settings.UpdateURL)] = pol.UpdateURL
+		out["settings"] = vals
+	}
 	out["searchHistory"] = settings.GetSearchHistory()
 	out["searchHot"] = settings.GetSearchHot()
 	out["backdrop"] = a.APIBackdrop()

@@ -13,6 +13,7 @@ import '../theme/layout_scale.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/kotv_theme.dart';
 import '../widgets/auth_gate.dart';
+import '../policy/group_policy.dart';
 import '../widgets/chrome.dart';
 import '../widgets/config_branding.dart';
 import '../widgets/dialogs.dart';
@@ -1002,7 +1003,7 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
           },
           onSite: () => _openSitePicker(sites),
           onSettings: () => goKotvPage(ref, KotvPage.settings),
-          onNews: () => showAppNews(context, remoteHint(ref)),
+          onNews: () => showLatestNews(context, ref),
         ),
         // 未就绪不画分类导航
         if (ready)

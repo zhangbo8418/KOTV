@@ -6,6 +6,7 @@ import '../theme/kotv_palette.dart';
 import '../theme/layout_scale.dart';
 import '../vod/grid_style.dart';
 import '../vod/vod_open.dart';
+import '../policy/group_policy.dart';
 import '../widgets/chrome.dart';
 import '../widgets/kotv_refresh.dart';
 import '../widgets/poster_card.dart';
@@ -56,7 +57,7 @@ class LibraryShelf extends ConsumerWidget {
           onBack: () => kotvPageBack(ref),
           onSearch: () => goKotvPage(ref, KotvPage.search),
           onProfile: () => goKotvPage(ref, KotvPage.profile),
-          onNews: () => showAppNews(context, remoteHint(ref)),
+          onNews: () => showLatestNews(context, ref),
           title: title,
           trailing: Row(
             mainAxisSize: MainAxisSize.min,

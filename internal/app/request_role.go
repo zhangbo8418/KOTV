@@ -7,6 +7,7 @@ import (
 	"github.com/bobo/KOTV/internal/auth"
 	"github.com/bobo/KOTV/internal/config"
 	"github.com/bobo/KOTV/internal/database"
+	"github.com/bobo/KOTV/internal/grouppolicy"
 	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/server"
 )
@@ -24,7 +25,7 @@ func currentRequestIsAdmin() bool {
 	return u != nil && u.Role == auth.RoleAdmin && u.Enabled
 }
 
-// errUnlessSharedSourceAllowed 远端非管理员只能选用已在共享表中的源，不能新增。
+// errUnlessSharedSourceAllowed 远端非管理员只能选用已在共享表中的源，且须在所属分组勾选集内。
 func (a *App) errUnlessSharedSourceAllowed(typ int64, raw string) error {
 	if a == nil || !hostclient.DedicatedRuntime() || currentRequestIsAdmin() {
 		return nil
@@ -32,6 +33,22 @@ func (a *App) errUnlessSharedSourceAllowed(typ int64, raw string) error {
 	url := config.NormalizeSource(strings.TrimSpace(raw))
 	if url == "" {
 		return nil
+	}
+	uid := hostclient.DataOwner()
+	u := auth.GetUser(uid)
+	pol := grouppolicy.Resolve(u)
+	if typ == database.ConfigTypeSite && !pol.AllowVodURL(url) {
+		// 也试 normalize 匹配
+		ok := false
+		for allowed := range pol.VodURLs {
+			if config.NormalizeSource(allowed) == url {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return fmt.Errorf("当前分组不可用该仓库")
+		}
 	}
 	var known map[string]struct{}
 	if typ == database.ConfigTypeLive {

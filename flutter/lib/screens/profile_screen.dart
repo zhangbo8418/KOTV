@@ -7,12 +7,11 @@ import '../api/kotv_engine_url.dart';
 import '../models/models.dart';
 import '../nav/kotv_page.dart';
 import '../providers.dart';
-import '../remote/engine_tools.dart';
+import '../policy/group_policy.dart';
 import '../remote/local_collect.dart';
 import '../remote/remote_bridge.dart';
 import '../theme/layout_scale.dart';
 import '../theme/kotv_palette.dart';
-import '../util/runtime_info.dart';
 import '../widgets/chrome.dart';
 import '../widgets/config_branding.dart';
 import '../widgets/dialogs.dart';
@@ -71,9 +70,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   Future<void> _checkUpdate() async {
     setState(() => _status = '正在检查更新…');
     try {
-      final data = await ref.read(apiProvider).tools('checkUpdate');
+      final msg = await kotvCheckUpdate(ref);
       if (!mounted) return;
-      final msg = kotvFormatCheckUpdateResult(data);
       setState(() => _status = msg);
       showAppNews(context, msg);
     } catch (e) {
@@ -84,25 +82,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
 
   Future<void> _checkSpider() => showSpiderCheckDialog(context, ref);
 
-  Future<void> _showAbout() async {
-    try {
-      final st = await ref.read(apiProvider).getSettings();
-      final rt = <String, String>{
-        for (final e in Map<String, dynamic>.from((st['runtime'] as Map?) ?? {}).entries)
-          e.key: '${e.value ?? ''}',
-      };
-      final lines = <String>[
-        'KO影视 Flutter ${st['version'] ?? kotvClientVersion}',
-        '引擎端口：${st['port'] ?? kotvDefaultEnginePort}',
-        '',
-        '运行时：',
-        ...formatKotvRuntimeLines(rt).map((e) => '  $e'),
-      ];
-      if (mounted) showAppNews(context, lines.join('\n'));
-    } catch (e) {
-      if (mounted) showAppNews(context, '读取运行时失败: $e\n${remoteHint(ref)}');
-    }
-  }
+  Future<void> _showAbout() => showKotvAbout(context, ref);
 
   @override
   Widget build(BuildContext context) {
@@ -213,7 +193,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 SizedBox(height: gap),
                 FeatureCard(
                   title: '关于',
-                  subtitle: '运行时信息',
+                  subtitle: '版本与说明',
                   start: const Color(0xEE49A7E9),
                   end: const Color(0xEE376EC5),
                   icon: Icons.info_outline,
@@ -292,7 +272,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       Expanded(
                         child: FeatureCard(
                           title: '关于',
-                          subtitle: '运行时与组件信息',
+                          subtitle: '版本与说明',
                           start: const Color(0xEE49A7E9),
                           end: const Color(0xEE376EC5),
                           icon: Icons.info_outline,

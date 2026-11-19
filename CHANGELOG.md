@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.4
+
+- 管理控制台：分组策略、用量/主机指标、审核与角色/分组管理；管理台前端与字体资源收拢。
+- 远端鉴权与网关：组策略下发、通知确认、注册审批等接口与 Flutter 侧对接。
+- 版本号同源升至 `0.3.4`（pubspec `0.3.4+44`）。
+
 ## v0.3.3
 
 - 硬切换集：`kotvStopPlayersForEpisodeSwitch` 统一先 pause 再卸文件，桌面 media_kit 不每集 dispose；直播切台复用同一路径；无缝仍走 playlist。

@@ -3,80 +3,412 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>KO影视 · 用户管理</title>
+  <title>KO影视 · 管理控制台</title>
   <link rel="icon" type="image/png" href="/img/favicon.png">
-  <link rel="stylesheet" href="/css/ui.css">
-  <style>
-    .admin-wrap { max-width: 720px; margin: 0 auto; padding: 20px 16px 48px; }
-    .admin-wrap h1 { font-size: 1.35rem; margin: 0 0 8px; }
-    .admin-wrap .sub { opacity: .7; margin-bottom: 20px; }
-    .row { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
-    .row input, .row select { flex: 1; min-width: 120px; }
-    table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: .9rem; }
-    th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid rgba(255,255,255,.08); }
-    .btn { cursor: pointer; border: 0; border-radius: 8px; padding: 8px 12px; background: #3b82f6; color: #fff; }
-    .btn.ghost { background: transparent; border: 1px solid rgba(255,255,255,.2); }
-    .btn.danger { background: #b91c1c; }
-    .hidden { display: none !important; }
-    #toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: #111; color: #fff; padding: 10px 16px; border-radius: 8px; opacity: 0; transition: .2s; }
-    #toast.show { opacity: 1; }
-  </style>
+  <!-- 不引入 /css/ui.css：其中 .nav 是遥控页底部固定栏，会把侧栏菜单钉到视口底部 -->
+  <link rel="stylesheet" href="/css/admin-fonts.css">
+  <link rel="stylesheet" href="/css/admin.css">
 </head>
 <body>
-  <div class="admin-wrap">
-    <h1>用户管理</h1>
-    <p class="sub">本机打开无需登录；远端打开须以管理员登录。新装默认管理员 admin / admin，请尽快改密。开启「远端鉴权」后，其它设备才能登录连入。</p>
-
-    <section id="login_box" class="glass card">
-      <h2>管理员登录</h2>
-      <p class="sub" id="login_hint">远端管理需要管理员账号</p>
-      <div class="row" id="login_form">
-        <input id="login_user" class="field" placeholder="用户名" autocomplete="username">
-        <input id="login_pass" class="field" type="password" placeholder="密码" autocomplete="current-password">
-        <button class="btn" id="btn_login">登录</button>
-      </div>
-    </section>
-
-    <section id="panel" class="hidden">
-      <div class="glass card">
-        <div class="row">
-          <label><input type="checkbox" id="opt_remote"> 开启远端鉴权</label>
-          <label><input type="checkbox" id="opt_register"> 开放注册</label>
-          <button class="btn" id="btn_save_opts">保存开关</button>
-          <button class="btn ghost" id="btn_logout">退出</button>
+  <!-- Login -->
+  <div id="login_box" class="login-shell">
+    <div class="login-aurora" aria-hidden="true"></div>
+    <section class="login-card">
+      <div class="login-brand">
+        <img class="login-logo" src="/img/icon.png" width="56" height="56" alt="KO影视">
+        <div>
+          <p class="login-eyebrow">管理控制台</p>
+          <h1>KO影视 <span>管理台</span></h1>
+          <p class="sub" id="login_hint">本机打开免登录；非本机须管理员账号。新装默认 admin / admin。</p>
         </div>
       </div>
-      <div class="glass card" style="margin-top:12px">
-        <h2>创建用户</h2>
-        <div class="row">
-          <input id="new_user" class="field" placeholder="用户名">
-          <input id="new_pass" class="field" type="password" placeholder="密码≥6位">
-          <select id="new_role" class="field"><option value="user">user</option><option value="admin">admin</option></select>
-          <button class="btn" id="btn_create">创建</button>
-        </div>
-      </div>
-      <table>
-        <thead><tr><th>用户</th><th>角色</th><th>状态</th><th>操作</th></tr></thead>
-        <tbody id="user_rows"></tbody>
-      </table>
-
-      <div class="glass card" style="margin-top:16px">
-        <h2>仓库管理</h2>
-        <p class="sub">点播 / 直播仓库与 App 设置同源。点「编辑」填回上方，可改备注与地址后保存</p>
-        <div class="row">
-          <select id="repo_kind" class="field" style="max-width:120px">
-            <option value="vod">点播</option>
-            <option value="live">直播</option>
-          </select>
-          <input id="repo_url" class="field" placeholder="配置地址或 JSON">
-          <input id="repo_name" class="field" placeholder="备注名（可选）" style="max-width:140px">
-          <button class="btn" id="btn_repo_add" type="button">添加 / 切换</button>
-          <button class="btn ghost" id="btn_repo_refresh" type="button">刷新</button>
-        </div>
-        <div class="file-list" id="admin_repo_list" style="margin-top:12px"></div>
+      <div class="login-form" id="login_form">
+        <label class="field-wrap"><span>用户名</span>
+          <input id="login_user" class="field" placeholder="admin" autocomplete="username">
+        </label>
+        <label class="field-wrap"><span>密码</span>
+          <input id="login_pass" class="field" type="password" placeholder="••••••••" autocomplete="current-password">
+        </label>
+        <button class="btn btn-login" id="btn_login" type="button">进入管理台</button>
       </div>
     </section>
   </div>
+
+  <!-- Console -->
+  <div id="panel" class="shell hidden">
+    <div class="scrim" id="scrim"></div>
+    <aside class="sidebar" id="sidebar">
+      <div class="brand-block">
+        <img class="logo" src="/img/icon.png" alt="KO影视" width="40" height="40">
+        <div class="brand-text">
+          <div class="mark">KO<span>TV</span></div>
+          <div class="tag">管理控制台</div>
+        </div>
+      </div>
+      <nav class="nav" id="nav">
+        <button type="button" data-view="overview" class="active">概览</button>
+        <button type="button" data-view="groups">分组</button>
+        <button type="button" data-view="users">用户与设备</button>
+        <button type="button" data-view="repos">资源池</button>
+        <button type="button" data-view="messages">消息中心</button>
+        <button type="button" data-view="security">安全与准入</button>
+        <button type="button" data-view="ops">配额与运维</button>
+        <button type="button" data-view="settings">全局设置</button>
+      </nav>
+      <div class="sidebar-foot">
+        <button class="btn ghost" id="btn_logout" type="button">退出登录</button>
+      </div>
+    </aside>
+
+    <div class="main">
+      <header class="topbar">
+        <button class="menu-toggle" id="menu_toggle" type="button" aria-label="菜单">☰</button>
+        <h2 id="view_title">概览</h2>
+        <span class="badge muted" id="online_badge">在线 —</span>
+      </header>
+      <div class="content">
+
+        <!-- 概览 -->
+        <section class="view active" id="view_overview" data-title="概览">
+          <div class="card">
+            <div class="row" style="margin:0;justify-content:space-between">
+              <div class="seg" id="range_seg">
+                <button type="button" data-range="1" class="active">今天</button>
+                <button type="button" data-range="7">7 天</button>
+                <button type="button" data-range="30">30 天</button>
+              </div>
+              <div class="row" style="margin:0">
+                <select id="ov_group" class="field"><option value="">全部分组</option></select>
+                <select id="ov_platform" class="field"><option value="">全部平台</option></select>
+                <button class="btn ghost" id="btn_ov_refresh" type="button">刷新</button>
+              </div>
+            </div>
+          </div>
+          <div class="grid-4" id="kpi_row"></div>
+          <div class="card" style="margin-top:14px">
+            <div class="row" style="margin:0;justify-content:space-between">
+              <h3 style="margin:0">系统资源</h3>
+              <button class="btn ghost sm" id="btn_ov_system" type="button">刷新仪表</button>
+            </div>
+            <div id="ov_system" class="sys-grid">加载中…</div>
+            <div id="ov_system_meta" class="sys-meta"></div>
+            <details id="ov_sessions_wrap" style="margin-top:14px">
+              <summary style="cursor:pointer;color:var(--admin-muted);font-size:.85rem">在线会话 <span id="ov_session_count"></span></summary>
+              <div id="ov_sessions" class="empty" style="margin-top:10px">—</div>
+            </details>
+          </div>
+          <div class="grid-2" style="margin-top:14px">
+            <div class="card">
+              <h3>最近消息</h3>
+              <div id="ov_messages" class="empty">加载中…</div>
+            </div>
+            <div class="card">
+              <h3>最近审计</h3>
+              <div id="ov_audit" class="empty">加载中…</div>
+            </div>
+          </div>
+          <div class="grid-2" style="margin-top:0">
+            <div class="card">
+              <h3>平台分布</h3>
+              <div id="ov_platforms" class="empty">加载中…</div>
+            </div>
+            <div class="card">
+              <h3>策略拒绝 / 错误 Top</h3>
+              <div id="ov_denies" class="empty">—</div>
+            </div>
+          </div>
+          <div class="grid-3" style="margin-top:0">
+            <div class="card">
+              <h3>仓库加载 Top</h3>
+              <div id="ov_repos" class="empty">—</div>
+            </div>
+            <div class="card">
+              <h3>直播加载 Top</h3>
+              <div id="ov_lives" class="empty">—</div>
+            </div>
+            <div class="card">
+              <h3>播放 Top</h3>
+              <div id="ov_plays" class="empty">—</div>
+            </div>
+          </div>
+          <div class="grid-2" style="margin-top:0">
+            <div class="card">
+              <h3>搜索 Top</h3>
+              <div id="ov_searches" class="empty">—</div>
+            </div>
+            <div class="card">
+              <h3>错误事件 Top</h3>
+              <div id="ov_errors" class="empty">—</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 分组 -->
+        <section class="view" id="view_groups" data-title="分组">
+          <div class="card">
+            <div class="row" style="margin:0">
+              <input id="grp_new_name" class="field" placeholder="新分组名称">
+              <input id="grp_new_note" class="field" placeholder="备注（可选）">
+              <select id="grp_copy_of" class="field" style="max-width:160px"><option value="">不复制</option></select>
+              <button class="btn" id="btn_grp_create" type="button">创建</button>
+            </div>
+          </div>
+          <div class="split">
+            <div class="list-pane" id="grp_list"></div>
+            <div id="grp_editor" class="card" style="margin:0">
+              <p class="empty">选择左侧分组进行编辑</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- 用户与设备 -->
+        <section class="view" id="view_users" data-title="用户与设备">
+          <div class="card hidden" id="card_pending">
+            <h3>注册审批</h3>
+            <p class="hint">开放注册且开启「注册需审批」时，新账号会出现在此，通过后才可登录。</p>
+            <div id="pending_approvals" class="empty">暂无待审批账号</div>
+          </div>
+          <div class="card">
+            <h3>创建用户</h3>
+            <div class="row">
+              <input id="new_user" class="field" placeholder="用户名">
+              <input id="new_pass" class="field" type="password" placeholder="密码≥6位">
+              <select id="new_role" class="field" style="max-width:110px">
+                <option value="user">用户</option>
+                <option value="admin">管理员</option>
+              </select>
+              <select id="new_group" class="field" style="max-width:160px"></select>
+              <button class="btn" id="btn_create" type="button">创建</button>
+            </div>
+          </div>
+          <div class="card">
+            <h3>用户列表</h3>
+            <div class="table-scroll">
+              <table class="data">
+                <thead>
+                  <tr><th>用户</th><th>角色</th><th>分组</th><th>状态</th><th>操作</th></tr>
+                </thead>
+                <tbody id="user_rows"></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="card">
+            <div class="row" style="margin:0;justify-content:space-between">
+              <h3 style="margin:0">设备绑定</h3>
+              <select id="dev_user" class="field" style="max-width:220px;flex:0"></select>
+            </div>
+            <p class="hint">选择用户后查看/解绑设备。待审批账号也可在上方「注册审批」处理。</p>
+            <div id="dev_list" class="empty">选择用户以加载设备</div>
+          </div>
+        </section>
+
+        <!-- 资源池 -->
+        <section class="view" id="view_repos" data-title="资源池">
+          <div class="card">
+            <h3>仓库管理</h3>
+            <p class="hint">点播 / 直播仓库与 App 设置同源。今日加载次数会显示在条目旁。</p>
+            <div class="row">
+              <select id="repo_kind" class="field" style="max-width:120px">
+                <option value="vod">点播</option>
+                <option value="live">直播</option>
+              </select>
+              <input id="repo_url" class="field" placeholder="配置地址或 JSON">
+              <input id="repo_name" class="field" placeholder="备注名（可选）" style="max-width:140px">
+              <button class="btn" id="btn_repo_add" type="button">添加 / 切换</button>
+              <button class="btn ghost" id="btn_repo_refresh" type="button">刷新</button>
+            </div>
+            <div class="file-list" id="admin_repo_list"></div>
+          </div>
+        </section>
+
+        <!-- 消息中心 -->
+        <section class="view" id="view_messages" data-title="消息中心">
+          <div class="card">
+            <div class="row" style="margin:0;justify-content:space-between">
+              <h3 style="margin:0" id="nt_form_title">发布公告</h3>
+              <button class="btn ghost sm hidden" id="btn_nt_cancel" type="button">取消编辑</button>
+            </div>
+            <input type="hidden" id="nt_id" value="">
+            <div class="form-grid" style="margin-top:12px">
+              <label class="block"><span>标题</span><input id="nt_title" class="field" placeholder="公告标题"></label>
+              <label class="block"><span>类型</span>
+                <select id="nt_kind" class="field">
+                  <option value="banner">横幅</option>
+                  <option value="dialog">弹窗</option>
+                  <option value="toast">轻提示</option>
+                </select>
+              </label>
+              <label class="block"><span>范围</span>
+                <select id="nt_scope" class="field">
+                  <option value="all">全部</option>
+                  <option value="group">分组</option>
+                  <option value="user">用户</option>
+                </select>
+              </label>
+              <label class="block" id="nt_target_wrap"><span id="nt_target_label">目标</span>
+                <select id="nt_target" class="field"><option value="">—</option></select>
+              </label>
+              <label class="block full"><span>正文</span><textarea id="nt_body" class="field" placeholder="公告内容"></textarea></label>
+              <label class="block"><span>链接</span><input id="nt_link" class="field" placeholder="可选链接"></label>
+              <label class="block"><span>优先级</span><input id="nt_priority" class="field" type="number" value="0"></label>
+              <label class="block"><span>生效开始</span><input id="nt_starts" class="field" type="datetime-local" title="点击选择日期与时间"></label>
+              <label class="block"><span>生效结束</span><input id="nt_ends" class="field" type="datetime-local" title="点击选择日期与时间"></label>
+              <label class="block" style="flex-direction:row;align-items:center;gap:10px;padding-top:22px">
+                <label class="check"><input type="checkbox" id="nt_sticky"> 置顶 / 需确认</label>
+              </label>
+            </div>
+            <div class="row"><button class="btn" id="btn_nt_save" type="button">发布</button></div>
+          </div>
+          <div class="card">
+            <h3>公告列表</h3>
+            <div id="nt_list" class="empty">加载中…</div>
+          </div>
+          <div class="card">
+            <h3>推送打开</h3>
+            <p class="hint">向分组或指定用户推送打开指令。分组与用户都为空时会广播到默认队列，请谨慎。</p>
+            <div class="form-grid">
+              <label class="block"><span>分组</span><select id="push_group" class="field"><option value="">不限</option></select></label>
+              <label class="block"><span>用户</span><select id="push_user" class="field"><option value="">不限（可配合分组）</option></select></label>
+              <label class="block"><span>类型</span>
+                <select id="push_kind" class="field">
+                  <option value="play">播放</option>
+                  <option value="detail">详情</option>
+                  <option value="live">直播</option>
+                  <option value="url">链接</option>
+                </select>
+              </label>
+              <label class="block"><span>站点</span><input id="push_site" class="field" placeholder="站点标识"></label>
+              <label class="block"><span>资源 ID</span><input id="push_id" class="field"></label>
+              <label class="block"><span>名称</span><input id="push_name" class="field"></label>
+              <label class="block full"><span>链接地址</span><input id="push_url" class="field" placeholder="https://…"></label>
+              <label class="block" style="flex-direction:row;align-items:center;padding-top:22px">
+                <label class="check"><input type="checkbox" id="push_emergency"> 紧急（忽略远端控制开关）</label>
+              </label>
+            </div>
+            <div class="row"><button class="btn" id="btn_push" type="button">推送</button></div>
+          </div>
+          <div class="card">
+            <div class="row" style="margin:0;justify-content:space-between">
+              <h3 style="margin:0">推送历史</h3>
+              <button class="btn ghost sm" id="btn_push_logs" type="button">刷新</button>
+            </div>
+            <div id="push_logs" class="empty" style="margin-top:10px">加载中…</div>
+          </div>
+        </section>
+
+        <!-- 安全与准入 -->
+        <section class="view" id="view_security" data-title="安全与准入">
+          <div class="card">
+            <h3>访问开关</h3>
+            <div class="row">
+              <label class="check"><input type="checkbox" id="opt_register"> 开放注册</label>
+              <label class="check"><input type="checkbox" id="opt_invite"> 注册需邀请码</label>
+              <label class="check"><input type="checkbox" id="opt_approval"> 注册需审批</label>
+              <button class="btn" id="btn_save_opts" type="button">保存</button>
+            </div>
+            <p class="hint">Web 管理台始终需登录。局域网 App 远端鉴权请在客户端「用户管理」中开关（默认关闭）。</p>
+          </div>
+          <div class="card">
+            <h3>IP / 时段准入</h3>
+            <div class="form-grid">
+              <label class="block full"><span>IP 白名单</span><textarea id="sec_ip_allow" class="field" placeholder="每行一个 CIDR/IP，空=不限制"></textarea></label>
+              <label class="block full"><span>IP 黑名单</span><textarea id="sec_ip_deny" class="field" placeholder="每行一个 CIDR/IP"></textarea></label>
+              <label class="block full"><span>准入时段</span><input id="sec_hours" class="field" placeholder="如 08:00-22:00 或 JSON"></label>
+            </div>
+            <div class="row"><button class="btn" id="btn_save_access" type="button">保存准入规则</button></div>
+          </div>
+          <div class="card">
+            <h3>邀请码</h3>
+            <div class="row">
+              <input id="inv_code" class="field" placeholder="邀请码（空则自动生成）">
+              <select id="inv_group" class="field" style="max-width:160px"></select>
+              <input id="inv_max" class="field" type="number" value="1" style="max-width:100px" placeholder="次数" title="可用次数">
+              <input id="inv_exp" class="field" type="datetime-local" style="max-width:220px" title="点击选择过期时间" aria-label="过期时间">
+              <button class="btn" id="btn_inv_create" type="button">创建</button>
+            </div>
+            <div id="inv_list" style="margin-top:12px" class="empty">加载中…</div>
+          </div>
+        </section>
+
+        <!-- 配额与运维 -->
+        <section class="view" id="view_ops" data-title="配额与运维">
+          <div class="card">
+            <h3>运维开关</h3>
+            <div class="form-grid">
+              <label class="block" style="flex-direction:row;align-items:center;gap:10px;padding-top:8px">
+                <label class="check"><input type="checkbox" id="ops_maintenance"> 维护模式</label>
+              </label>
+              <label class="block" style="flex-direction:row;align-items:center;gap:10px;padding-top:8px">
+                <label class="check"><input type="checkbox" id="ops_force"> 强制更新</label>
+              </label>
+              <label class="block full"><span>维护提示</span><input id="ops_maint_msg" class="field" placeholder="维护公告文案"></label>
+              <label class="block"><span>最低客户端版本</span><input id="ops_min_ver" class="field" placeholder="如 1.2.0"></label>
+              <label class="block"><span>用量保留天数</span><input id="ops_retention" class="field" type="number" placeholder="如 30"></label>
+              <label class="block"><span>全局最大设备数</span><input id="ops_max_devices" class="field" type="number" placeholder="0=不限"></label>
+              <label class="block"><span>全局最大会话数</span><input id="ops_max_sessions" class="field" type="number" placeholder="0=不限"></label>
+            </div>
+            <div class="row"><button class="btn" id="btn_ops_save" type="button">保存运维设置</button></div>
+          </div>
+          <div class="card">
+            <h3>运维工具</h3>
+            <div class="row">
+              <input id="ops_purge_user" class="field" placeholder="清缓存用户 ID（空=当前上下文）" style="max-width:260px">
+              <button class="btn ghost" id="btn_ops_purge" type="button">清用户缓存</button>
+            </div>
+            <div class="row">
+              <input id="ops_probe_url" class="field" placeholder="探测仓库 URL">
+              <button class="btn ghost" id="btn_ops_probe" type="button">探测</button>
+            </div>
+            <p class="hint" id="ops_tool_msg"></p>
+          </div>
+          <div class="card">
+            <h3>引擎日志</h3>
+            <p class="hint">查看 data/log 下的引擎日志；清理会截断占用中的文件（与 App「仅日志」清理同源）。</p>
+            <div class="log-toolbar">
+              <select id="log_file" class="field"><option value="">选择日志…</option></select>
+              <button class="btn ghost sm" id="btn_log_refresh" type="button">刷新</button>
+              <button class="btn ghost sm" id="btn_log_clear_one" type="button">清空当前</button>
+              <button class="btn danger sm" id="btn_log_clear_all" type="button">清空全部</button>
+            </div>
+            <div class="log-meta" id="log_meta">尚未加载</div>
+            <pre class="log-view" id="log_view">选择日志文件后显示内容</pre>
+          </div>
+          <div class="card">
+            <h3>审计日志</h3>
+            <div class="row"><button class="btn ghost" id="btn_audit_refresh" type="button">刷新</button></div>
+            <div id="audit_list" class="empty">加载中…</div>
+          </div>
+        </section>
+
+        <!-- 全局设置 -->
+        <section class="view" id="view_settings" data-title="全局设置">
+          <div class="card">
+            <h3>基础</h3>
+            <div class="form-grid">
+              <label class="block"><span>更新地址</span><input id="set_update_url" class="field" placeholder="https://…"></label>
+              <label class="block"><span>默认分组</span><select id="set_default_group" class="field"></select></label>
+            </div>
+          </div>
+          <div class="card">
+            <h3>品牌展示</h3>
+            <p class="hint">写入全局 settings；分组品牌字段优先，未设置时回落到此处。</p>
+            <div class="form-grid">
+              <label class="block"><span>Logo</span><input id="brand_logo" class="field" placeholder="图片地址"></label>
+              <label class="block"><span>壁纸</span><input id="brand_wallpaper" class="field" placeholder="壁纸地址"></label>
+              <label class="block"><span>横幅</span><input id="brand_banner" class="field" placeholder="横幅地址"></label>
+              <label class="block"><span>关于页链接</span><input id="brand_about" class="field" placeholder="https://…"></label>
+              <label class="block"><span>支持页链接</span><input id="brand_support" class="field" placeholder="https://…"></label>
+              <label class="block"><span>页脚</span><input id="brand_footer" class="field"></label>
+              <label class="block full"><span>欢迎语</span><input id="brand_welcome" class="field" placeholder="欢迎语"></label>
+            </div>
+            <div class="row"><button class="btn" id="btn_settings_save" type="button">保存全局设置</button></div>
+          </div>
+        </section>
+
+      </div>
+    </div>
+  </div>
+
   <div id="toast"></div>
   <script src="/js/noble.min.js"></script>
   <script src="/js/kotv-auth.js"></script>

@@ -51,6 +51,16 @@ func (m *Manager) API() model.Api {
 	return m.api
 }
 
+// ReplaceLives 用分组专属直播列表覆盖仓内 lives（LoadVod 后调用）。
+func (m *Manager) ReplaceLives(lives model.LiveList) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.api.Lives = append(model.LiveList(nil), lives...)
+}
+
 func (m *Manager) Home() model.Site {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

@@ -31,10 +31,22 @@ type User struct {
 	Enabled            bool      `json:"enabled"`
 	MustChangePassword bool      `json:"mustChangePassword,omitempty"`
 	CreatedAt          time.Time `json:"createdAt"`
+	GroupID            string    `json:"groupId"`
+	Status             string    `json:"status"`
+	Note               string    `json:"note,omitempty"`
+	ExpiresAt          int64     `json:"expiresAt,omitempty"`
 }
 
 // Public 返回不含密码哈希的视图。
 func (u User) Public() map[string]any {
+	gid := u.GroupID
+	if gid == "" {
+		gid = database.DefaultGroupID
+	}
+	st := u.Status
+	if st == "" {
+		st = "active"
+	}
 	return map[string]any{
 		"id":                 u.ID,
 		"username":           u.Username,
@@ -42,6 +54,10 @@ func (u User) Public() map[string]any {
 		"enabled":            u.Enabled,
 		"mustChangePassword": u.MustChangePassword,
 		"createdAt":          u.CreatedAt.UTC().Format(time.RFC3339),
+		"groupId":            gid,
+		"status":             st,
+		"note":               u.Note,
+		"expiresAt":          u.ExpiresAt,
 	}
 }
 
@@ -64,6 +80,14 @@ func fromRow(u *database.AuthUser) *User {
 	if u == nil {
 		return nil
 	}
+	gid := u.GroupID
+	if gid == "" {
+		gid = database.DefaultGroupID
+	}
+	st := u.Status
+	if st == "" {
+		st = "active"
+	}
 	return &User{
 		ID:                 u.ID,
 		Username:           u.Username,
@@ -72,10 +96,22 @@ func fromRow(u *database.AuthUser) *User {
 		Enabled:            u.Enabled,
 		MustChangePassword: u.MustChangePassword,
 		CreatedAt:          u.CreatedAt,
+		GroupID:            gid,
+		Status:             st,
+		Note:               u.Note,
+		ExpiresAt:          u.ExpiresAt,
 	}
 }
 
 func toRow(u User) database.AuthUser {
+	gid := u.GroupID
+	if gid == "" {
+		gid = database.DefaultGroupID
+	}
+	st := u.Status
+	if st == "" {
+		st = "active"
+	}
 	return database.AuthUser{
 		ID:                 u.ID,
 		Username:           u.Username,
@@ -84,6 +120,10 @@ func toRow(u User) database.AuthUser {
 		Enabled:            u.Enabled,
 		MustChangePassword: u.MustChangePassword,
 		CreatedAt:          u.CreatedAt,
+		GroupID:            gid,
+		Status:             st,
+		Note:               u.Note,
+		ExpiresAt:          u.ExpiresAt,
 	}
 }
 
@@ -140,21 +180,27 @@ func RemoteAuthEnabled() bool { return settings.Bool(settings.RemoteAuth, false)
 // AllowRegister 是否开放注册。
 func AllowRegister() bool { return settings.Bool(settings.AllowRegister, false) }
 
-// SetRemoteAuth / SetAllowRegister 供管理页写入。
+// RequireApproval 自助注册是否需管理员审批后才能登录。
+func RequireApproval() bool { return settings.Bool(settings.RequireApproval, false) }
+
+// SetRemoteAuth / SetAllowRegister / SetRequireApproval 供管理页写入。
 func SetRemoteAuth(on bool) error {
-	if on {
-		settings.Set(settings.RemoteAuth, "true")
-	} else {
-		settings.Set(settings.RemoteAuth, "false")
-	}
-	return settings.Save()
+	return setBoolSetting(settings.RemoteAuth, on)
 }
 
 func SetAllowRegister(on bool) error {
+	return setBoolSetting(settings.AllowRegister, on)
+}
+
+func SetRequireApproval(on bool) error {
+	return setBoolSetting(settings.RequireApproval, on)
+}
+
+func setBoolSetting(t settings.Type, on bool) error {
 	if on {
-		settings.Set(settings.AllowRegister, "true")
+		settings.Set(t, "true")
 	} else {
-		settings.Set(settings.AllowRegister, "false")
+		settings.Set(t, "false")
 	}
 	return settings.Save()
 }
@@ -180,6 +226,15 @@ func Login(username, password string) (token string, user User, err error) {
 	if u == nil || !u.Enabled {
 		return "", User{}, fmt.Errorf("用户名或密码错误")
 	}
+	if u.Status == "pending" {
+		return "", User{}, fmt.Errorf("账号待审批")
+	}
+	if u.Status == "disabled" {
+		return "", User{}, fmt.Errorf("账号已禁用")
+	}
+	if u.ExpiresAt > 0 && time.Now().UnixMilli() > u.ExpiresAt {
+		return "", User{}, fmt.Errorf("账号已到期")
+	}
 	if bcrypt.CompareHashAndPassword([]byte(u.PassHash), []byte(password)) != nil {
 		return "", User{}, fmt.Errorf("用户名或密码错误")
 	}
@@ -191,8 +246,13 @@ func Login(username, password string) (token string, user User, err error) {
 	return tok, *u, nil
 }
 
-// Register 开放注册。
+// Register 开放注册；inviteCode 非空时消费邀请码并入对应分组。
 func Register(username, password string) (User, error) {
+	return RegisterWithInvite(username, password, "")
+}
+
+// RegisterWithInvite 注册并可绑定邀请码。
+func RegisterWithInvite(username, password, inviteCode string) (User, error) {
 	if !AllowRegister() {
 		return User{}, fmt.Errorf("未开放注册")
 	}
@@ -204,7 +264,36 @@ func Register(username, password string) (User, error) {
 	if len(password) < 6 {
 		return User{}, fmt.Errorf("密码至少 6 位")
 	}
-	return insertUser(username, password, RoleUser)
+	inviteCode = strings.TrimSpace(inviteCode)
+	if settings.Bool(settings.RequireInvite, false) && inviteCode == "" {
+		return User{}, fmt.Errorf("需要邀请码")
+	}
+	u, err := insertUser(username, password, RoleUser)
+	if err != nil {
+		return User{}, err
+	}
+	db, err := requireDB()
+	if err != nil {
+		return u, nil
+	}
+	if inviteCode != "" {
+		gid, cerr := db.ConsumeInvite(inviteCode)
+		if cerr != nil {
+			_ = db.DeleteAuthUser(u.ID)
+			return User{}, cerr
+		}
+		_ = SetUserGroup(u.ID, gid)
+		if nu := GetUser(u.ID); nu != nil {
+			u = *nu
+		}
+	}
+	if RequireApproval() {
+		u.Status = "pending"
+		u.Enabled = false
+		_ = db.UpsertAuthUser(toRow(u))
+		_ = db.DeleteAuthTokensForUser(u.ID)
+	}
+	return u, nil
 }
 
 // Logout 作废 token。
@@ -249,6 +338,15 @@ func LookupToken(token string) (*User, error) {
 	u := fromRow(row)
 	if u == nil || !u.Enabled {
 		return nil, fmt.Errorf("用户不可用")
+	}
+	if u.Status == "pending" {
+		return nil, fmt.Errorf("账号待审批")
+	}
+	if u.Status == "disabled" {
+		return nil, fmt.Errorf("账号已禁用")
+	}
+	if u.ExpiresAt > 0 && time.Now().UnixMilli() > u.ExpiresAt {
+		return nil, fmt.Errorf("账号已到期")
 	}
 	if time.Until(rec.ExpiresAt) < tokenTTL-tokenRenewAfter {
 		rec.ExpiresAt = time.Now().Add(tokenTTL)
@@ -312,6 +410,12 @@ func insertUser(username, password, role string) (User, error) {
 	} else if existing != nil {
 		return User{}, fmt.Errorf("用户名已存在")
 	}
+	defaultGID := database.DefaultGroupID
+	if dg := strings.TrimSpace(settings.Get(settings.Type("defaultGroupId"))); dg != "" {
+		if g, _ := db.GetAuthGroup(dg); g != nil {
+			defaultGID = dg
+		}
+	}
 	u := User{
 		ID:        newID(),
 		Username:  username,
@@ -319,6 +423,8 @@ func insertUser(username, password, role string) (User, error) {
 		Role:      role,
 		Enabled:   true,
 		CreatedAt: time.Now().UTC(),
+		GroupID:   defaultGID,
+		Status:    "active",
 	}
 	if err := db.UpsertAuthUser(toRow(u)); err != nil {
 		return User{}, err
@@ -486,4 +592,77 @@ func BearerFromHeader(h string) string {
 		return ""
 	}
 	return strings.TrimSpace(h[7:])
+}
+
+// SetUserRole 设置用户角色（user|admin）；降级唯一管理员会被拒绝。
+func SetUserRole(userID, role string) error {
+	role = strings.TrimSpace(strings.ToLower(role))
+	if role != RoleAdmin && role != RoleUser {
+		return fmt.Errorf("角色无效")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	db, err := requireDB()
+	if err != nil {
+		return err
+	}
+	row, err := db.GetAuthUser(userID)
+	if err != nil {
+		return err
+	}
+	u := fromRow(row)
+	if u == nil {
+		return fmt.Errorf("用户不存在")
+	}
+	if u.Role == RoleAdmin && role != RoleAdmin {
+		n, err := db.CountAuthAdmins()
+		if err != nil {
+			return err
+		}
+		if n <= 1 {
+			return fmt.Errorf("不能取消唯一管理员")
+		}
+	}
+	u.Role = role
+	return db.UpsertAuthUser(toRow(*u))
+}
+
+// SetUserGroup 指定用户唯一分组。
+func SetUserGroup(userID, groupID string) error {
+	groupID = strings.TrimSpace(groupID)
+	if groupID == "" {
+		groupID = database.DefaultGroupID
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	db, err := requireDB()
+	if err != nil {
+		return err
+	}
+	if g, err := db.GetAuthGroup(groupID); err != nil {
+		return err
+	} else if g == nil {
+		return fmt.Errorf("分组不存在")
+	}
+	row, err := db.GetAuthUser(userID)
+	if err != nil {
+		return err
+	}
+	u := fromRow(row)
+	if u == nil {
+		return fmt.Errorf("用户不存在")
+	}
+	u.GroupID = groupID
+	return db.UpsertAuthUser(toRow(*u))
+}
+
+// ForceLogout 撤销用户全部 token。
+func ForceLogout(userID string) error {
+	mu.Lock()
+	defer mu.Unlock()
+	db, err := requireDB()
+	if err != nil {
+		return err
+	}
+	return db.DeleteAuthTokensForUser(userID)
 }

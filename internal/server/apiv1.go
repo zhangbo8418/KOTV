@@ -9,11 +9,15 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/bobo/KOTV/internal/auth"
+	"github.com/bobo/KOTV/internal/database"
+	"github.com/bobo/KOTV/internal/grouppolicy"
 	"github.com/bobo/KOTV/internal/model"
 	"github.com/bobo/KOTV/internal/playproxy"
 	"github.com/bobo/KOTV/internal/remote"
+	"github.com/bobo/KOTV/internal/usage"
 )
 
 // ContentAPI Flutter /api/v1 后端（由 app.App 实现，避免 server→app 循环依赖）。
@@ -219,13 +223,21 @@ func (s *Server) handleAPIv1Config(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, http.StatusBadRequest, "missing source")
 			return
 		}
+		started := time.Now()
+		repoName := s.configRemarkName(src, int64(database.ConfigTypeSite))
 		if err := api.APILoadConfig(src); err != nil {
+			recordUsage(r, "config_load", "repo", src, repoName, false, "load", started)
 			if rejectNeedAdminErr(w, err) {
 				return
 			}
 			writeAPIError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		// 加载后可能刚写入备注名，再取一次
+		if repoName == "" {
+			repoName = s.configRemarkName(src, int64(database.ConfigTypeSite))
+		}
+		recordUsage(r, "config_load", "repo", src, repoName, true, "", started)
 		writeJSON(w, http.StatusOK, api.APIGetConfig())
 	default:
 		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -284,11 +296,27 @@ func (s *Server) handleAPIv1Home(w http.ResponseWriter, r *http.Request) {
 	if rejectNoContent(w, api) {
 		return
 	}
+	started := time.Now()
 	out, err := api.APIHome()
+	ok := err == nil
+	site := ""
+	if out != nil {
+		if v, _ := out["site"].(string); v != "" {
+			site = v
+		}
+	}
+	recordUsage(r, "site_home", "site", site, "", ok, errCode(err), started)
 	if rejectBadGateway(w, err) {
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+func errCode(err error) string {
+	if err == nil {
+		return ""
+	}
+	return "err"
 }
 
 func (s *Server) handleAPIv1Category(w http.ResponseWriter, r *http.Request) {
@@ -521,6 +549,12 @@ func (s *Server) handleAPIv1Search(w http.ResponseWriter, r *http.Request) {
 	if rejectNoContent(w, api) {
 		return
 	}
+	user := authUserFrom(r.Context())
+	pol := grouppolicy.Resolve(user)
+	if (user == nil || user.Role != auth.RoleAdmin) && !pol.Caps["allowSearch"] {
+		writeAPIError(w, http.StatusForbidden, "当前分组未开放搜索")
+		return
+	}
 	keyword := strings.TrimSpace(r.URL.Query().Get("wd"))
 	var siteKeys []string
 	var exact bool
@@ -557,7 +591,16 @@ func (s *Server) handleAPIv1Search(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "missing keyword")
 		return
 	}
+	started := time.Now()
 	out, err := api.APISearch(keyword, siteKeys, exact, exclude)
+	refName := ""
+	if usage.SearchTermsEnabled() {
+		refName = keyword
+		if len(refName) > 64 {
+			refName = refName[:64]
+		}
+	}
+	recordUsage(r, "search", "q", "", refName, err == nil, errCode(err), started)
 	if rejectBadGateway(w, err) {
 		return
 	}
@@ -620,7 +663,10 @@ func (s *Server) handleAPIv1Play(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "missing episode url")
 		return
 	}
+	started := time.Now()
 	out, err := api.APIPlay(siteKey, vodID, flag, ep, epIdx, qualIdx)
+	refID := siteKey + "/" + vodID
+	recordUsage(r, "play", "vod", refID, "", err == nil, errCode(err), started)
 	if rejectBadGateway(w, err) {
 		return
 	}
@@ -809,6 +855,14 @@ func (s *Server) handleAPIv1Live(w http.ResponseWriter, r *http.Request) {
 	if rejectNoContent(w, api) {
 		return
 	}
+	user := authUserFrom(r.Context())
+	pol := grouppolicy.Resolve(user)
+	if user == nil || user.Role != auth.RoleAdmin {
+		if !pol.Caps["allowLive"] {
+			writeAPIError(w, http.StatusForbidden, "当前分组未开放直播")
+			return
+		}
+	}
 	if r.Method == http.MethodGet {
 		writeJSON(w, http.StatusOK, api.APILiveSources())
 		return
@@ -835,13 +889,30 @@ func (s *Server) handleAPIv1Live(w http.ResponseWriter, r *http.Request) {
 	case "", "sources":
 		writeJSON(w, http.StatusOK, api.APILiveSources())
 	case "load":
+		started := time.Now()
+		liveURL := strings.TrimSpace(body.URL)
+		liveName := s.configRemarkName(liveURL, int64(database.ConfigTypeLive))
 		out, err := api.APILiveLoad(body.Index, body.URL, body.Force)
+		if liveURL == "" && out != nil {
+			liveURL = strings.TrimSpace(fmt.Sprint(out["url"]))
+		}
+		if liveName == "" && liveURL != "" {
+			liveName = s.configRemarkName(liveURL, int64(database.ConfigTypeLive))
+		}
+		if liveName == "" && out != nil {
+			if n := strings.TrimSpace(fmt.Sprint(out["name"])); n != "" && n != liveURL {
+				liveName = n
+			}
+		}
+		recordUsage(r, "live_load", "live", liveURL, liveName, err == nil, errCode(err), started)
 		if rejectBadGateway(w, err) {
 			return
 		}
 		writeJSON(w, http.StatusOK, out)
 	case "play":
+		started := time.Now()
 		out, err := api.APILivePlay(body.Group, body.Channel, body.Line)
+		recordUsage(r, "live_play", "live", fmt.Sprintf("%d/%d", body.Group, body.Channel), "", err == nil, errCode(err), started)
 		if rejectBadGateway(w, err) {
 			return
 		}
@@ -853,7 +924,9 @@ func (s *Server) handleAPIv1Live(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	case "epg":
+		started := time.Now()
 		out, err := api.APILiveEPG(body.Group, body.Channel)
+		recordUsage(r, "live_epg", "live", fmt.Sprintf("%d/%d", body.Group, body.Channel), "", err == nil, errCode(err), started)
 		if rejectBadGateway(w, err) {
 			return
 		}
@@ -882,7 +955,9 @@ func (s *Server) handleAPIv1Live(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	case "catchup":
+		started := time.Now()
 		out, err := api.APILiveCatchup(body.Group, body.Channel, body.Day, body.Prog)
+		recordUsage(r, "live_catchup", "live", fmt.Sprintf("%d/%d", body.Group, body.Channel), "", err == nil, errCode(err), started)
 		if rejectBadGateway(w, err) {
 			return
 		}
@@ -995,7 +1070,16 @@ func (s *Server) handleSessionPing(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	writeJSON(w, http.StatusOK, api.APISessionPing())
+	out := api.APISessionPing()
+	recordUsage(r, "ping", "session", "", "", true, "", time.Time{})
+	if u := authUserFrom(r.Context()); u != nil {
+		usage.TouchDevice(u, r)
+	}
+	// 低频清理：约每 64 次 ping 扫一次
+	if time.Now().Unix()%64 == 0 {
+		go usage.MaybePurge()
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) handleSessionLeave(w http.ResponseWriter, r *http.Request) {

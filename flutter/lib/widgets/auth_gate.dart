@@ -16,7 +16,10 @@ import 'kotv_tv_text_field.dart';
 
 bool kotvMessageNeedsLogin(Object error) {
   final s = '$error';
-  return s.contains('需要登录') || s.contains('登录已失效');
+  return s.contains('需要登录') ||
+      s.contains('登录已失效') ||
+      s.contains('HTTP 401') ||
+      RegExp(r'\b401\b').hasMatch(s);
 }
 
 /// 弹出登录框（远端后端或 Web）。登录成功后重查引擎状态并返回 true。
@@ -58,7 +61,8 @@ Future<bool> kotvPresentLoginIfNeeded(BuildContext context, WidgetRef ref) {
     try {
       await kotvClearAuthToken();
       if (!context.mounted) return false;
-      final ok = await kotvShowSignIn(context, ref);
+      // Web：会话失效必须重新登录，取消则退回登录页（不可继续用）。
+      final ok = await kotvShowSignIn(context, ref, allowCancel: !kIsWeb);
       if (!ok) ref.invalidate(engineStatusProvider);
       return ok;
     } finally {

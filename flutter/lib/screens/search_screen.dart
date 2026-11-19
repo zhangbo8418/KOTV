@@ -14,6 +14,7 @@ import '../search/zhu_to_pin.dart';
 import '../theme/layout_scale.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/kotv_theme.dart';
+import '../policy/group_policy.dart';
 import '../widgets/chrome.dart';
 import '../widgets/kotv_tv_text_field.dart';
 import '../widgets/poster_card.dart';
@@ -342,7 +343,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
           onBack: () => kotvPageBack(ref),
           onSearch: () => _search(_ctrl.text),
           onProfile: () => goKotvPage(ref, KotvPage.profile),
-          onNews: () => showAppNews(context, remoteHint(ref)),
+          onNews: () => showLatestNews(context, ref),
           title: '搜索',
         ),
         Expanded(

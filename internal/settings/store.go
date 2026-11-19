@@ -61,8 +61,10 @@ const (
 	Incognito     Type = "incognito"
 	SyncPairCode  Type = "syncPairCode"
 	DeviceUUID    Type = "deviceUUID"
-	RemoteAuth    Type = "remoteAuth"    // 允许非本机连入并强制登录，默认 false
-	AllowRegister Type = "allowRegister" // 开放注册，默认 false
+	RemoteAuth      Type = "remoteAuth"      // App 用户管理开关：允许非本机客户端连入并强制登录；默认 false。Web 始终需登录
+	AllowRegister   Type = "allowRegister"   // 开放注册，默认 false
+	RequireInvite   Type = "requireInvite"   // 注册需邀请码，默认 false
+	RequireApproval Type = "requireApproval" // 注册需管理员审批，默认 false；开放注册时建议开启
 
 	DownloadDir         Type = "downloadDir"         // 下载目录；空则 paths.Downloads()
 	DownloadNameRule    Type = "downloadNameRule"    // 命名规则 ID

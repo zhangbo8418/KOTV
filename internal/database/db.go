@@ -164,6 +164,9 @@ func (db *DB) migrate() error {
 		return err
 	}
 	_, _ = db.conn.Exec(`ALTER TABLE history ADD COLUMN site_name TEXT`)
+	if err := db.migrateAdminGroups(); err != nil {
+		return err
+	}
 	return nil
 }
 

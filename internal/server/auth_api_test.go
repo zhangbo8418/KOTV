@@ -80,6 +80,12 @@ func TestRemoteAccessAllowed(t *testing.T) {
 	if !remoteAccessAllowed(loop) {
 		t.Fatal("loopback always allowed")
 	}
+	if !isLocalNative(loop) {
+		t.Fatal("native loopback should be local native")
+	}
+	if !isAdmin(loop, nil) {
+		t.Fatal("native loopback is admin without login")
+	}
 	lan := newReq("192.168.1.8:54321", nil)
 	if remoteAccessAllowed(lan) {
 		t.Fatal("LAN without remoteAuth must be denied")
@@ -90,6 +96,25 @@ func TestRemoteAccessAllowed(t *testing.T) {
 	}
 	if !loginRequired(webLan) {
 		t.Fatal("Web must still require login")
+	}
+	// 静态页（无 platform）：本机免登、可管理
+	staticLoop := newReq("127.0.0.1:12345", nil)
+	if !isLocalNative(staticLoop) || !isAdmin(staticLoop, nil) || loginRequired(staticLoop) {
+		t.Fatal("static loopback must be local-native admin without login")
+	}
+	// Flutter Web（platform=web）：即使 127.0.0.1 也要登录，不能免登管理
+	webLoop := newReq("127.0.0.1:12345", http.Header{"X-Kotv-Client-Platform": []string{"web"}})
+	if isLocalNative(webLoop) {
+		t.Fatal("Flutter Web on loopback is not local native")
+	}
+	if !loginRequired(webLoop) {
+		t.Fatal("Flutter Web on loopback must require login")
+	}
+	if isAdmin(webLoop, nil) {
+		t.Fatal("Flutter Web on loopback must not be admin without account")
+	}
+	if !isAdmin(webLoop, &auth.User{Role: auth.RoleAdmin}) {
+		t.Fatal("Flutter Web admin token should pass isAdmin")
 	}
 
 	settings.Set(settings.RemoteAuth, "true")

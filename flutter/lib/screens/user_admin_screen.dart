@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -10,12 +11,13 @@ import '../providers.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/layout_scale.dart';
 import '../theme/kotv_theme.dart';
+import '../policy/group_policy.dart';
 import '../widgets/chrome.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/kotv_tv_text_field.dart';
 import 'shell.dart';
 
-/// 本机引擎用户管理（`/admin`）：鉴权/注册开关、账号 CRUD、改密。
+/// 应用内轻量用户管理：远端鉴权（仅原生）、账号/角色/分组、注册审批；完整策略走 Web 管理控制台。
 class UserAdminScreen extends ConsumerStatefulWidget {
   const UserAdminScreen({super.key});
 
@@ -30,7 +32,9 @@ class _UserAdminScreenState extends ConsumerState<UserAdminScreen> {
   bool _isAdmin = false;
   bool _remoteAuth = false;
   bool _allowRegister = false;
+  bool _requireApproval = false;
   List<Map<String, dynamic>> _users = [];
+  List<Map<String, dynamic>> _groups = [];
   Map<String, dynamic>? _me;
   bool _forceChangeShown = false;
   String _deviceIp = '';
@@ -139,13 +143,31 @@ class _UserAdminScreenState extends ConsumerState<UserAdminScreen> {
           .map((e) => Map<String, dynamic>.from(e))
           .toList();
       list.sort((a, b) => '${a['username']}'.compareTo('${b['username']}'));
+      var groups = <Map<String, dynamic>>[];
+      try {
+        final gdata = await _api.adminListGroups();
+        groups = ((gdata['groups'] as List?) ?? const [])
+            .whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList();
+        groups.sort((a, b) {
+          final sa = (a['sort'] is num) ? (a['sort'] as num).toInt() : 0;
+          final sb = (b['sort'] is num) ? (b['sort'] as num).toInt() : 0;
+          if (sa != sb) return sa.compareTo(sb);
+          return '${a['name']}'.compareTo('${b['name']}');
+        });
+      } catch (_) {
+        groups = [];
+      }
       if (!mounted) return;
       setState(() {
         _me = user;
         _isAdmin = true;
         _remoteAuth = data['remoteAuth'] == true;
         _allowRegister = data['allowRegister'] == true;
+        _requireApproval = data['requireApproval'] == true;
         _users = list;
+        _groups = groups;
         _loading = false;
         _busy = false;
         _status = '';
@@ -227,14 +249,26 @@ class _UserAdminScreenState extends ConsumerState<UserAdminScreen> {
     }
   }
 
-  Future<void> _setFlag({bool? remoteAuth, bool? allowRegister}) async {
+  Future<void> _setFlag({
+    bool? remoteAuth,
+    bool? allowRegister,
+    bool? requireApproval,
+  }) async {
     setState(() => _busy = true);
     try {
-      final data = await _api.adminSetSettings(remoteAuth: remoteAuth, allowRegister: allowRegister);
+      // 开启开放注册时一并打开审批（后端也会默认打开）。
+      final approval = requireApproval ??
+          (allowRegister == true && !_requireApproval ? true : null);
+      final data = await _api.adminSetSettings(
+        remoteAuth: remoteAuth,
+        allowRegister: allowRegister,
+        requireApproval: approval,
+      );
       if (!mounted) return;
       setState(() {
         _remoteAuth = data['remoteAuth'] == true;
         _allowRegister = data['allowRegister'] == true;
+        _requireApproval = data['requireApproval'] == true;
         _busy = false;
         _status = '已保存';
       });
@@ -247,11 +281,41 @@ class _UserAdminScreenState extends ConsumerState<UserAdminScreen> {
     }
   }
 
+  List<Map<String, dynamic>> get _pendingUsers => _users
+      .where((u) => '${u['status'] ?? ''}' == 'pending')
+      .toList(growable: false);
+
+  String _groupLabel(String groupId) {
+    final id = groupId.trim().isEmpty ? 'default' : groupId.trim();
+    for (final g in _groups) {
+      if ('${g['id']}' == id) {
+        final name = '${g['name'] ?? ''}'.trim();
+        return name.isEmpty ? id : name;
+      }
+    }
+    return id;
+  }
+
+  List<DropdownMenuItem<String>> _groupMenuItems() {
+    if (_groups.isEmpty) {
+      return const [DropdownMenuItem(value: 'default', child: Text('默认'))];
+    }
+    return _groups
+        .map(
+          (g) => DropdownMenuItem<String>(
+            value: '${g['id']}',
+            child: Text('${g['name'] ?? g['id']}'),
+          ),
+        )
+        .toList();
+  }
+
   Future<void> _createUser() async {
     final p = KotvPalette.of(context);
     final userCtrl = TextEditingController();
     final passCtrl = TextEditingController();
     var role = 'user';
+    var groupId = _groups.isNotEmpty ? '${_groups.first['id']}' : 'default';
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -298,6 +362,24 @@ class _UserAdminScreenState extends ConsumerState<UserAdminScreen> {
                     ),
                   ],
                 ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Text('分组', style: TextStyle(color: p.muted)),
+                    const Spacer(),
+                    DropdownButton<String>(
+                      value: _groupMenuItems().any((e) => e.value == groupId) ? groupId : _groupMenuItems().first.value,
+                      focusColor: p.focus.withOpacity(0.28),
+                      dropdownColor: p.dialogBg,
+                      style: TextStyle(color: p.fg),
+                      items: _groupMenuItems(),
+                      onChanged: (v) {
+                        if (v == null) return;
+                        setLocal(() => groupId = v);
+                      },
+                    ),
+                  ],
+                ),
               ],
             ),
           ),
@@ -314,12 +396,121 @@ class _UserAdminScreenState extends ConsumerState<UserAdminScreen> {
         username: userCtrl.text.trim(),
         password: passCtrl.text,
         role: role,
+        groupId: groupId,
       );
       setState(() => _status = '已创建 ${userCtrl.text.trim()}');
       await _refresh();
     } catch (e) {
       if (!mounted) return;
       setState(() => _status = '创建失败: $e');
+    }
+  }
+
+  Future<void> _setUserRole(Map<String, dynamic> u) async {
+    final id = '${u['id'] ?? ''}';
+    final name = '${u['username'] ?? ''}';
+    if (id.isEmpty) return;
+    final p = KotvPalette.of(context);
+    var role = '${u['role'] ?? 'user'}' == 'admin' ? 'admin' : 'user';
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          backgroundColor: p.dialogBg,
+          title: Text('角色 · $name', style: TextStyle(color: p.fg)),
+          content: DropdownButton<String>(
+            value: role,
+            isExpanded: true,
+            focusColor: p.focus.withOpacity(0.28),
+            dropdownColor: p.dialogBg,
+            style: TextStyle(color: p.fg),
+            items: const [
+              DropdownMenuItem(value: 'user', child: Text('普通用户')),
+              DropdownMenuItem(value: 'admin', child: Text('管理员')),
+            ],
+            onChanged: (v) {
+              if (v == null) return;
+              setLocal(() => role = v);
+            },
+          ),
+          actions: [
+            KotvFocusAction(label: '取消', color: p.muted, onPressed: () => Navigator.pop(ctx, false)),
+            KotvFocusAction(label: '保存', filled: true, onPressed: () => Navigator.pop(ctx, true)),
+          ],
+        ),
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await _api.adminSetUserRole(id, role);
+      setState(() => _status = '已更新 $name 角色');
+      await _refresh();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _status = '角色失败: $e');
+    }
+  }
+
+  Future<void> _approveUser(Map<String, dynamic> u) async {
+    final id = '${u['id'] ?? ''}';
+    final name = '${u['username'] ?? ''}';
+    if (id.isEmpty) return;
+    try {
+      await _api.adminApproveUser(id);
+      setState(() => _status = '已审批 $name');
+      await _refresh();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _status = '审批失败: $e');
+    }
+  }
+
+  Future<void> _setUserGroup(Map<String, dynamic> u) async {
+    final id = '${u['id'] ?? ''}';
+    final name = '${u['username'] ?? ''}';
+    if (id.isEmpty) return;
+    if (_groups.isEmpty) {
+      setState(() => _status = '暂无分组，请先在管理控制台创建分组');
+      return;
+    }
+    final p = KotvPalette.of(context);
+    var groupId = '${u['groupId'] ?? 'default'}';
+    if (!_groupMenuItems().any((e) => e.value == groupId)) {
+      groupId = _groupMenuItems().first.value!;
+    }
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          backgroundColor: p.dialogBg,
+          title: Text('分组 · $name', style: TextStyle(color: p.fg)),
+          content: DropdownButton<String>(
+            value: groupId,
+            isExpanded: true,
+            focusColor: p.focus.withOpacity(0.28),
+            dropdownColor: p.dialogBg,
+            style: TextStyle(color: p.fg),
+            items: _groupMenuItems(),
+            onChanged: (v) {
+              if (v == null) return;
+              setLocal(() => groupId = v);
+            },
+          ),
+          actions: [
+            KotvFocusAction(label: '取消', color: p.muted, onPressed: () => Navigator.pop(ctx, false)),
+            KotvFocusAction(label: '保存', filled: true, onPressed: () => Navigator.pop(ctx, true)),
+          ],
+        ),
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await _api.adminSetUserGroup(id, groupId);
+      setState(() => _status = '已更新 $name 分组');
+      await _refresh();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _status = '分组失败: $e');
     }
   }
 
@@ -504,12 +695,7 @@ class _UserAdminScreenState extends ConsumerState<UserAdminScreen> {
             onBack: () => Navigator.of(context).maybePop(),
             onSearch: () => goKotvPage(ref, KotvPage.search),
             onProfile: () => goKotvPage(ref, KotvPage.profile),
-            onNews: () => showAppNews(
-              context,
-              _deviceIp.isNotEmpty
-                  ? '用户管理：本机免登录。远端鉴权开启后非本机需登录。\n本机访问：http://$_deviceIp:$_devicePort/'
-                  : '用户管理：本机免登录。开启「远端鉴权」后，非本机才可连接并登录；管理员可管账号，看片按账号隔离。',
-            ),
+            onNews: () => showLatestNews(context, ref),
             title: '用户管理',
           ),
           if (_deviceIp.isNotEmpty || _deviceIpv4.isNotEmpty || _deviceIpv6.isNotEmpty || _devicePublicIp.isNotEmpty)
@@ -574,37 +760,115 @@ class _UserAdminScreenState extends ConsumerState<UserAdminScreen> {
                     : ListView(
                         padding: EdgeInsets.fromLTRB(compact ? 16 : 24, 12, compact ? 16 : 24, 24),
                         children: [
-                          const KotvSettingsSectionTitle('远端鉴权'),
+                          const KotvSettingsSectionTitle('访问与注册'),
                           KotvSettingsCard(children: [
-                            TvFocus(
-                              onPressed: _busy ? null : () => unawaited(_setFlag(remoteAuth: !_remoteAuth)),
-                              borderRadius: 8,
-                              scrollIntoView: true,
-                              child: ExcludeFocus(
-                                child: SwitchListTile(
-                                  title: Text('开启远端鉴权', style: TextStyle(color: p.fg)),
-                                  subtitle: Text('关闭时仅本机可用；开启后非本机才能连接并登录，按账号隔离', style: TextStyle(color: p.muted, fontSize: 12)),
-                                  value: _remoteAuth,
-                                  onChanged: _busy ? null : (v) => unawaited(_setFlag(remoteAuth: v)),
+                            // Flutter Web 本身始终鉴权，不提供「远端鉴权」主机开关；该开关只影响局域网 App。
+                            if (!kIsWeb)
+                              TvFocus(
+                                onPressed: _busy ? null : () => unawaited(_setFlag(remoteAuth: !_remoteAuth)),
+                                borderRadius: 8,
+                                scrollIntoView: true,
+                                child: ExcludeFocus(
+                                  child: SwitchListTile(
+                                    title: Text('开启远端鉴权', style: TextStyle(color: p.fg)),
+                                    subtitle: Text(
+                                      '默认关闭：仅本机 App 免登录。开启后局域网其它 App 须登录。本机浏览器打开的遥控/管理台始终免登录；Flutter Web 始终须登录。',
+                                      style: TextStyle(color: p.muted, fontSize: 12),
+                                    ),
+                                    value: _remoteAuth,
+                                    onChanged: _busy ? null : (v) => unawaited(_setFlag(remoteAuth: v)),
+                                  ),
                                 ),
                               ),
-                            ),
+                            if (kIsWeb)
+                              ListTile(
+                                title: Text('Web 客户端鉴权', style: TextStyle(color: p.fg)),
+                                subtitle: Text(
+                                  'Flutter Web 始终需要登录，无法关闭。',
+                                  style: TextStyle(color: p.muted, fontSize: 12),
+                                ),
+                              ),
                             TvFocus(
                               onPressed: _busy ? null : () => unawaited(_setFlag(allowRegister: !_allowRegister)),
                               borderRadius: 8,
                               scrollIntoView: true,
                               child: ExcludeFocus(
                                 child: SwitchListTile(
-                                  title: Text('开放远端注册', style: TextStyle(color: p.fg)),
-                                  subtitle: Text('允许访客自行注册普通账号', style: TextStyle(color: p.muted, fontSize: 12)),
+                                  title: Text('开放注册', style: TextStyle(color: p.fg)),
+                                  subtitle: Text('允许访客自行注册普通账号；开启时默认需要审批', style: TextStyle(color: p.muted, fontSize: 12)),
                                   value: _allowRegister,
                                   onChanged: _busy ? null : (v) => unawaited(_setFlag(allowRegister: v)),
                                 ),
                               ),
                             ),
+                            if (_allowRegister || _requireApproval)
+                              TvFocus(
+                                onPressed: _busy
+                                    ? null
+                                    : () => unawaited(_setFlag(requireApproval: !_requireApproval)),
+                                borderRadius: 8,
+                                scrollIntoView: true,
+                                child: ExcludeFocus(
+                                  child: SwitchListTile(
+                                    title: Text('注册需审批', style: TextStyle(color: p.fg)),
+                                    subtitle: Text('新注册账号须管理员通过后才能登录', style: TextStyle(color: p.muted, fontSize: 12)),
+                                    value: _requireApproval,
+                                    onChanged: _busy
+                                        ? null
+                                        : (v) => unawaited(_setFlag(requireApproval: v)),
+                                  ),
+                                ),
+                              ),
                           ]),
+                          if (_allowRegister || _requireApproval || _pendingUsers.isNotEmpty) ...[
+                            const SizedBox(height: 8),
+                            const KotvSettingsSectionTitle('注册审批'),
+                            if (_pendingUsers.isEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 8),
+                                child: Text('暂无待审批账号', style: TextStyle(color: p.muted, fontSize: 13)),
+                              )
+                            else
+                              ..._pendingUsers.map((u) {
+                                final name = '${u['username'] ?? ''}';
+                                final groupLabel = _groupLabel('${u['groupId'] ?? ''}');
+                                return Padding(
+                                  padding: const EdgeInsets.only(bottom: 8),
+                                  child: Material(
+                                    color: p.pillBg,
+                                    borderRadius: BorderRadius.circular(12),
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                      child: Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              '$name · 分组 $groupLabel · 待审批',
+                                              style: TextStyle(color: p.fg, fontSize: 14),
+                                            ),
+                                          ),
+                                          KotvFocusAction(
+                                            label: '通过',
+                                            filled: true,
+                                            fontSize: 12,
+                                            onPressed: () => unawaited(_approveUser(u)),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              }),
+                          ],
                           const SizedBox(height: 8),
                           const KotvSettingsSectionTitle('账号'),
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: Text(
+                              '分组策略、品牌、公告等：可返回设置长按「用户管理」在浏览器打开管理台。',
+                              style: TextStyle(color: p.muted, fontSize: 12),
+                            ),
+                          ),
                           KotvSettingsCard(children: [
                             KotvSettingsGrid(columns: compact ? 2 : 3, children: [
                               KotvSettingsCell(label: '创建账号', onTap: () => unawaited(_createUser())),
@@ -618,7 +882,12 @@ class _UserAdminScreenState extends ConsumerState<UserAdminScreen> {
                             final role = '${u['role'] ?? ''}';
                             final enabled = u['enabled'] == true;
                             final must = u['mustChangePassword'] == true;
+                            final pending = '${u['status'] ?? ''}' == 'pending';
                             final roleLabel = role == 'admin' ? '管理员' : '用户';
+                            final groupLabel = _groupLabel('${u['groupId'] ?? ''}');
+                            final statusLabel = pending
+                                ? '待审批'
+                                : (enabled ? '启用' : '停用');
                             return Padding(
                               padding: const EdgeInsets.only(bottom: 8),
                               child: Material(
@@ -635,11 +904,30 @@ class _UserAdminScreenState extends ConsumerState<UserAdminScreen> {
                                             Text(name, style: TextStyle(color: p.fg, fontWeight: FontWeight.w600, fontSize: 15)),
                                             const SizedBox(height: 2),
                                             Text(
-                                              '$roleLabel · ${enabled ? '启用' : '停用'}${must ? ' · 需改密' : ''}',
+                                              '$roleLabel · 分组 $groupLabel · $statusLabel${must ? ' · 需改密' : ''}',
                                               style: TextStyle(color: p.muted, fontSize: 12),
                                             ),
                                           ],
                                         ),
+                                      ),
+                                      if (pending)
+                                        KotvFocusAction(
+                                          label: '审批',
+                                          color: p.fg,
+                                          fontSize: 12,
+                                          onPressed: () => unawaited(_approveUser(u)),
+                                        ),
+                                      KotvFocusAction(
+                                        label: '角色',
+                                        color: p.fg,
+                                        fontSize: 12,
+                                        onPressed: () => unawaited(_setUserRole(u)),
+                                      ),
+                                      KotvFocusAction(
+                                        label: '分组',
+                                        color: p.fg,
+                                        fontSize: 12,
+                                        onPressed: () => unawaited(_setUserGroup(u)),
                                       ),
                                       KotvFocusAction(
                                         label: enabled ? '停用' : '启用',

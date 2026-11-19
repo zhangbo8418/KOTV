@@ -57,6 +57,7 @@ import '../widgets/auth_gate.dart';
 import '../widgets/buffering_overlay.dart';
 import '../widgets/cast_flow.dart';
 import '../widgets/danmaku_search_dialog.dart';
+import '../policy/group_policy.dart';
 import '../widgets/chrome.dart';
 import '../widgets/focus_arm.dart';
 import '../widgets/kotv_tv_text_field.dart';
@@ -3900,7 +3901,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             onBack: () => unawaited(_leavePage()),
             onSearch: () => unawaited(_leavePage(afterPop: () => goKotvPage(ref, KotvPage.search))),
             onProfile: () => unawaited(_leavePage(afterPop: () => goKotvPage(ref, KotvPage.profile))),
-            onNews: () => showAppNews(context, remoteHint(ref)),
+            onNews: () => showLatestNews(context, ref),
             title: _routeTitle.isNotEmpty ? _routeTitle : '详情',
           );
       // 详情压在壳层 Navigator 上（Cupertino/Material 路由默认不透明），
@@ -4022,7 +4023,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
                   onBack: () => unawaited(_leavePage()),
                   onSearch: () => unawaited(_leavePage(afterPop: () => goKotvPage(ref, KotvPage.search))),
                   onProfile: () => unawaited(_leavePage(afterPop: () => goKotvPage(ref, KotvPage.profile))),
-                  onNews: () => showAppNews(context, remoteHint(ref)),
+                  onNews: () => showLatestNews(context, ref),
                   title: _routeTitle.isNotEmpty ? _routeTitle : '详情',
                 ),
                 Expanded(

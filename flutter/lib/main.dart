@@ -29,6 +29,7 @@ import 'util/kotv_image_cache.dart';
 import 'widgets/auth_gate.dart';
 import 'widgets/chrome.dart';
 import 'widgets/h_scroll.dart';
+import 'widgets/web_sign_in_page.dart';
 
 /// Release 构建里 build 抛异常会渲染成一块灰色空白（默认 ErrorWidget），
 /// 页面看着像"没了"却无从追查；换成可读文案并把错误打到日志。
@@ -402,7 +403,13 @@ class _KotvAppState extends ConsumerState<KotvApp> with WindowListener, WidgetsB
       home: status.when(
         data: (st) => switch (st.state) {
           KotvEngineState.ready => const AppShell(),
-          KotvEngineState.signIn => _SignInPage(key: ObjectKey(st), status: st),
+          KotvEngineState.signIn => kIsWeb
+              ? KotvWebSignInPage(
+                  key: ObjectKey(st),
+                  allowRegister: st.allowRegister,
+                  engineLabel: st.engine,
+                )
+              : _SignInPage(key: ObjectKey(st), status: st),
           KotvEngineState.offline => _EngineOfflinePage(error: st.error),
         },
         loading: () => const _EngineWaitPage(),
