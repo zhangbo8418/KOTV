@@ -14,6 +14,7 @@ Widget kotvMpvLetterboxFill({Key? key}) => ColoredBox(
 
 /// 播放洞：下发几何 `updateFrame`；未就绪黑遮。
 /// macOS 显隐只由原生 open/stop 驱动；Win 仍经通道 `setVisible`。
+/// 就绪后须 [BlendMode.clear] 清掉同帧已画像素，单靠 transparent 透不出 ASBDL。
 class KotvMpvUnderlayHole extends StatefulWidget {
   const KotvMpvUnderlayHole({
     super.key,
@@ -105,10 +106,29 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
         return false;
       },
       child: SizeChangedLayoutNotifier(
-        child: ColoredBox(
-          color: cover ? Colors.black : Colors.transparent,
-        ),
+        child: cover
+            ? const ColoredBox(color: Colors.black)
+            : const CustomPaint(
+                painter: _KotvUnderlayClearPainter(),
+                child: SizedBox.expand(),
+              ),
       ),
     );
   }
+}
+
+/// 把本矩形清成透明，露出 contentView.layer 下的视频层。
+class _KotvUnderlayClearPainter extends CustomPainter {
+  const _KotvUnderlayClearPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.drawRect(
+      Offset.zero & size,
+      Paint()..blendMode = BlendMode.clear,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

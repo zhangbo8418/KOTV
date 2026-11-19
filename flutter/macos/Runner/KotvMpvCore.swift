@@ -485,7 +485,13 @@ final class KotvMpvCore {
         mpv_get_property(handle, "video-params/sig-peak", MPV_FORMAT_DOUBLE, &peak)
       }
       updateEDRMode(sigPeak: peak)
-      DispatchQueue.main.async { [weak self] in self?.setVisible(true) }
+      DispatchQueue.main.async { [weak self] in
+        guard let self else { return }
+        if let contentView = self.window?.contentView, let layer = contentView.layer {
+          self.ensureFlutterSurfacesAllowUnderlay(on: layer)
+        }
+        self.setVisible(true)
+      }
     case MPV_EVENT_END_FILE:
       if let data = event.data?.assumingMemoryBound(to: mpv_event_end_file.self).pointee {
         if data.reason == MPV_END_FILE_REASON_EOF {
@@ -642,6 +648,18 @@ final class KotvMpvCore {
       }
       containerLayer.frame = frame
       updateContentsScale()
+      // Flutter 表面默认可按不透明合成；关掉才能透出下层 ASBDL。
+      ensureFlutterSurfacesAllowUnderlay(on: superlayer)
+    }
+  }
+
+  private func ensureFlutterSurfacesAllowUnderlay(on superlayer: CALayer) {
+    guard let containerLayer else { return }
+    for layer in superlayer.sublayers ?? [] {
+      if layer === containerLayer { continue }
+      if layer.isOpaque {
+        layer.isOpaque = false
+      }
     }
   }
 
