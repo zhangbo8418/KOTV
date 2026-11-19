@@ -1039,7 +1039,8 @@ class NativeMpvPlayback extends KotvPlayback {
   }
 
   @override
-  bool get supportsDiscNav => true;
+  /// 桌面原生桥尚未接碟片导航（Android 原生另有实现）。
+  bool get supportsDiscNav => kotvIsAndroid();
 
   @override
   Future<List<KotvTrack>> discTitles() async {

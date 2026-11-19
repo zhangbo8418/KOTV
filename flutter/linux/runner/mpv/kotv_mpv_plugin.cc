@@ -3,6 +3,7 @@
 #include <mpv/client.h>
 
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <string>
@@ -26,6 +27,7 @@ struct KotvMpvState {
   std::string hwdec;
   GtkWidget* view_widget = nullptr;
   int64_t wid = 0;
+  std::chrono::steady_clock::time_point last_pos{};
 };
 
 KotvMpvState* g_state = nullptr;
@@ -148,7 +150,12 @@ bool ensure_mpv() {
       mpv_event* ev = mpv_wait_event(g_state->mpv, 0.05);
       if (!ev) continue;
       if (ev->event_id == MPV_EVENT_NONE) {
-        emit_position();
+        const auto now = std::chrono::steady_clock::now();
+        if (g_state->last_pos.time_since_epoch().count() == 0 ||
+            now - g_state->last_pos >= std::chrono::milliseconds(300)) {
+          g_state->last_pos = now;
+          emit_position();
+        }
         continue;
       }
       if (ev->event_id == MPV_EVENT_SHUTDOWN) break;
@@ -330,12 +337,12 @@ void method_call(FlMethodChannel*, FlMethodCall* call, gpointer) {
   fl_method_call_respond_not_implemented(call, nullptr);
 }
 
-FlMethodErrorResponse* listen_events(FlEventChannel*, FlValue*, gpointer*) {
+FlMethodErrorResponse* listen_events(FlEventChannel*, FlValue*, gpointer) {
   if (g_state) g_state->listening = true;
   return nullptr;
 }
 
-FlMethodErrorResponse* cancel_events(FlEventChannel*, FlValue*, gpointer*) {
+FlMethodErrorResponse* cancel_events(FlEventChannel*, FlValue*, gpointer) {
   if (g_state) g_state->listening = false;
   return nullptr;
 }

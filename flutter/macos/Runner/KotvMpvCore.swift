@@ -2,35 +2,37 @@ import AVFoundation
 import Cocoa
 import QuartzCore
 
-/// macOS 原生 libmpv：`vo=avfoundation`，画面挂在窗口 contentView 底层 underlay。
-/// 进度事件字段与 Android 一致：`positionMs` / `durationMs` / `playing`。
+/// macOS 原生 libmpv：`vo=avfoundation` underlay。
+///
+/// 所有 `mpv_*` 仅在 [mpvQueue] 上调用。`vo_avfoundation` 会在 VO 线程
+/// `dispatch_sync` 主队列；若主线程再同步调 mpv，会死锁卡死 UI。
 final class KotvMpvCore {
   private weak var window: NSWindow?
   private var containerLayer: KotvMpvContainerLayer?
   private var videoLayer: AVSampleBufferDisplayLayer?
+  /// libmpv client API 串行队列（含事件排空）。
+  private let mpvQueue = DispatchQueue(label: "com.bobo.kotv.mpv")
   private var mpv: OpaquePointer?
-  private var eventQueue = DispatchQueue(label: "com.bobo.kotv.mpv.events")
   private var wakeup: (() -> Void)?
-  private var positionTimer: Timer?
+  private var positionTimer: DispatchSourceTimer?
   private var lastSigPeak = 0.0
   private var isVisible = false
   private var layerHiddenForOcclusion = false
+  private var destroyed = false
 
   var onEvent: (([String: Any]) -> Void)?
-  var isReady: Bool { mpv != nil }
+  var isReady: Bool { mpv != nil && !destroyed }
 
-  /// 在主窗口 contentView 底层插入视频容器。
-  @discardableResult
-  func initialize(in window: NSWindow) -> Bool {
-    if mpv != nil {
+  /// 在主线程准备 layer；mpv 初始化在 [mpvQueue]（勿在主线程调）。
+  func prepareLayers(in window: NSWindow) -> Bool {
+    assert(Thread.isMainThread)
+    if containerLayer != nil {
       self.window = window
-      if let contentView = window.contentView, let contentLayer = contentView.layer, let container = containerLayer {
+      if let contentView = window.contentView, let contentLayer = contentView.layer {
         attachContainer(to: contentLayer, frame: contentView.bounds)
-        _ = container
       }
       return true
     }
-
     guard let contentView = window.contentView else { return false }
     self.window = window
 
@@ -51,7 +53,6 @@ final class KotvMpvCore {
 
     containerLayer = container
     videoLayer = layer
-
     contentView.wantsLayer = true
     guard let contentLayer = contentView.layer else {
       containerLayer = nil
@@ -59,13 +60,7 @@ final class KotvMpvCore {
       return false
     }
     attachContainer(to: contentLayer, frame: contentView.bounds)
-
-    guard setupMpv(layer: layer) else {
-      container.removeFromSuperlayer()
-      containerLayer = nil
-      videoLayer = nil
-      return false
-    }
+    setContainerHidden(true)
 
     NotificationCenter.default.addObserver(
       self, selector: #selector(windowOcclusionDidChange),
@@ -75,21 +70,32 @@ final class KotvMpvCore {
       self, selector: #selector(windowDidChangeBacking),
       name: NSWindow.didChangeBackingPropertiesNotification, object: window
     )
-
-    setContainerHidden(true)
-    startPositionTimer()
     return true
   }
 
-  @discardableResult
-  func ensureInitialized() -> Bool {
-    if let window = window ?? NSApp.mainWindow ?? NSApp.windows.first {
-      return initialize(in: window)
+  /// 在 [mpvQueue] 上创建并初始化 mpv；成功后启动节流进度定时器。
+  func startMpv(completion: @escaping (Bool) -> Void) {
+    mpvQueue.async { [weak self] in
+      guard let self, !self.destroyed else {
+        completion(false)
+        return
+      }
+      if self.mpv != nil {
+        completion(true)
+        return
+      }
+      guard let layer = self.videoLayer else {
+        completion(false)
+        return
+      }
+      let ok = self.setupMpv(layer: layer)
+      if ok { self.startPositionTimer() }
+      completion(ok)
     }
-    return mpv != nil
   }
 
   func setVisible(_ visible: Bool) {
+    assert(Thread.isMainThread)
     guard containerLayer != nil else { return }
     isVisible = visible
     if visible, let contentView = window?.contentView, let contentLayer = contentView.layer {
@@ -100,10 +106,10 @@ final class KotvMpvCore {
   }
 
   func updateFrame(_ rect: CGRect?) {
+    assert(Thread.isMainThread)
     guard let containerLayer else { return }
     let target: CGRect
     if let rect, rect.width > 1, rect.height > 1 {
-      // Dart 逻辑坐标：原点左上；AppKit layer 原点左下。
       if let bounds = window?.contentView?.bounds {
         target = CGRect(
           x: rect.origin.x,
@@ -128,6 +134,152 @@ final class KotvMpvCore {
     CATransaction.commit()
   }
 
+  /// 投递到 mpv 队列（MethodChannel 路径用，勿在主线程同步等）。
+  func asyncMpv(_ body: @escaping () -> Void) {
+    mpvQueue.async { [weak self] in
+      guard let self, !self.destroyed else { return }
+      body()
+    }
+  }
+
+  func setProperty(_ name: String, _ value: String) {
+    guard let handle = mpv else { return }
+    if name == "vo" || name == "wid" || name == "gpu-api" || name == "gpu-context"
+      || name.hasPrefix("avfoundation-")
+    {
+      return
+    }
+    mpv_set_property_string(handle, name, value)
+  }
+
+  func command(_ args: [String]) {
+    guard let handle = mpv, !args.isEmpty else { return }
+    var cArgs: [UnsafePointer<CChar>?] = args.map { strdup($0) }.map { UnsafePointer($0) }
+    cArgs.append(nil)
+    defer {
+      for p in cArgs {
+        if let p { free(UnsafeMutablePointer(mutating: p)) }
+      }
+    }
+    cArgs.withUnsafeMutableBufferPointer { buf in
+      _ = mpv_command(handle, buf.baseAddress)
+    }
+  }
+
+  func open(url: String, startAtMs: Int64 = 0) {
+    DispatchQueue.main.async { [weak self] in self?.setVisible(false) }
+    command(["stop"])
+    if startAtMs > 0 {
+      let sec = String(format: "%.3f", Double(startAtMs) / 1000.0)
+      command(["loadfile", url, "replace", "start=\(sec)"])
+    } else {
+      command(["loadfile", url, "replace"])
+    }
+    command(["set", "pause", "no"])
+  }
+
+  func play() { command(["set", "pause", "no"]) }
+  func pause() { command(["set", "pause", "yes"]) }
+  func stop() {
+    command(["stop"])
+    DispatchQueue.main.async { [weak self] in self?.setVisible(false) }
+  }
+
+  func seek(positionMs: Int64) {
+    let sec = String(format: "%.3f", Double(positionMs) / 1000.0)
+    command(["seek", sec, "absolute"])
+  }
+
+  func setVolume(_ volume: Double) {
+    setProperty("volume", String(max(0, min(100, volume))))
+  }
+
+  func setRate(_ rate: Double) {
+    setProperty("speed", String(max(0.25, min(4.0, rate))))
+  }
+
+  func setAspect(_ mode: String) {
+    let gravity: AVLayerVideoGravity
+    switch mode {
+    case "fill", "cover":
+      gravity = .resizeAspectFill
+      setProperty("keepaspect", "no")
+    case "stretch":
+      gravity = .resize
+      setProperty("keepaspect", "no")
+    default:
+      gravity = .resizeAspect
+      setProperty("keepaspect", "yes")
+      setProperty("panscan", "0")
+      setProperty("video-aspect-override", "no")
+    }
+    DispatchQueue.main.async { [weak self] in
+      self?.videoLayer?.videoGravity = gravity
+    }
+  }
+
+  func videoInfo() -> [String: Any] {
+    guard let handle = mpv else { return [:] }
+    var hwdec = ""
+    var hwcur = ""
+    var vo = ""
+    var w: Int64 = 0, h: Int64 = 0
+    if let raw = mpv_get_property_string(handle, "hwdec") {
+      hwdec = String(cString: raw); mpv_free(raw)
+    }
+    if let raw = mpv_get_property_string(handle, "hwdec-current") {
+      hwcur = String(cString: raw); mpv_free(raw)
+    }
+    if let raw = mpv_get_property_string(handle, "current-vo") {
+      vo = String(cString: raw); mpv_free(raw)
+    }
+    mpv_get_property(handle, "dwidth", MPV_FORMAT_INT64, &w)
+    mpv_get_property(handle, "dheight", MPV_FORMAT_INT64, &h)
+    return [
+      "hwdec": hwdec,
+      "hwdec-current": hwcur.isEmpty ? hwdec : hwcur,
+      "current-vo": vo,
+      "width": Int(w),
+      "height": Int(h),
+    ]
+  }
+
+  func destroy(completion: (() -> Void)? = nil) {
+    destroyed = true
+    positionTimer?.cancel()
+    positionTimer = nil
+    let tearDownUI = { [weak self] in
+      guard let self else {
+        completion?()
+        return
+      }
+      NotificationCenter.default.removeObserver(self)
+      self.videoLayer?.removeFromSuperlayer()
+      self.containerLayer?.removeFromSuperlayer()
+      self.videoLayer = nil
+      self.containerLayer = nil
+      self.window = nil
+      completion?()
+    }
+    mpvQueue.async { [weak self] in
+      guard let self else {
+        DispatchQueue.main.async(execute: tearDownUI)
+        return
+      }
+      if let handle = self.mpv {
+        mpv_set_wakeup_callback(handle, nil, nil)
+        mpv_wakeup(handle)
+        mpv_terminate_destroy(handle)
+        self.mpv = nil
+      }
+      self.wakeup?()
+      self.wakeup = nil
+      DispatchQueue.main.async(execute: tearDownUI)
+    }
+  }
+
+  // MARK: - private
+
   private func setupMpv(layer: AVSampleBufferDisplayLayer) -> Bool {
     guard let handle = mpv_create() else { return false }
     mpv = handle
@@ -137,7 +289,6 @@ final class KotvMpvCore {
     mpv_set_option_string(handle, "vo", "avfoundation")
     mpv_set_option_string(handle, "avfoundation-presentation", "host")
     mpv_set_option_string(handle, "avfoundation-composite-osd", "no")
-    // 会话层再按 decodeMode 覆盖；默认交给 auto。
     mpv_set_option_string(handle, "hwdec", "auto")
     mpv_set_option_string(handle, "hwdec-codecs", "all")
     mpv_set_option_string(handle, "hwdec-software-fallback", "yes")
@@ -148,7 +299,6 @@ final class KotvMpvCore {
     mpv_set_option_string(handle, "input-default-bindings", "no")
     mpv_set_option_string(handle, "input-vo-keyboard", "no")
     mpv_set_option_string(handle, "terminal", "no")
-    mpv_set_option_string(handle, "msg-level", "status=v")
 
     if mpv_initialize(handle) < 0 {
       mpv_terminate_destroy(handle)
@@ -166,8 +316,7 @@ final class KotvMpvCore {
       return false
     }
 
-    mpv_observe_property(handle, 0, "time-pos", MPV_FORMAT_DOUBLE)
-    mpv_observe_property(handle, 0, "duration", MPV_FORMAT_DOUBLE)
+    // 进度靠节流定时器；不 observe time-pos，避免与 VO/主线程交织刷事件。
     mpv_observe_property(handle, 0, "pause", MPV_FORMAT_FLAG)
     mpv_observe_property(handle, 0, "paused-for-cache", MPV_FORMAT_FLAG)
     mpv_observe_property(handle, 0, "eof-reached", MPV_FORMAT_FLAG)
@@ -182,26 +331,23 @@ final class KotvMpvCore {
     mpv_set_wakeup_callback(handle, { ctx in
       guard let ctx else { return }
       let core = Unmanaged<KotvMpvCore>.fromOpaque(ctx).takeUnretainedValue()
-      core.eventQueue.async { core.drainEvents() }
+      core.mpvQueue.async { core.drainEvents() }
     }, box.toOpaque())
     wakeup = { box.release() }
     return true
   }
 
   private func startPositionTimer() {
-    DispatchQueue.main.async { [weak self] in
-      guard let self else { return }
-      self.positionTimer?.invalidate()
-      let timer = Timer(timeInterval: 0.3, repeats: true) { [weak self] _ in
-        self?.emitPosition()
-      }
-      RunLoop.main.add(timer, forMode: .common)
-      self.positionTimer = timer
-    }
+    positionTimer?.cancel()
+    let timer = DispatchSource.makeTimerSource(queue: mpvQueue)
+    timer.schedule(deadline: .now() + .milliseconds(300), repeating: .milliseconds(300))
+    timer.setEventHandler { [weak self] in self?.emitPosition() }
+    timer.resume()
+    positionTimer = timer
   }
 
   private func drainEvents() {
-    guard let handle = mpv else { return }
+    guard let handle = mpv, !destroyed else { return }
     while true {
       let ev = mpv_wait_event(handle, 0)
       guard let ev else { break }
@@ -216,7 +362,7 @@ final class KotvMpvCore {
       guard let prop = event.data?.assumingMemoryBound(to: mpv_event_property.self).pointee,
             let namePtr = prop.name else { return }
       switch String(cString: namePtr) {
-      case "time-pos", "duration", "pause", "paused-for-cache", "eof-reached":
+      case "pause", "paused-for-cache", "eof-reached":
         emitPosition()
       case "dwidth", "dheight", "video-params/w", "video-params/h":
         emitSize(ready: true)
@@ -235,9 +381,7 @@ final class KotvMpvCore {
       emitSize(ready: true)
       emitPosition()
       emitVideoInfo()
-      DispatchQueue.main.async { [weak self] in
-        self?.setVisible(true)
-      }
+      DispatchQueue.main.async { [weak self] in self?.setVisible(true) }
     case MPV_EVENT_END_FILE:
       if let data = event.data?.assumingMemoryBound(to: mpv_event_end_file.self).pointee {
         if data.reason == MPV_END_FILE_REASON_EOF {
@@ -258,7 +402,7 @@ final class KotvMpvCore {
   }
 
   private func emitPosition() {
-    guard let handle = mpv else { return }
+    guard let handle = mpv, !destroyed else { return }
     var pos = 0.0, dur = 0.0, buf = 0.0, speed = 0.0
     var pause: Int32 = 1, cache: Int32 = 0, eof: Int32 = 0
     var idle: Int32 = 0, coreIdle: Int32 = 0, seeking: Int32 = 0
@@ -298,112 +442,13 @@ final class KotvMpvCore {
     emit(["event": ready ? "ready" : "size", "width": Int(w), "height": Int(h)])
   }
 
-  func videoInfo() -> [String: Any] {
-    guard let handle = mpv else { return [:] }
-    var hwdec = ""
-    var hwcur = ""
-    var vo = ""
-    var w: Int64 = 0, h: Int64 = 0
-    if let raw = mpv_get_property_string(handle, "hwdec") {
-      hwdec = String(cString: raw); mpv_free(raw)
-    }
-    if let raw = mpv_get_property_string(handle, "hwdec-current") {
-      hwcur = String(cString: raw); mpv_free(raw)
-    }
-    if let raw = mpv_get_property_string(handle, "current-vo") {
-      vo = String(cString: raw); mpv_free(raw)
-    }
-    mpv_get_property(handle, "dwidth", MPV_FORMAT_INT64, &w)
-    mpv_get_property(handle, "dheight", MPV_FORMAT_INT64, &h)
-    return [
-      "hwdec": hwdec,
-      "hwdec-current": hwcur.isEmpty ? hwdec : hwcur,
-      "current-vo": vo,
-      "width": Int(w),
-      "height": Int(h),
-    ]
-  }
-
   private func emitVideoInfo() {
     var info = videoInfo()
     info["event"] = "videoInfo"
     emit(info)
   }
 
-  func setProperty(_ name: String, _ value: String) {
-    guard let handle = mpv else { return }
-    if name == "vo" || name == "wid" || name == "gpu-api" || name == "gpu-context"
-      || name.hasPrefix("avfoundation-")
-    {
-      return
-    }
-    mpv_set_property_string(handle, name, value)
-  }
-
-  func command(_ args: [String]) {
-    guard let handle = mpv, !args.isEmpty else { return }
-    var cArgs: [UnsafePointer<CChar>?] = args.map { strdup($0) }.map { UnsafePointer($0) }
-    cArgs.append(nil)
-    defer {
-      for p in cArgs {
-        if let p { free(UnsafeMutablePointer(mutating: p)) }
-      }
-    }
-    cArgs.withUnsafeMutableBufferPointer { buf in
-      _ = mpv_command(handle, buf.baseAddress)
-    }
-  }
-
-  func open(url: String, startAtMs: Int64 = 0) {
-    guard mpv != nil else { return }
-    DispatchQueue.main.async { [weak self] in self?.setVisible(false) }
-    command(["stop"])
-    if startAtMs > 0 {
-      let sec = String(format: "%.3f", Double(startAtMs) / 1000.0)
-      command(["loadfile", url, "replace", "start=\(sec)"])
-    } else {
-      command(["loadfile", url, "replace"])
-    }
-    command(["set", "pause", "no"])
-  }
-
-  func play() { command(["set", "pause", "no"]) }
-  func pause() { command(["set", "pause", "yes"]) }
-  func stop() {
-    command(["stop"])
-    DispatchQueue.main.async { [weak self] in self?.setVisible(false) }
-  }
-
-  func seek(positionMs: Int64) {
-    let sec = String(format: "%.3f", Double(positionMs) / 1000.0)
-    command(["seek", sec, "absolute"])
-  }
-
-  func setVolume(_ volume: Double) {
-    setProperty("volume", String(max(0, min(100, volume))))
-  }
-
-  func setRate(_ rate: Double) {
-    setProperty("speed", String(max(0.25, min(4.0, rate))))
-  }
-
-  func setAspect(_ mode: String) {
-    switch mode {
-    case "fill", "cover":
-      videoLayer?.videoGravity = .resizeAspectFill
-      setProperty("keepaspect", "no")
-    case "stretch":
-      videoLayer?.videoGravity = .resize
-      setProperty("keepaspect", "no")
-    default:
-      videoLayer?.videoGravity = .resizeAspect
-      setProperty("keepaspect", "yes")
-      setProperty("panscan", "0")
-      setProperty("video-aspect-override", "no")
-    }
-  }
-
-  func updateEDRMode(sigPeak: Double) {
+  private func updateEDRMode(sigPeak: Double) {
     lastSigPeak = sigPeak
     guard let videoLayer else { return }
     let enable = sigPeak > 1.0
@@ -415,24 +460,6 @@ final class KotvMpvCore {
       }
       CATransaction.commit()
     }
-  }
-
-  func destroy() {
-    positionTimer?.invalidate()
-    positionTimer = nil
-    NotificationCenter.default.removeObserver(self)
-    if let handle = mpv {
-      mpv_set_wakeup_callback(handle, nil, nil)
-      mpv_terminate_destroy(handle)
-      mpv = nil
-    }
-    wakeup?()
-    wakeup = nil
-    videoLayer?.removeFromSuperlayer()
-    containerLayer?.removeFromSuperlayer()
-    videoLayer = nil
-    containerLayer = nil
-    window = nil
   }
 
   @objc private func windowOcclusionDidChange(_ notification: Notification) {
@@ -473,7 +500,6 @@ final class KotvMpvCore {
   }
 }
 
-/// 底层容器：layout 时同步 display layer 尺寸。
 private final class KotvMpvContainerLayer: CALayer {
   weak var videoLayer: CALayer?
 

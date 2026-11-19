@@ -3,9 +3,9 @@ import 'package:flutter/services.dart';
 
 import 'kotv_platform.dart';
 
-/// macOS / 桌面 underlay：播放洞透明穿透 + 换集黑遮罩，避免漏底。
+/// 桌面 underlay：播放洞透明穿透 + 换集黑遮罩。
 ///
-/// 矩形与可见性经 `kotv_mpv` 的 `updateFrame` / `setVisible` 下发（单点，供详情/直播共用）。
+/// 矩形/可见性经 `kotv_mpv` 的 `updateFrame` / `setVisible` 下发（详情/直播共用）。
 class KotvMpvUnderlayHole extends StatefulWidget {
   const KotvMpvUnderlayHole({
     super.key,
@@ -13,10 +13,7 @@ class KotvMpvUnderlayHole extends StatefulWidget {
     required this.coverUntilReady,
   });
 
-  /// 已出画（playback-restart / ready）后为 true，洞才透明。
   final bool ready;
-
-  /// 换集/加载期强制不透明黑，防止漏桌面。
   final bool coverUntilReady;
 
   @override
@@ -30,6 +27,12 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
   bool? _lastVisible;
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _sync());
+  }
+
+  @override
   void dispose() {
     _setVisible(false);
     super.dispose();
@@ -38,13 +41,16 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
   @override
   void didUpdateWidget(covariant KotvMpvUnderlayHole oldWidget) {
     super.didUpdateWidget(oldWidget);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _sync());
+    if (oldWidget.ready != widget.ready ||
+        oldWidget.coverUntilReady != widget.coverUntilReady) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _sync());
+    }
   }
 
   Future<void> _setVisible(bool visible) async {
     if (_lastVisible == visible) return;
     _lastVisible = visible;
-    if (!kotvIsMacOS() && !kotvIsWindows() && !kotvIsIOS()) return;
+    if (!kotvIsMacOS() && !kotvIsWindows()) return;
     try {
       await _ch.invokeMethod('setVisible', {'visible': visible});
     } catch (_) {}
@@ -68,8 +74,7 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
     final origin = box.localToGlobal(Offset.zero);
     final size = box.size;
     final show = widget.ready && !widget.coverUntilReady;
-    final moved = _lastOrigin != origin || _lastSize != size;
-    if (moved) {
+    if (_lastOrigin != origin || _lastSize != size) {
       _lastOrigin = origin;
       _lastSize = size;
       _updateFrame(origin & size);
@@ -79,10 +84,17 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
 
   @override
   Widget build(BuildContext context) {
-    WidgetsBinding.instance.addPostFrameCallback((_) => _sync());
     final opaque = !widget.ready || widget.coverUntilReady;
-    return ColoredBox(
-      color: opaque ? Colors.black : Colors.transparent,
+    return NotificationListener<SizeChangedLayoutNotification>(
+      onNotification: (_) {
+        WidgetsBinding.instance.addPostFrameCallback((_) => _sync());
+        return false;
+      },
+      child: SizeChangedLayoutNotifier(
+        child: ColoredBox(
+          color: opaque ? Colors.black : Colors.transparent,
+        ),
+      ),
     );
   }
 }

@@ -2,9 +2,11 @@
 
 ## v0.3.5
 
-- 桌面原生 MPV（`kotv_mpv`）：macOS underlay（vo=avfoundation）、Windows 子 HWND（vo=gpu-next）、Linux X11 wid；hwdec 由 Dart `KotvMpvOpts.hwdecValue()` 单点下发。
+- 桌面原生 MPV（`kotv_mpv`）：macOS underlay（vo=avfoundation）、Windows 子 HWND（vo=gpu-next）、Linux X11 wid；hwdec 由 Dart `KotvMpvOpts.hwdecValue()` 单点下发。桌面桥为薄宿主（轨表/排队/碟片等尚未齐，碟片导航仅 Android）。
+- macOS：所有 `mpv_*` 离主线程串行，避免与 `vo_avfoundation` 主队列 `dispatch_sync` 死锁卡 UI；进度 300ms 节流。
 - Win7 硬解直出经原生 `setProperty(hwdec=dxva2)`；关直出为 `auto`。
-- 清理未链接的多余 mpv 源码副本；iOS 仍走 media_kit（当前捆绑 Libmpv 无 vo_avfoundation）。
+- FFmpeg Apple 构建：tip 已含 DV 调用但缺 `dovi_convert` 时用 helpers 兜底；Linux EventChannel 签名修正。
+- 清理未链接多余 mpv 副本；iOS 仍走 media_kit（捆绑 Libmpv 无 vo_avfoundation）。
 - 版本号同源升至 `0.3.5`（pubspec `0.3.5+45`）。
 
 ## v0.3.4

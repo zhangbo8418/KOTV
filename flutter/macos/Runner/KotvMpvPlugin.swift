@@ -1,12 +1,13 @@
 import Cocoa
 import FlutterMacOS
 
-/// MethodChannel `kotv_mpv` / EventChannel `kotv_mpv/events`（与 Android 同名）。
+/// MethodChannel `kotv_mpv` / EventChannel `kotv_mpv/events`。
+///
+/// mpv API 一律经 [KotvMpvCore.asyncMpv]；layer 显隐/几何留在主线程。
 final class KotvMpvPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
   private var core: KotvMpvCore?
   private var eventSink: FlutterEventSink?
   private var decodeMode = "auto"
-  /// Dart `KotvMpvOpts.hwdecValue()`；非空则优先于 decode 映射。
   private var hwdecOverride = ""
   private var conf = ""
   private var diskCache = false
@@ -23,7 +24,6 @@ final class KotvMpvPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
     events.setStreamHandler(instance)
   }
 
-  /// 兼容旧注册签名。
   static func register(with registrar: FlutterPluginRegistrar) {
     register(with: registrar, window: NSApp.mainWindow ?? NSApp.windows.first)
   }
@@ -42,23 +42,6 @@ final class KotvMpvPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
     eventSink?(map)
   }
 
-  private func ensureCore() throws -> KotvMpvCore {
-    if let core { return core }
-    let created = KotvMpvCore()
-    created.onEvent = { [weak self] map in self?.emit(map) }
-    let win = hostWindow ?? NSApp.mainWindow ?? NSApp.windows.first
-    guard let win, created.initialize(in: win) else {
-      throw NSError(
-        domain: "kotv_mpv",
-        code: 2,
-        userInfo: [NSLocalizedDescriptionKey: "mpv init failed"]
-      )
-    }
-    core = created
-    applySessionOpts(created)
-    return created
-  }
-
   private func ingest(_ args: [String: Any]?) {
     guard let args else { return }
     if let d = args["decode"] as? String, !d.isEmpty { decodeMode = d }
@@ -70,7 +53,6 @@ final class KotvMpvPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
     if let v = args["dolbyVisionPolicy"] as? NSNumber { dolbyVisionPolicy = v.intValue }
   }
 
-  /// hwdec 写入点：优先 Dart 下发；否则 decode → auto/videotoolbox/no。
   private func applySessionOpts(_ core: KotvMpvCore) {
     if !hwdecOverride.isEmpty {
       core.setProperty("hwdec", hwdecOverride)
@@ -104,117 +86,209 @@ final class KotvMpvPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
     }
   }
 
+  /// 主线程建 layer，mpvQueue 上 init；完成后再回主线程 result。
+  private func ensureCore(completion: @escaping (Result<KotvMpvCore, Error>) -> Void) {
+    if let core, core.isReady {
+      completion(.success(core))
+      return
+    }
+    let win = hostWindow ?? NSApp.mainWindow ?? NSApp.windows.first
+    guard let win else {
+      completion(.failure(NSError(
+        domain: "kotv_mpv", code: 1,
+        userInfo: [NSLocalizedDescriptionKey: "no window"]
+      )))
+      return
+    }
+    let created = core ?? KotvMpvCore()
+    created.onEvent = { [weak self] map in self?.emit(map) }
+    guard created.prepareLayers(in: win) else {
+      completion(.failure(NSError(
+        domain: "kotv_mpv", code: 2,
+        userInfo: [NSLocalizedDescriptionKey: "layer prepare failed"]
+      )))
+      return
+    }
+    core = created
+    created.startMpv { [weak self] ok in
+      DispatchQueue.main.async {
+        if ok {
+          completion(.success(created))
+        } else {
+          self?.core = nil
+          completion(.failure(NSError(
+            domain: "kotv_mpv", code: 3,
+            userInfo: [NSLocalizedDescriptionKey: "mpv init failed"]
+          )))
+        }
+      }
+    }
+  }
+
   func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
     let args = call.arguments as? [String: Any]
     switch call.method {
     case "isVulkanAvailable":
       result(false)
+
     case "create":
       ingest(args)
       livePlayback = (args?["live"] as? Bool) ?? livePlayback
-      do {
-        let c = try ensureCore()
-        applySessionOpts(c)
-        result(["ok": true, "ready": true])
-      } catch {
-        result(FlutterError(code: "CREATE_FAILED", message: error.localizedDescription, details: nil))
+      ensureCore { [weak self] res in
+        switch res {
+        case .success(let c):
+          c.asyncMpv {
+            self?.applySessionOpts(c)
+            DispatchQueue.main.async { result(["ok": true, "ready": true]) }
+          }
+        case .failure(let e):
+          result(FlutterError(code: "CREATE_FAILED", message: e.localizedDescription, details: nil))
+        }
       }
+
     case "open":
       ingest(args)
       livePlayback = (args?["live"] as? Bool) ?? false
       let url = (args?["url"] as? String) ?? ""
       let startAt = (args?["startAtMs"] as? NSNumber)?.int64Value ?? 0
-      do {
-        let c = try ensureCore()
-        applySessionOpts(c)
-        if let props = args?["props"] as? [String: Any] {
+      let props = args?["props"] as? [String: Any]
+      let headers = args?["headers"] as? [String: String]
+      ensureCore { [weak self] res in
+        switch res {
+        case .success(let c):
+          c.asyncMpv {
+            self?.applySessionOpts(c)
+            if let props {
+              for (k, v) in props { c.setProperty(k, "\(v)") }
+            }
+            if let headers, !headers.isEmpty {
+              let fields = headers.map { "\($0.key): \($0.value)" }.joined(separator: "\r\n")
+              c.setProperty("http-header-fields", fields)
+            }
+            c.open(url: url, startAtMs: startAt)
+            DispatchQueue.main.async { result(nil) }
+          }
+        case .failure(let e):
+          result(FlutterError(code: "OPEN_FAILED", message: e.localizedDescription, details: nil))
+        }
+      }
+
+    case "play":
+      guard let c = core else { result(nil); return }
+      c.asyncMpv { c.play(); DispatchQueue.main.async { result(nil) } }
+    case "pause":
+      guard let c = core else { result(nil); return }
+      c.asyncMpv { c.pause(); DispatchQueue.main.async { result(nil) } }
+    case "stop":
+      guard let c = core else { result(nil); return }
+      c.asyncMpv { c.stop(); DispatchQueue.main.async { result(nil) } }
+    case "dispose":
+      guard let c = core else { result(nil); return }
+      core = nil
+      c.destroy { result(nil) }
+
+    case "seek":
+      let ms = (args?["positionMs"] as? NSNumber)?.int64Value ?? 0
+      guard let c = core else { result(nil); return }
+      c.asyncMpv { c.seek(positionMs: ms); DispatchQueue.main.async { result(nil) } }
+
+    case "setVolume":
+      let v = (args?["volume"] as? NSNumber)?.doubleValue ?? 100
+      guard let c = core else { result(nil); return }
+      c.asyncMpv { c.setVolume(v); DispatchQueue.main.async { result(nil) } }
+
+    case "setRate":
+      let r = (args?["rate"] as? NSNumber)?.doubleValue ?? 1
+      guard let c = core else { result(nil); return }
+      c.asyncMpv { c.setRate(r); DispatchQueue.main.async { result(nil) } }
+
+    case "setAspect":
+      let mode = (args?["mode"] as? String) ?? "default"
+      guard let c = core else { result(nil); return }
+      c.asyncMpv { c.setAspect(mode); DispatchQueue.main.async { result(nil) } }
+
+    case "setOpts", "setDecode":
+      ingest(args)
+      let props = args?["props"] as? [String: Any]
+      guard let c = core else { result(nil); return }
+      c.asyncMpv { [weak self] in
+        self?.applySessionOpts(c)
+        if let props {
           for (k, v) in props { c.setProperty(k, "\(v)") }
         }
-        if let headers = args?["headers"] as? [String: String], !headers.isEmpty {
-          let fields = headers.map { "\($0.key): \($0.value)" }.joined(separator: "\r\n")
-          c.setProperty("http-header-fields", fields)
-        }
-        c.open(url: url, startAtMs: startAt)
-        result(nil)
-      } catch {
-        result(FlutterError(code: "OPEN_FAILED", message: error.localizedDescription, details: nil))
+        DispatchQueue.main.async { result(nil) }
       }
-    case "play":
-      core?.play(); result(nil)
-    case "pause":
-      core?.pause(); result(nil)
-    case "stop":
-      core?.stop(); result(nil)
-    case "dispose":
-      core?.destroy()
-      core = nil
-      result(nil)
-    case "seek":
-      core?.seek(positionMs: (args?["positionMs"] as? NSNumber)?.int64Value ?? 0)
-      result(nil)
-    case "setVolume":
-      core?.setVolume((args?["volume"] as? NSNumber)?.doubleValue ?? 100)
-      result(nil)
-    case "setRate":
-      core?.setRate((args?["rate"] as? NSNumber)?.doubleValue ?? 1)
-      result(nil)
-    case "setAspect":
-      core?.setAspect((args?["mode"] as? String) ?? "default")
-      result(nil)
-    case "setOpts":
-      ingest(args)
-      if let c = core { applySessionOpts(c) }
-      if let props = args?["props"] as? [String: Any] {
-        for (k, v) in props { core?.setProperty(k, "\(v)") }
-      }
-      result(nil)
-    case "setDecode":
-      ingest(args)
-      if let c = core { applySessionOpts(c) }
-      result(nil)
+
     case "setRepeatOne":
-      core?.setProperty("loop-file", ((args?["on"] as? Bool) ?? false) ? "inf" : "no")
-      result(nil)
+      let on = (args?["on"] as? Bool) ?? false
+      guard let c = core else { result(nil); return }
+      c.asyncMpv { c.setProperty("loop-file", on ? "inf" : "no"); DispatchQueue.main.async { result(nil) } }
+
     case "setAudioOffsetMs":
       let ms = (args?["ms"] as? NSNumber)?.doubleValue
         ?? (args?["audioOffsetMs"] as? NSNumber)?.doubleValue
         ?? 0
-      core?.setProperty("audio-delay", String(ms / 1000.0))
-      result(nil)
+      guard let c = core else { result(nil); return }
+      c.asyncMpv { c.setProperty("audio-delay", String(ms / 1000.0)); DispatchQueue.main.async { result(nil) } }
+
     case "setEqualizer":
-      if let af = args?["audioAf"] as? String { core?.setProperty("af", af) }
-      if let vf = args?["videoVf"] as? String { core?.setProperty("vf", vf) }
-      if let scale = args?["subtitleFontScale"] as? NSNumber {
-        core?.setProperty("sub-scale", "\(scale.doubleValue)")
+      let af = args?["audioAf"] as? String
+      let vf = args?["videoVf"] as? String
+      let scale = args?["subtitleFontScale"] as? NSNumber
+      guard let c = core else { result(nil); return }
+      c.asyncMpv {
+        if let af { c.setProperty("af", af) }
+        if let vf { c.setProperty("vf", vf) }
+        if let scale { c.setProperty("sub-scale", "\(scale.doubleValue)") }
+        DispatchQueue.main.async { result(nil) }
       }
-      result(nil)
+
     case "setAudioTrack":
-      if let id = args?["id"] as? String { core?.command(["set", "aid", id]) }
-      result(nil)
+      let id = args?["id"] as? String
+      guard let c = core else { result(nil); return }
+      c.asyncMpv {
+        if let id { c.command(["set", "aid", id]) }
+        DispatchQueue.main.async { result(nil) }
+      }
     case "setVideoTrack":
-      if let id = args?["id"] as? String { core?.command(["set", "vid", id]) }
-      result(nil)
+      let id = args?["id"] as? String
+      guard let c = core else { result(nil); return }
+      c.asyncMpv {
+        if let id { c.command(["set", "vid", id]) }
+        DispatchQueue.main.async { result(nil) }
+      }
     case "setSubtitleTrack":
-      if let id = args?["id"] as? String { core?.command(["set", "sid", id]) }
-      result(nil)
+      let id = args?["id"] as? String
+      guard let c = core else { result(nil); return }
+      c.asyncMpv {
+        if let id { c.command(["set", "sid", id]) }
+        DispatchQueue.main.async { result(nil) }
+      }
     case "setSecondarySubtitleTrack":
-      if let id = args?["id"] as? String { core?.command(["set", "secondary-sid", id]) }
-      result(nil)
+      let id = args?["id"] as? String
+      guard let c = core else { result(nil); return }
+      c.asyncMpv {
+        if let id { c.command(["set", "secondary-sid", id]) }
+        DispatchQueue.main.async { result(nil) }
+      }
+
     case "setSubtitleOffsetMs":
       let ms = (args?["ms"] as? NSNumber)?.doubleValue ?? 0
-      core?.setProperty("sub-delay", String(ms / 1000.0))
-      result(nil)
-    case "setSubtitleStyle":
-      result(nil)
+      guard let c = core else { result(nil); return }
+      c.asyncMpv { c.setProperty("sub-delay", String(ms / 1000.0)); DispatchQueue.main.async { result(nil) } }
+
     case "addSubtitle":
-      if let url = args?["url"] as? String { core?.command(["sub-add", url]) }
-      result(nil)
-    case "setRenderMode", "setSurfaceLayerEnabled":
-      result(nil)
+      let url = args?["url"] as? String
+      guard let c = core else { result(nil); return }
+      c.asyncMpv {
+        if let url { c.command(["sub-add", url]) }
+        DispatchQueue.main.async { result(nil) }
+      }
+
     case "setVisible":
-      let visible = (args?["visible"] as? Bool) ?? false
-      core?.setVisible(visible)
+      core?.setVisible((args?["visible"] as? Bool) ?? false)
       result(nil)
+
     case "updateFrame", "setVideoRect":
       if let x = (args?["x"] as? NSNumber)?.doubleValue,
          let y = (args?["y"] as? NSNumber)?.doubleValue,
@@ -228,15 +302,22 @@ final class KotvMpvPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
         core?.updateFrame(nil)
       }
       result(nil)
+
+    case "videoInfo":
+      guard let c = core else { result([:]); return }
+      c.asyncMpv {
+        let info = c.videoInfo()
+        DispatchQueue.main.async { result(info) }
+      }
+
     case "getAudioTracks", "getVideoTracks", "getSubtitleTracks":
       result("[]")
-    case "videoInfo":
-      result(core?.videoInfo() ?? [:])
     case "queueNext", "clearNext", "skipToNext":
       result(false)
     case "discTitleCount", "discChapterCount":
       result(0)
-    case "setDiscTitle", "setDiscChapter", "openDiscMenu", "retryVideo":
+    case "setSubtitleStyle", "setRenderMode", "setSurfaceLayerEnabled",
+         "setDiscTitle", "setDiscChapter", "openDiscMenu", "retryVideo":
       result(nil)
     default:
       result(FlutterMethodNotImplemented)
@@ -244,7 +325,6 @@ final class KotvMpvPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
   }
 }
 
-/// 极简 mpv.conf 解析（与 Dart `KotvMpvOpts.parseConfLines` 同语义子集）。
 enum KotvMpvOptsParser {
   static func parse(_ text: String) -> [(String, String)] {
     var out: [(String, String)] = []
