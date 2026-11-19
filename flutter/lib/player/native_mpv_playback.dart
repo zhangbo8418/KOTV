@@ -10,14 +10,15 @@ import 'kotv_playback.dart';
 import 'kotv_platform.dart';
 import 'mpv_opts.dart';
 import 'mpv_surface.dart';
+import 'mpv_underlay.dart';
 import 'play_format.dart';
 import 'play_headers.dart';
 import 'player_normalize.dart';
 import 'position_coalesce.dart';
 import 'silent_video_guard.dart';
 
-/// Android 原生 libmpv（MethodChannel `kotv_mpv` + PlatformView Surface/Texture）。
-/// 桌面 / iOS 请用 [MediaKitPlayback]。
+/// 原生 libmpv（MethodChannel `kotv_mpv`）。
+/// Android：PlatformView Surface/Texture；macOS/iOS：underlay ASBDL；Win/Linux：原生 runner。
 class NativeMpvPlayback extends KotvPlayback {
   NativeMpvPlayback({KotvMpvOpts? opts}) : _opts = opts ?? const KotvMpvOpts();
 
@@ -109,8 +110,12 @@ class NativeMpvPlayback extends KotvPlayback {
   @override
   String get engineLabel => '内置 MPV';
 
+  /// Surface/Texture 切换仅 Android；其它原生平台固定 underlay / HWND / 平面。
   @override
-  bool get supportsRenderMode => true;
+  bool get supportsRenderMode => kotvIsAndroid();
+
+  /// 换集/开播前盖黑，避免 underlay 透明洞漏底。
+  bool _underlayCover = true;
 
   @override
   bool get supportsStableVolume => true;
@@ -293,20 +298,42 @@ class NativeMpvPlayback extends KotvPlayback {
     );
   }
 
-  /// Android：Hybrid Composition PlatformView（对应 setRender）。
-  /// 画幅由原生 [setAspect] 按宿主 View 布局缩放；此处铺满槽位。
+  /// Android：PlatformView；macOS/iOS/Win/Linux：underlay 洞（黑遮罩防漏底）。
   Widget buildView({BoxFit fit = BoxFit.contain}) {
-    if (!kotvIsAndroid()) {
+    if (kotvIsAndroid()) {
+      return Stack(
+        key: const ValueKey('kotv_mpv_surface'),
+        fit: StackFit.expand,
+        children: [
+          const ColoredBox(color: Colors.black),
+          kotvMpvSurfaceView(
+            viewType: 'kotv_mpv/surface',
+            hybrid: true,
+          ),
+          if (_lastError != null)
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text(
+                  _lastError!,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white70, fontSize: 14, height: 1.4),
+                ),
+              ),
+            ),
+        ],
+      );
+    }
+    if (!kotvUsesNativeMpv()) {
       return const ColoredBox(color: Colors.black);
     }
     return Stack(
-      key: const ValueKey('kotv_mpv_surface'),
+      key: const ValueKey('kotv_mpv_underlay'),
       fit: StackFit.expand,
       children: [
-        const ColoredBox(color: Colors.black),
-        kotvMpvSurfaceView(
-          viewType: 'kotv_mpv/surface',
-          hybrid: true,
+        KotvMpvUnderlayHole(
+          ready: _ready && _surfaceLayerEnabled && !_videoOutputSuppressed,
+          coverUntilReady: _underlayCover || !_ready,
         ),
         if (_lastError != null)
           Center(
@@ -340,13 +367,14 @@ class NativeMpvPlayback extends KotvPlayback {
     if (_nativeReady && _createdAsLive == live) return;
     try {
       await _ch.invokeMethod<dynamic>('create', {
-        'decode': kotvNormalizeDecodeMode(_opts.decodeMode),
+        ..._sessionDecodeArgs(),
         'gpuNext': _opts.gpuNext,
         'vulkan': _opts.vulkan,
         'conf': _opts.conf,
         'tlsVerify': _opts.tlsVerify,
         'audioPassThrough': _opts.audioPassThrough,
         'diskCache': _opts.diskCache && !live,
+        'dolbyVisionPolicy': _opts.dolbyVisionPolicy,
         'bufferBytes': KotvBufferBudget.bytes(),
         'render': _renderMode,
         // 直播须在 create 时写入，磁盘缓存和 cache-pause 按这次会话来。
@@ -413,6 +441,7 @@ class NativeMpvPlayback extends KotvPlayback {
         if (nw > 0) _w = nw;
         if (nh > 0) _h = nh;
         _ready = true;
+        _underlayCover = false;
         _lastError = null;
         if (_w > 0 && _h > 0) _buffering = false;
         unawaited(_refreshTracks());
@@ -471,6 +500,7 @@ class NativeMpvPlayback extends KotvPlayback {
     _headers = kotvNormalizePlayHeaders(headers, url: url);
     _completed = false;
     _ready = false;
+    _underlayCover = true;
     _buffering = true;
     _playing = false;
     _w = 0;
@@ -508,7 +538,7 @@ class NativeMpvPlayback extends KotvPlayback {
         'headers': _headers,
         if (mime != null) 'mime': mime,
         'live': live,
-        'decode': kotvNormalizeDecodeMode(_opts.decodeMode),
+        ..._sessionDecodeArgs(),
         'gpuNext': _opts.gpuNext,
         'vulkan': _opts.vulkan,
         'conf': _opts.conf,
@@ -696,11 +726,16 @@ class NativeMpvPlayback extends KotvPlayback {
   Future<void> setDecodeMode(String mode) async {
     _opts = _opts.copyWith(decodeMode: mode);
     try {
-      await _ch.invokeMethod('setDecode', {
-        'decode': kotvNormalizeDecodeMode(_opts.decodeMode),
-      });
+      await _ch.invokeMethod('setDecode', _sessionDecodeArgs());
     } catch (_) {}
   }
+
+  /// decode / direct / hwdec 单点下发（桌面原生认 [KotvMpvOpts.hwdecValue]）。
+  Map<String, Object?> _sessionDecodeArgs() => {
+        'decode': kotvNormalizeDecodeMode(_opts.decodeMode),
+        'direct': _opts.direct,
+        'hwdec': _opts.hwdecValue(),
+      };
 
   /// 原生只排点播、请求头与当前集相同的下一集（DRM 已在 [open] 拒绝，无当前 DRM 会话）。
   @override
@@ -826,7 +861,7 @@ class NativeMpvPlayback extends KotvPlayback {
     try {
       await KotvBufferBudget.warm(force: true);
       await _ch.invokeMethod('setOpts', {
-        'decode': kotvNormalizeDecodeMode(opts.decodeMode),
+        ..._sessionDecodeArgs(),
         'gpuNext': opts.gpuNext,
         'vulkan': opts.vulkan,
         'conf': opts.conf,

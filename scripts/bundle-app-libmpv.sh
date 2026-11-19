@@ -188,23 +188,31 @@ kotv_macos_bundle_dylib_deps() {
 kotv_macos_copy_prefix_libplacebo() {
   local fw="$1"
   local prefix="${KOTV_MPV_PREFIX:-$ROOT/.build/desktop-mpv/prefix}"
-  local f base resolved
+  local asset="$ROOT/flutter/assets/mpv-libs/macos"
+  local f base resolved src_tag
   shopt -s nullglob
-  for f in "$prefix/lib"/libplacebo*.dylib; do
+  # prefix 与 assets 都扫：发行包常只留 assets；@rpath 依赖不会被 dylib 闭包从绝对路径收进来。
+  for f in "$prefix/lib"/libplacebo*.dylib "$asset"/libplacebo*.dylib; do
     [[ -e "$f" ]] || continue
     # 跟随 symlink，避免把指向 Cellar 的链接原样拷进 Frameworks。
     resolved="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$f" 2>/dev/null || echo "$f")"
     [[ -f "$resolved" ]] || continue
     base="$(basename "$f")"
+    [[ -f "$fw/$base" ]] && continue
     cp -f "$resolved" "$fw/$base"
     chmod u+w "$fw/$base" 2>/dev/null || true
     install_name_tool -id "@rpath/$base" "$fw/$base" 2>/dev/null || true
     kotv_macos_strip_abs_rpaths "$fw/$base"
-    echo "  + Frameworks/$base (prefix)"
+    if [[ "$f" == "$asset"/* ]]; then src_tag=asset; else src_tag=prefix; fi
+    echo "  + Frameworks/$base ($src_tag)"
     # 收齐其非系统依赖并改成 @rpath（防御仍链到 Homebrew 的旧拷贝）。
     kotv_macos_bundle_dylib_deps "$fw" "$fw/$base"
   done
   shopt -u nullglob
+  if ! find "$fw" -maxdepth 1 \( -name 'libplacebo.*.dylib' -o -name 'libplacebo.dylib' \) | grep -q .; then
+    echo "ERROR: missing libplacebo in Frameworks (need assets or $prefix/lib)" >&2
+    return 1
+  fi
 }
 
 kotv_macos_verify_libmpv_self_contained() {
@@ -425,6 +433,9 @@ case "$(uname -s)" in
     mkdir -p "$FW"
     cp -f "$MPV" "$FW/libmpv.dylib"
     chmod u+w "$FW/libmpv.dylib" 2>/dev/null || true
+    # 主程序若以 -lmpv 链接，依赖 install_name=@rpath/libmpv.2.dylib；只放 libmpv.dylib 会启动即 DYLD 崩。
+    install_name_tool -id "@rpath/libmpv.2.dylib" "$FW/libmpv.dylib" 2>/dev/null || true
+    ln -sfn libmpv.dylib "$FW/libmpv.2.dylib"
     echo "==> bundle macOS libmpv + dylib deps into Frameworks"
     kotv_macos_bundle_dylib_deps "$FW" "$FW/libmpv.dylib"
     kotv_macos_copy_prefix_libplacebo "$FW"
@@ -478,14 +489,17 @@ EOF
     echo "==> strip Homebrew rpaths from Frameworks (mdk/fvp/libmpv)"
     kotv_macos_strip_homebrew_rpaths_tree "$FW"
     kotv_macos_verify_libmpv_self_contained "$FW/libmpv.dylib"
+    [[ -e "$FW/libmpv.2.dylib" ]] \
+      || { echo "ERROR: missing Frameworks/libmpv.2.dylib (main binary needs @rpath/libmpv.2.dylib)" >&2; exit 1; }
     if [[ "${KOTV_MACOS_NO_FVP:-0}" == "1" ]]; then
       rm -rf "$FW/fvp.framework" "$FW/mdk.framework" 2>/dev/null || true
       echo "  - removed fvp/mdk.framework (MPV-only macOS)"
     fi
     kotv_macos_adhoc_sign_app "$DEST"
     kotv_macos_verify_libmpv_dlopen "$FW/libmpv.dylib"
+    kotv_macos_verify_libmpv_dlopen "$FW/libmpv.2.dylib"
     strip_runtime_libmpv
-    echo "bundled macOS Frameworks/libmpv.dylib (+ deps)"
+    echo "bundled macOS Frameworks/libmpv.dylib (+ libmpv.2.dylib link, deps)"
     ;;
   Linux)
     MPV="$ROOT/flutter/assets/mpv-libs/linux/libmpv.so.2"

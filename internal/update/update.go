@@ -17,7 +17,7 @@ import (
 
 // CurrentVersion 与 flutter/pubspec.yaml 同源；打包脚本用
 // kotv_engine_version_ldflags / -X …CurrentVersion= 注入，避免界面与产物名脱节。
-var CurrentVersion = "0.3.4"
+var CurrentVersion = "0.3.5"
 
 // Info 远程版本信息。
 type Info struct {

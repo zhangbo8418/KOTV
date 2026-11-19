@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# 桌面 libmpv 源码构建（Vulkan + AV3A：FongMi FFmpeg/libarcdav3a + FongMi mpv）。
+# 桌面 libmpv 源码构建（Vulkan + AV3A + mpv-build Apple/桌面补丁）。
+# 钉点见仓库根 mpv-build.lock.json（edde746/mpv-build）。
 # 用法: build-desktop-mpv-from-source.sh {linux|macos|windows}
 # 环境变量：
 #   KOTV_BUILD_MPV_AV3A=1     默认开启 AV3A（走 build-desktop-ffmpeg-av3a-prefix.sh）
@@ -14,10 +15,13 @@ ASSET="$ROOT/flutter/assets/mpv-libs"
 BUILD_DIR="${KOTV_MPV_BUILD_DIR:-$ROOT/.build/desktop-mpv}"
 PREFIX="${KOTV_DESKTOP_FFMPEG_PREFIX:-$BUILD_DIR/prefix}"
 MPV_REPO="${KOTV_MPV_REPO:-https://github.com/FongMi/mpv.git}"
-# 默认解析 fongmi tip；KOTV_MPV_COMMIT 可覆盖做可复现构建。
+# 默认解析 fongmi tip（含桌面所需能力）；可用 KOTV_MPV_COMMIT 钉死。
 MPV_REF="${KOTV_MPV_REF:-fongmi}"
 JOBS="${KOTV_MPV_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
 AV3A="${KOTV_BUILD_MPV_AV3A:-1}"
+if [[ -f "$ROOT/mpv-build.lock.json" ]]; then
+  echo "ok mpv-build.lock $(python3 -c "import json;print(json.load(open('$ROOT/mpv-build.lock.json'))['commit'][:12])" 2>/dev/null || echo present)"
+fi
 
 # shellcheck source=scripts/kotv-resolve-git-ref.sh
 source "$ROOT/scripts/kotv-resolve-git-ref.sh"
@@ -662,6 +666,51 @@ apply_mpv_win7_patches() {
     echo "ERROR: failed to apply mpv Win7 patches" >&2
     exit 1
   fi
+}
+
+# macOS：vo_avfoundation（AVSampleBufferDisplayLayer）。
+# 补丁取自 edde746/mpv-build pool，顺序：osd_ahead → 0004（依赖 osd_ahead.h）。
+# 与 ao_avfoundation 共用 avfoundation 探测，另开 vo-avfoundation。
+apply_mpv_apple_vo_patch() {
+  local dir="$ROOT/scripts/patches/mpv-apple"
+  local p0031="$dir/0031-vo-osd-ahead-shared-subtitle-render-pipeline.patch"
+  local p0031a="$dir/0031a-osd-ahead-tip-compat.patch"
+  local p0214="$dir/0214-osd-ahead-repeat-an-unchanged-frame-on-request.patch"
+  local p0004="$dir/0004-avfoundation-video-output.patch"
+  [[ -f "$p0031" && -f "$p0031a" && -f "$p0214" && -f "$p0004" ]] \
+    || { echo "ERROR: missing mpv Apple patches under $dir" >&2; exit 1; }
+
+  kotv_apply_mpv_patch() {
+    local patch="$1" label="$2"
+    if patch -p1 --forward --batch <"$patch"; then
+      echo "ok applied $label"
+    elif patch -p1 -R --dry-run --batch <"$patch" >/dev/null 2>&1; then
+      echo "ok $label already applied"
+    else
+      echo "ERROR: failed to apply $label" >&2
+      exit 1
+    fi
+  }
+
+  if [[ -f video/out/vo_avfoundation.m && -f video/out/osd_ahead.h ]] \
+    && grep -q 'osd_get_sub_render_horizon' sub/osd.h 2>/dev/null; then
+    echo "ok mpv Apple vo_avfoundation + osd_ahead already present"
+    return 0
+  fi
+  kotv_apply_mpv_patch "$p0031" "mpv osd_ahead (0031)"
+  kotv_apply_mpv_patch "$p0031a" "mpv osd_ahead tip-compat (0031a)"
+  kotv_apply_mpv_patch "$p0214" "mpv osd_ahead repeat (0214)"
+  kotv_apply_mpv_patch "$p0004" "mpv vo_avfoundation (0004)"
+  # tip：vo_set_queue_params 多了 num_frame_refs；旧三参补丁需适配。
+  if grep -q 'vo_set_queue_params(vo, MP_TIME_MS_TO_NS(p->opts->queue_lead_ms), 1);' \
+      video/out/vo_avfoundation.m 2>/dev/null; then
+    sed -i.bak 's/vo_set_queue_params(vo, MP_TIME_MS_TO_NS(p->opts->queue_lead_ms), 1);/vo_set_queue_params(vo, MP_TIME_MS_TO_NS(p->opts->queue_lead_ms), 1, 1);/g' \
+      video/out/vo_avfoundation.m
+    rm -f video/out/vo_avfoundation.m.bak
+    echo "ok tip-compat vo_set_queue_params arity"
+  fi
+  [[ -f video/out/vo_avfoundation.m && -f video/out/osd_ahead.h ]] \
+    || { echo "ERROR: vo_avfoundation / osd_ahead missing after patch" >&2; exit 1; }
 }
 
 # 非 Win7 构建：源码目录可能被 Win7 构建打过补丁，按补丁里的文件从 git 还原。
@@ -1481,6 +1530,8 @@ EOF
   echo "ok vulkan.pc -> $PREFIX/lib/pkgconfig/vulkan.pc"
 }
 
+# Linux：依赖尽量静态链进 libmpv.so，减轻对宿主 glibc 版本（如 mpv-build 2.39 地板）的硬要求。
+# 完整 musl 全静态可另开工具链；默认仍产出 .so，但 FFmpeg/placebo 等走 PREFIX 静态库。
 build_mpv_linux() {
   need meson
   need ninja
@@ -1554,6 +1605,7 @@ build_mpv_macos() {
   mkdir -p "$BUILD_DIR"
   kotv_checkout_mpv_src
   cd "$BUILD_DIR/mpv"
+  apply_mpv_apple_vo_patch
   rm -rf build
   export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
   export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
@@ -1564,6 +1616,7 @@ build_mpv_macos() {
   # 校验改用 Python 字节搜索，不再依赖 BSD grep。
   local native_ini
   native_ini="$(kotv_macos_write_meson_native)"
+  echo "==> mpv macOS: vulkan + vo-avfoundation + lua/osc (arch=$(kotv_macos_target_arch))"
   meson setup build \
     --native-file="$native_ini" \
     -Ddefault_library=shared \
@@ -1582,6 +1635,8 @@ build_mpv_macos() {
     -Dgl=enabled \
     -Dplain-gl=enabled \
     -Dlua=enabled \
+    -Davfoundation=enabled \
+    -Dvo-avfoundation=enabled \
     -Dlibavdevice=disabled
   kotv_meson_compile build "mpv-macos"
   cp -f build/libmpv.dylib "$ASSET/macos/libmpv.dylib"
@@ -1607,6 +1662,15 @@ build_mpv_macos() {
     echo "ERROR: libmpv.dylib built without vulkan" >&2
     exit 1
   fi
+  # vo_avfoundation 符号：拒绝只有 ao_avfoundation 的旧包。
+  if ! grep -aq 'vo_avfoundation' "$ASSET/macos/libmpv.dylib" 2>/dev/null; then
+    echo "ERROR: libmpv.dylib missing vo_avfoundation (Apple VO patch not linked)" >&2
+    exit 1
+  fi
+  if grep -aq 'opengl-next' "$ASSET/macos/libmpv.dylib" 2>/dev/null; then
+    echo "ERROR: libmpv.dylib still contains abandoned opengl-next string" >&2
+    exit 1
+  fi
   verify_mpv_has_libcurl "$ASSET/macos/libmpv.dylib" || exit 1
   mkdir -p "$ASSET/macos"
   for f in libvulkan.1.dylib libvulkan.dylib libMoltenVK.dylib; do
@@ -1619,7 +1683,7 @@ build_mpv_macos() {
     mkdir -p "$ASSET/macos/vulkan/icd.d"
     cp -f "$PREFIX/share/vulkan/icd.d/MoltenVK_icd.json" "$ASSET/macos/vulkan/icd.d/"
   fi
-  echo "built macOS/libmpv.dylib (+ AV3A=$AV3A, vulkan=enabled, no avdevice, curl stack staged)"
+  echo "built macOS/libmpv.dylib (+ AV3A=$AV3A, vulkan=enabled, vo-avfoundation=enabled, no avdevice, curl stack staged)"
 }
 
 build_mpv_windows() {

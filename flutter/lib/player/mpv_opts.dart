@@ -89,23 +89,18 @@ Map<String, String> kotvFvpAvformatProbeOpts() => const {
 const kotvPlaylistExts = '';
 const kotvImageExts = '';
 
-/// MPV 选项：Android 走原生插件；桌面/Windows/macOS 走 media_kit + 自带 libmpv。
+/// MPV 选项：原生 `kotv_mpv`（Android / macOS / Windows / Linux）与 media_kit 遗留路径共用。
 ///
-/// 自带 libmpv 由 scripts 编译（Vulkan 硬解、AV3A 等）；Flutter 侧不挂 wid/Surface。
+/// 自带 libmpv 由 scripts 自编译（Vulkan、AV3A、macOS vo_avfoundation 等），钉 [mpv-build.lock.json]。
 /// FVP 为独立内置播放器，与 MPV 并列可选。
 ///
-/// ## 平台能力
-/// | 选项 | Android 原生 | 桌面 media_kit |
-/// |------|-------------|----------------|
-/// | hwdec | 硬=直出；自动=直出硬解优先再软解 | Windows=`auto`（与 Win10 相同）；Win7 开直出=`dxva2`（不行则会话退回关直出） |
-/// | gpu-next | vo=gpu-next（Surface） | ❌（Texture/libmpv） |
-/// | Vulkan | gpu-api=vulkan（设备支持时） | ❌（libmpv 渲染 API 由 media_kit 定为 OpenGL） |
-/// | 音频直通 | audio-spdif | ❌（不设 audio-spdif，音效照常写 af） |
-/// | AV3A | 原生 MPVLib（jniLibs） | 自带 FFmpeg+avs3a |
-/// 桌面/iOS media_kit：软解只改 `hwdec=no`（渲染仍 GPU Texture），可同 Player `setProperty`。
-/// Win7 开/关硬解直出会换 ANGLE D3D9↔D3D11，须换 Player（见 [KotvMpvOpts.direct]）。
+/// Win7「硬解直出」开：`hwdec=dxva2`；关：`auto`（与 Win10+ 相同）。切换直出见 [kotvMpvNeedsNewPlayer]。
+bool kotvMpvNeedsNewPlayer(KotvMpvOpts from, KotvMpvOpts to) =>
+    kotvIsWindows7() && from.direct != to.direct;
+
+/// @nodoc 旧名，等同 [kotvMpvNeedsNewPlayer]。
 bool kotvMediaKitNeedsNewPlayer(KotvMpvOpts from, KotvMpvOpts to) =>
-    !kotvIsAndroid() && kotvIsWindows7() && from.direct != to.direct;
+    kotvMpvNeedsNewPlayer(from, to);
 
 class KotvMpvOpts {
   const KotvMpvOpts({
@@ -144,7 +139,7 @@ class KotvMpvOpts {
   final bool tlsVerify;
   final bool audioPassThrough;
   final bool diskCache;
-  /// Win7 硬解直出（默认关）：开 = ANGLE D3D9 + dxva2 零拷贝（不行则会话退回关直出）；关 = `hwdec=auto`（与 Win10 相同）。
+  /// Win7 硬解直出（默认关）：开 → `hwdec=dxva2`；关 → `auto`。
   final bool direct;
   /// 杜比视界策略：0=AUTO 1=假定支持 2=假定不支持（与 exoDolbyVision 枚举一致）。
   final int dolbyVisionPolicy;
@@ -173,7 +168,7 @@ class KotvMpvOpts {
 
   factory KotvMpvOpts.fromSettings(Map<String, dynamic> settings, {String? decodeMode}) {
     final decode = (decodeMode ?? '${settings['playerDecode'] ?? 'auto'}').trim();
-    // gpu-next / Vulkan 只有 Android 原生 MPV 用得上；桌面和 iOS 的 media_kit 是 vo=libmpv。
+    // gpu-next / Vulkan 只有 Android 原生 MPV 用得上。
     final android = kotvIsAndroid();
     final gpuNext = android && '${settings['mpvGpuNext'] ?? ''}'.toLowerCase() == 'true';
     final vulkan = android && '${settings['mpvVulkan'] ?? ''}'.toLowerCase() == 'true';
@@ -288,48 +283,31 @@ class KotvMpvOpts {
 
   bool get hard => kotvNormalizeDecodeMode(decodeMode) == 'hard';
 
-  /// 供 setProperty / VideoController 使用的 hwdec 值。
+  /// 全平台唯一 hwdec 字符串（Dart 侧）。原生桌面通道经 create/setDecode/setOpts 下发；
+  /// Android 原生仍按 decode 自算（API / 直出），可忽略本值。
   ///
   /// 「自动」= 优先硬解，失败再软解；UI 仍显示自动。
-  /// Windows：Win10+ 用 mpv `auto`；Win7 见 [_windowsHwdec]。其它平台按平台写死链：
-  /// Android / macOS / Linux 为直出，iOS 为 videotoolbox-copy。
   String hwdecValue() {
     if (soft) return 'no';
     if (kotvIsAndroid()) {
-      // 硬解锁 mediacodec；自动 = 直出硬解，不行再软解（原生 RK 也会覆盖为 mediacodec）
       return hard ? 'mediacodec' : 'mediacodec,no';
     }
-    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
-      return _windowsHwdec(hard: hard);
+    if (kotvIsWindows()) {
+      if (kotvIsWindows7() && direct) {
+        return hard ? 'dxva2' : 'dxva2,no';
+      }
+      return 'auto';
     }
-    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
-      // 画面经 OpenGL ES 画进 FBO。直出 videotoolbox 的帧进不了这块缓冲，只能拷贝后再画。
-      return hard ? 'videotoolbox-copy' : 'videotoolbox-copy,no';
+    if (kotvIsMacOS() || kotvIsIOS()) {
+      return hard ? 'videotoolbox' : 'auto';
     }
-    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.macOS) {
-      return hard ? 'videotoolbox' : 'videotoolbox,no';
-    }
-    // Linux 等：直出硬解链，自动再兜底软解
     const linuxHw = 'vaapi,vulkan,nvdec,cuda,vdpau';
     return hard ? linuxHw : '$linuxHw,no';
   }
 
-  /// Win7 / Win10+ 的 hwdec 列表（收拢在此，避免详情/直播各写一份）。
+  /// Android 可切 gpu/gpu-next；media_kit 必须 libmpv（Flutter Texture）。
   ///
-  /// Win7 开「硬解直出」：只试 `dxva2`（须 ANGLE D3D9 + dxva2-egl）；不行则软解，
-  /// Dart 会话内关直出并新建 Player（与关直出相同：`auto` + D3D11 ANGLE）。
-  ///
-  /// Win7 关直出 / Win10+：一律 `hwdec=auto`（官方自选硬解/拷贝/软解，无额外拒互通）。
-  String _windowsHwdec({required bool hard}) {
-    if (kotvIsWindows7() && direct) {
-      return hard ? 'dxva2' : 'dxva2,no';
-    }
-    return 'auto';
-  }
-
-  /// Android 可切 gpu/gpu-next；桌面 media_kit 必须 libmpv（Flutter Texture）。
-  ///
-  /// 桌面/iOS：软解 = `hwdec=no`，[enableHardwareAcceleration] 恒 true（GPU Texture）。
+  /// media_kit：软解 = `hwdec=no`，[enableHardwareAcceleration] 恒 true（GPU Texture）。
   /// 勿把 soft 绑成 CPU/`pixel_buffer` 渲染，否则与「自动回落软解」发白、撕裂不一致。
   VideoControllerConfiguration videoControllerConfiguration() {
     final hw = hwdecValue();
@@ -481,6 +459,8 @@ class KotvMpvOpts {
     'hwdec',
     'audio-spdif',
     'android-dolby-vision-output',
+    'avfoundation-presentation',
+    'avfoundation-composite-osd',
     'demuxer-dovi-profile7',
     'cache',
     'cache-on-disk',

@@ -111,6 +111,12 @@ if [[ "$KOTV_MACOS_NO_FVP" == "1" ]]; then
 else
   kotv_ensure_mdk_apple_pod
 fi
+# 按目标架构限制 Xcode（通用二进制另一切片无对应 libmpv 时会绑到 Mpv.framework）。
+if [[ "$ARCH" == "x86_64" ]]; then
+  export ARCHS=x86_64 ONLY_ACTIVE_ARCH=NO EXCLUDED_ARCHS=arm64
+else
+  export ARCHS=arm64 ONLY_ACTIVE_ARCH=NO EXCLUDED_ARCHS=x86_64
+fi
 flutter build macos --release \
   --dart-define=KOTV_MACOS_NO_FVP=$KOTV_MACOS_NO_FVP
 
@@ -139,6 +145,15 @@ while IFS= read -r assets_dir; do
   [[ -n "$assets_dir" ]] || continue
   kotv_flutter_strip_placeholder_assets "$assets_dir"
 done < <(find "$OUT_APP" -type d -name flutter_assets)
+# 双保险：若仍打出通用二进制，按目标架构瘦身，避免错误切片绑到 Mpv.framework。
+PACK_MAIN="$OUT_APP/Contents/MacOS/KO影视"
+[[ -x "$PACK_MAIN" ]] || PACK_MAIN="$OUT_APP/Contents/MacOS/kotv"
+if [[ -x "$PACK_MAIN" ]] && lipo -info "$PACK_MAIN" 2>/dev/null | grep -q 'Architectures in the fat file'; then
+  echo "==> lipo thin $PACK_MAIN -> $ARCH"
+  lipo "$PACK_MAIN" -thin "$ARCH" -output "$PACK_MAIN.$ARCH"
+  mv "$PACK_MAIN.$ARCH" "$PACK_MAIN"
+  chmod +x "$PACK_MAIN"
+fi
 
 chmod +x "$ROOT/scripts/bundle-app-libmpv.sh"
 "$ROOT/scripts/bundle-app-libmpv.sh" "$OUT_APP"
@@ -178,6 +193,8 @@ if ! echo "$PACK_ENG_ARCH" | grep -q "$WANT_ENGINE_ARCH"; then
   exit 1
 fi
 test -f "$OUT_APP/Contents/Frameworks/libmpv.dylib"
+test -e "$OUT_APP/Contents/Frameworks/libmpv.2.dylib" \
+  || { echo "ERROR: missing Frameworks/libmpv.2.dylib (主程序 -lmpv 依赖此名)" >&2; exit 1; }
 # 发行包不得再链 Homebrew 绝对路径，且 LC_RPATH 不得指向 Cellar（否则会混载两套库 SIGABRT）。
 if otool -L "$OUT_APP/Contents/Frameworks/libmpv.dylib" | awk 'NR>1 {print $1}' | grep -E '^(/usr/local/|/opt/homebrew/)'; then
   echo "ERROR: Frameworks/libmpv.dylib still has Homebrew absolute deps" >&2
@@ -205,7 +222,24 @@ if strings "$OUT_APP/Contents/Frameworks/libmpv.dylib" | grep -q 'AVFFrameReceiv
   echo "ERROR: bundled libmpv still contains AVFFrameReceiver" >&2
   exit 1
 fi
-echo "  java ok, engine ok, libmpv ok (self-contained)"
+if ! grep -aFq 'vo_avfoundation' "$OUT_APP/Contents/Frameworks/libmpv.dylib"; then
+  echo "ERROR: bundled libmpv missing vo_avfoundation" >&2
+  exit 1
+fi
+# Runner 必须把 mpv_* 绑到自带 libmpv，不能绑到 media_kit 的 Mpv.framework（无 avfoundation VO）。
+# 通用二进制按打包架构检查（另一切片可能仍绑 Mpv，因 assets 常为单架构 libmpv）。
+PACK_BIN="$OUT_APP/Contents/MacOS/KO影视"
+MPV_BIND="$(nm -m "$PACK_BIN" 2>/dev/null | grep '_mpv_create' | head -1 || true)"
+if ! echo "$MPV_BIND" | grep -q '(from libmpv)'; then
+  echo "ERROR: main binary ($ARCH) mpv_create not bound to libmpv (got: ${MPV_BIND:-empty})" >&2
+  echo "hint: OTHER_LDFLAGS must list -lmpv before \$(inherited) / Mpv.framework" >&2
+  exit 1
+fi
+if echo "$MPV_BIND" | grep -q '(from Mpv)'; then
+  echo "ERROR: main binary ($ARCH) still binds mpv_create to Mpv.framework: $MPV_BIND" >&2
+  exit 1
+fi
+echo "  java ok, engine ok, libmpv ok (self-contained, vo_avfoundation, $ARCH bind=$MPV_BIND)"
 
 echo "==> ad-hoc sign"
 codesign --force --deep --sign - "$OUT_APP"

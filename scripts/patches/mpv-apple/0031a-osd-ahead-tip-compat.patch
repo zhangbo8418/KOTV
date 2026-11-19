@@ -1,0 +1,60 @@
+diff --git a/sub/osd.c b/sub/osd.c
+index 7994021..180c6c5 100644
+--- a/sub/osd.c
++++ b/sub/osd.c
+@@ -15,6 +15,7 @@
+  * License along with mpv.  If not, see <http://www.gnu.org/licenses/>.
+  */
+ 
++#include <math.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <assert.h>
+@@ -269,6 +270,24 @@ double osd_get_force_video_pts(struct osd_state *osd)
+     return atomic_load(&osd->force_video_pts);
+ }
+ 
++double osd_get_sub_render_horizon(struct osd_state *osd)
++{
++    (void)osd;
++    return INFINITY;
++}
++
++void osd_get_sub_schedule(struct osd_state *osd, double pts, double after,
++                          double *next_start, int *next_events,
++                          double *visible_end)
++{
++    (void)osd;
++    (void)pts;
++    (void)after;
++    *next_start = MP_NOPTS_VALUE;
++    *next_events = 0;
++    *visible_end = MP_NOPTS_VALUE;
++}
++
+ void osd_set_progbar(struct osd_state *osd, struct osd_progbar_state *s)
+ {
+     mp_mutex_lock(&osd->lock);
+diff --git a/sub/osd.h b/sub/osd.h
+index 5eca5fc..117157e 100644
+--- a/sub/osd.h
++++ b/sub/osd.h
+@@ -211,6 +211,10 @@ bool osd_get_render_subs_in_filter(struct osd_state *osd);
+ void osd_set_render_subs_in_filter(struct osd_state *osd, bool s);
+ void osd_set_force_video_pts(struct osd_state *osd, double video_pts);
+ double osd_get_force_video_pts(struct osd_state *osd);
++double osd_get_sub_render_horizon(struct osd_state *osd);
++void osd_get_sub_schedule(struct osd_state *osd, double pts, double after,
++                          double *next_start, int *next_events,
++                          double *visible_end);
+ 
+ struct osd_progbar_state {
+     int type;           // <0: disabled, 1-255: symbol, else: no symbol
+@@ -226,6 +230,7 @@ enum mp_osd_draw_flags {
+     OSD_DRAW_SUB_FILTER = (1 << 0),
+     OSD_DRAW_SUB_ONLY   = (1 << 1),
+     OSD_DRAW_OSD_ONLY   = (1 << 2),
++    OSD_DRAW_PREFETCH   = OSD_DRAW_SUB_ONLY,
+ };
+ 
+ void osd_draw(struct osd_state *osd, struct mp_osd_res res,

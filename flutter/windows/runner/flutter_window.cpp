@@ -8,6 +8,7 @@
 #include "flutter/generated_plugin_registrant.h"
 #include "kotv_external_player.h"
 #include "kotv_iface_rx.h"
+#include "mpv/kotv_mpv_plugin.h"
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
@@ -30,6 +31,8 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
   RegisterPlugins(flutter_controller_->engine());
+  KotvMpvPluginRegisterWithRegistrar(
+      flutter_controller_->engine()->GetRegistrarForPlugin("KotvMpvPlugin"));
   RegisterHostChannel();
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 

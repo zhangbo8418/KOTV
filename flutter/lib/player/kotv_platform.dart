@@ -33,6 +33,15 @@ bool kotvIsWindows7() {
 bool kotvIsAndroid() => !kIsWeb && Platform.isAndroid;
 bool kotvIsIOS() => !kIsWeb && Platform.isIOS;
 bool kotvIsWindows() => !kIsWeb && Platform.isWindows;
+bool kotvIsMacOS() => !kIsWeb && Platform.isMacOS;
+bool kotvIsLinux() => !kIsWeb && Platform.isLinux;
+
+/// 原生 libmpv 通道（`kotv_mpv`）。
+///
+/// 已接通：Android Surface、macOS underlay（vo=avfoundation）、Windows 子 HWND（vo=gpu-next）、
+/// Linux X11 wid（否则 vo=libmpv）。iOS 仍走 media_kit（当前捆绑 Libmpv 无 vo_avfoundation）。
+bool kotvUsesNativeMpv() =>
+    kotvIsAndroid() || kotvIsMacOS() || kotvIsWindows() || kotvIsLinux();
 
 /// 设为 true 时 macOS 发行包不链 FVP/mdk（仅 MPV/media_kit）；默认 false，MPV+FVP 全功能。
 const bool kotvMacosNoFvp = bool.fromEnvironment('KOTV_MACOS_NO_FVP', defaultValue: false);
@@ -53,7 +62,7 @@ String kotvPlayerRenderLabel(String raw) =>
     kotvNormalizePlayerRender(raw) == 'texture' ? 'Texture' : 'Surface';
 
 /// Surface/Texture：Android 内置 Exo / MPV（设置项 `playerRender`）。
-/// 桌面 media_kit MPV 固定 Flutter Texture（vo=libmpv），无此开关。
+/// macOS 原生层固定 AVSampleBufferDisplayLayer；media_kit 固定 Flutter Texture。
 bool kotvPlayerRenderApplies(String playerVal) {
   if (!kotvIsAndroid()) return false;
   final b = kotvEmbedBackend(playerVal);

@@ -212,7 +212,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   }
 
   KotvPlayback _ensureMpv() {
-    if (kotvIsAndroid()) {
+    if (kotvUsesNativeMpv()) {
       _mk ??= NativeMpvPlayback(opts: _mpvOpts.copyWith(decodeMode: _decodeMode));
       return _mk!;
     }
@@ -236,8 +236,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   }
 
   /// 桌面起播前：等拆机门闩；无实例则 [kotvTakeDesktopMpvPlayer] 再建。
+  /// macOS / Android 原生通道不走 media_kit，直接返回。
   /// [kotvMpvTeardownStuck] 时写状态提示重启，返回 false。
   Future<bool> _primeDesktopMpv() async {
+    if (kotvUsesNativeMpv()) return true;
     if (kotvMpvTeardownStuck) {
       if (mounted) setState(() => _status = '播放器异常，请重启应用');
       return false;
@@ -295,7 +297,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     required int serial,
   }) async {
     bool stale() => !mounted || serial != _playSerial;
-    final canRecreateDesktopMpv = !kotvIsAndroid() && pb is MediaKitPlayback;
+    final canRecreateDesktopMpv = !kotvUsesNativeMpv() && pb is MediaKitPlayback;
     final plan = kotvPlanSilentRecover(
       failover: failover,
       canRecreateDesktopMpv: canRecreateDesktopMpv,
@@ -2065,10 +2067,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     }
   }
 
-  /// 全屏/竖屏/横屏共用画面。Android PlatformView 才用 GlobalKey reparent。
+  /// 全屏/竖屏/横屏共用画面。原生 MPV 画面层用 GlobalKey 保活。
   Widget _buildSharedLiveVideo() {
     final inner = _liveVideoInner();
-    if (kotvIsAndroid() && _mk is NativeMpvPlayback) {
+    if (kotvUsesNativeMpv() && _mk is NativeMpvPlayback) {
       return KeyedSubtree(key: _videoHostKey, child: inner);
     }
     return inner;
@@ -2086,7 +2088,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       fit: _liveAspect.fit,
     );
     final ratio = _liveAspect.ratio;
-    final mpvNativeScale = kotvIsAndroid() && _mk is NativeMpvPlayback;
+    final mpvNativeScale = kotvUsesNativeMpv() && _mk is NativeMpvPlayback;
     if (!mpvNativeScale && ratio != null && ratio > 0) {
       view = ColoredBox(
         color: Colors.black,
@@ -2719,7 +2721,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       _prefDecodeMode = v;
     });
     if (_backend == KotvEmbedBackend.mpv &&
-        kotvMediaKitNeedsNewPlayer(
+        kotvMpvNeedsNewPlayer(
           _mpvOpts.copyWith(decodeMode: prev),
           _mpvOpts.copyWith(decodeMode: v),
         )) {

@@ -135,8 +135,8 @@ abstract class KotvPlayback extends ChangeNotifier {
   Future<void> setRepeatOne(bool on);
   Future<void> setDecodeMode(String mode);
 
-  /// 硬解直出开关（仅 Win7 MPV：开=dxva2；关=hwdec=auto，与 Win10 相同）。Win7 以上不显示。
-  /// 切换要换播放器（见 [kotvMediaKitNeedsNewPlayer]），由页面按新选项重建。
+  /// 硬解直出开关（仅 Win7 MPV：开=dxva2；关=hwdec=auto）。非 Win7 不显示。
+  /// 切换要换播放器（见 [kotvMpvNeedsNewPlayer]），由页面按新选项重建。
   bool get supportsDirectOutput => false;
   bool get directOutput => true;
 

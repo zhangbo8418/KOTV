@@ -13,6 +13,7 @@
 #include <string.h>
 
 #include "flutter/generated_plugin_registrant.h"
+#include "runner/mpv/kotv_mpv_plugin.h"
 
 static gboolean kotv_is_browser_app_id(const gchar* id) {
   if (id == nullptr || id[0] == '\0') return TRUE;
@@ -359,6 +360,9 @@ static void my_application_activate(GApplication* application) {
   gtk_container_add(GTK_CONTAINER(window), GTK_WIDGET(view));
 
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
+  kotv_mpv_plugin_register_with_registrar(
+      fl_plugin_registry_get_registrar_for_plugin(FL_PLUGIN_REGISTRY(view),
+                                                  "KotvMpvPlugin"));
 
   g_autoptr(FlStandardMethodCodec) codec = fl_standard_method_codec_new();
   self->host_channel = fl_method_channel_new(

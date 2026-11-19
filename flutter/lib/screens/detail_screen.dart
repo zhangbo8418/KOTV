@@ -521,7 +521,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   }
 
   KotvPlayback _ensureMpv() {
-    if (kotvIsAndroid()) {
+    if (kotvUsesNativeMpv()) {
       _mk ??= NativeMpvPlayback(opts: _mpvOpts.copyWith(decodeMode: _decodeMode));
       return _mk!;
     }
@@ -568,8 +568,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   }
 
   /// 桌面起播前：等拆机门闩；无实例则 [kotvTakeDesktopMpvPlayer] 再建。
+  /// macOS / Android 原生通道不走 media_kit，直接返回。
   /// [kotvMpvTeardownStuck] 时写状态提示重启，返回 false。
   Future<bool> _primeDesktopMpv() async {
+    if (kotvUsesNativeMpv()) return true;
     if (kotvMpvTeardownStuck) {
       if (mounted) setState(() => _status = '播放器异常，请重启应用');
       return false;
@@ -619,7 +621,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     required KotvPlaybackFailover failover,
     required int serial,
   }) async {
-    final canRecreateDesktopMpv = !kotvIsAndroid() && pb is MediaKitPlayback;
+    final canRecreateDesktopMpv = !kotvUsesNativeMpv() && pb is MediaKitPlayback;
     final plan = kotvPlanSilentRecover(
       failover: failover,
       canRecreateDesktopMpv: canRecreateDesktopMpv,
@@ -966,7 +968,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     });
   }
 
-  /// 换一个 media_kit Player（见 [kotvMediaKitNeedsNewPlayer]）；正在播就按当前进度重开本集。
+  /// 换 MPV 会话（见 [kotvMpvNeedsNewPlayer]）；正在播就按当前进度重开本集。
   /// 没在播也要拆掉旧的，否则下次起播仍复用按旧选项建的 Player。
   Future<void> _reopenWithNewMpvPlayer() async {
     final playing = _epIdx >= 0 && _playUrl.isNotEmpty;
@@ -2794,8 +2796,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   /// 固定画幅：Exo/其它用 [AspectRatio]；Android MPV 走原生 video-aspect-override，勿再套一层。
   /// 纯音频时叠 [KotvAudioStage]，各入口共用，避免黑屏。
   Widget _buildSharedVideo({BoxFit fit = BoxFit.contain}) {
-    // 桌面 MPV 还没有实例时不要在 build 里创建，避免离页交错留下无人释放的 Player。
-    if (!kotvIsAndroid() && _backend == KotvEmbedBackend.mpv && _mk == null) {
+    // media_kit 桌面：还没有实例时不要在 build 里创建，避免离页交错留下无人释放的 Player。
+    if (!kotvUsesNativeMpv() && _backend == KotvEmbedBackend.mpv && _mk == null) {
       return const ColoredBox(color: Colors.black);
     }
     Widget inner = kotvPlaybackView(
@@ -2804,12 +2806,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       mpv: _mk,
       fit: fit,
     );
-    // 仅 Android 原生 MPV Surface 需要跨布局保活同一 PlatformView。
-    if (kotvIsAndroid() && _mk is NativeMpvPlayback) {
+    // Android / macOS 原生 PlatformView：跨布局保活。
+    if (kotvUsesNativeMpv() && _mk is NativeMpvPlayback) {
       inner = KeyedSubtree(key: _videoHostKey, child: inner);
     }
     final ratio = _aspect.ratio;
-    final mpvNativeScale = kotvIsAndroid() && _mk is NativeMpvPlayback;
+    final mpvNativeScale = kotvUsesNativeMpv() && _mk is NativeMpvPlayback;
     if (!mpvNativeScale && ratio != null && ratio > 0) {
       inner = ColoredBox(
         color: Colors.black,
@@ -3031,7 +3033,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         child: Stack(
           fit: StackFit.expand,
           children: [
-            // letterbox 默认黑底，避免镂空透出壳壁纸；氛围模式由外层沉浸 Stack 去掉四周黑底。
+            // letterbox 默认黑底，避免镂空透出壳壁纸。
             const ColoredBox(color: Colors.black),
             ExcludeFocus(child: _buildSharedVideo(fit: _aspect.fit)),
             // 仅 Android：解析/无帧/起播缓冲盖住 Hybrid Surface，防叠影。
@@ -3301,7 +3303,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             });
           }
           if (_backend == KotvEmbedBackend.mpv &&
-              kotvMediaKitNeedsNewPlayer(
+              kotvMpvNeedsNewPlayer(
                 _mpvOpts.copyWith(decodeMode: prev),
                 _mpvOpts.copyWith(decodeMode: mode),
               )) {
@@ -3659,7 +3661,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     if (k == 'mpvDirect') {
       final prev = _mpvOpts;
       setState(() => _mpvOpts = _mpvOpts.copyWith(direct: kotvSettingsFlag(v)));
-      if (_backend == KotvEmbedBackend.mpv && kotvMediaKitNeedsNewPlayer(prev, _mpvOpts)) {
+      if (_backend == KotvEmbedBackend.mpv && kotvMpvNeedsNewPlayer(prev, _mpvOpts)) {
         unawaited(_reopenWithNewMpvPlayer());
       }
     }

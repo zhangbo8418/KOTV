@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.3.5
+
+- 桌面原生 MPV（`kotv_mpv`）：macOS underlay（vo=avfoundation）、Windows 子 HWND（vo=gpu-next）、Linux X11 wid；hwdec 由 Dart `KotvMpvOpts.hwdecValue()` 单点下发。
+- Win7 硬解直出经原生 `setProperty(hwdec=dxva2)`；关直出为 `auto`。
+- 清理未链接的多余 mpv 源码副本；iOS 仍走 media_kit（当前捆绑 Libmpv 无 vo_avfoundation）。
+- 版本号同源升至 `0.3.5`（pubspec `0.3.5+45`）。
+
 ## v0.3.4
 
 - 管理控制台：分组策略、用量/主机指标、审核与角色/分组管理；管理台前端与字体资源收拢。

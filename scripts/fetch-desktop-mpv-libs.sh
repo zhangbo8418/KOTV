@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 桌面 libmpv：一律源码编 FongMi mpv + AV3A FFmpeg（不拉 shinchiro / Ubuntu deb / brew bottle）。
+# 桌面 libmpv：一律源码自编译（mpv + AV3A FFmpeg + mpv-build 补丁；见 mpv-build.lock.json）。
 # 产物：flutter/assets/mpv-libs/{windows,linux,macos}/
 set -euo pipefail
 
@@ -88,19 +88,26 @@ fetch_macos() {
   mkdir -p "$ASSET/macos"
   local out="$ASSET/macos/libmpv.dylib"
   local src_stamp="$ASSET/macos/.kotv-mpv-src"
+  local kind_file="$ASSET/macos/.kind"
+  # vo-avfoundation：Apple 侧用 AVSampleBufferDisplayLayer，勿走 Texture/libmpv OpenGL。
+  local want_kind="av3a-dav1d-vulkan-vo-avfoundation-osc-dovi-lcms-xxhash-v1"
   if marker_ok "$out" 500000 && grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$out" 2>/dev/null \
     && grep -aqE 'dovi_parse_unspec62_nalu|pl_hdr_metadata_from_dovi_rpu' "$out" 2>/dev/null \
     && grep -aqE 'dav1d_data_props|dav1d_get_picture|libdav1d' "$out" 2>/dev/null \
+    && grep -aq 'vo_avfoundation' "$out" 2>/dev/null \
+    && ! grep -aq 'opengl-next' "$out" 2>/dev/null \
+    && [[ "$(cat "$kind_file" 2>/dev/null || true)" == "$want_kind" ]] \
     && kotv_mpv_src_stamp_ok "$src_stamp"; then
-    echo "ok macOS/libmpv.dylib (cached AV3A + libdovi + dav1d)"
+    echo "ok macOS/libmpv.dylib (cached AV3A + libdovi + dav1d + vo-avfoundation, kind=$want_kind)"
     return
   fi
-  echo "==> macOS libmpv: source build with AV3A + libdovi + dav1d"
+  echo "==> macOS libmpv: source build with AV3A + libdovi + dav1d + vo-avfoundation (kind=$want_kind)"
   if [[ "${KOTV_MPV_MACOS_ARCH:-$(uname -m)}" == "x86_64" && "$(uname -m)" == "arm64" ]]; then
     arch -x86_64 "$ROOT/scripts/build-desktop-mpv-from-source.sh" macos
   else
     "$ROOT/scripts/build-desktop-mpv-from-source.sh" macos
   fi
+  echo "$want_kind" > "$kind_file"
   kotv_mpv_src_stamp > "$src_stamp"
 }
 

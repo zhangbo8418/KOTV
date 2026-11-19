@@ -270,8 +270,11 @@ cmake --install arcdav3a-build
 
 setup_pkg_config
 
-echo "==> configure FongMi FFmpeg (static PIC + libarcdav3a)"
+echo "==> configure FFmpeg (static PIC + libarcdav3a; Apple 另打 mpv-build VT/DV 补丁)"
 cd ffmpeg
+if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
+  "$ROOT/scripts/kotv-apply-ffmpeg-apple-patches.sh" "$PWD"
+fi
 $MAKE distclean 2>/dev/null || true
 
 PREF_NATIVE="$(kotv_native_path "$PREFIX")"

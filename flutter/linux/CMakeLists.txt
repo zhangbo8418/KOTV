@@ -63,8 +63,32 @@ add_definitions(-DAPPLICATION_ID="${APPLICATION_ID}")
 add_executable(${BINARY_NAME}
   "main.cc"
   "my_application.cc"
+  "runner/mpv/kotv_mpv_plugin.cc"
   "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"
 )
+
+target_include_directories(${BINARY_NAME} PRIVATE
+  "${CMAKE_SOURCE_DIR}"
+  "${CMAKE_SOURCE_DIR}/runner/mpv/include"
+)
+# 自带 libmpv（静态依赖已链入 .so）；缺省时回退系统 libmpv。
+set(KOTV_MPV_LINUX "${CMAKE_SOURCE_DIR}/../assets/mpv-libs/linux/libmpv.so.2")
+if(EXISTS "${KOTV_MPV_LINUX}")
+  target_link_libraries(${BINARY_NAME} PRIVATE "${KOTV_MPV_LINUX}")
+else()
+  find_library(KOTV_SYSTEM_MPV mpv)
+  if(KOTV_SYSTEM_MPV)
+    target_link_libraries(${BINARY_NAME} PRIVATE ${KOTV_SYSTEM_MPV})
+  endif()
+endif()
+target_compile_definitions(${BINARY_NAME} PRIVATE "KOTV_NATIVE_MPV=1")
+# X11 wid 嵌入（Wayland 平面见 runner/mpv/README）
+find_package(X11)
+if(X11_FOUND)
+  target_compile_definitions(${BINARY_NAME} PRIVATE "GDK_WINDOWING_X11=1")
+  target_include_directories(${BINARY_NAME} PRIVATE ${X11_INCLUDE_DIR})
+  target_link_libraries(${BINARY_NAME} PRIVATE ${X11_LIBRARIES})
+endif()
 
 # Apply the standard set of build settings. This can be removed for applications
 # that need different build settings.

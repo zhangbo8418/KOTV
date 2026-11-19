@@ -9,7 +9,7 @@ bool kotvWin7DirectToggleNeedsNewPlayer({
   required KotvMpvOpts from,
   required bool nextDirect,
 }) =>
-    kotvMediaKitNeedsNewPlayer(from, from.copyWith(direct: nextDirect));
+    kotvMpvNeedsNewPlayer(from, from.copyWith(direct: nextDirect));
 
 /// 直出开却已软解：D3D9 ANGLE 上 in-place 换 D3D11 会 create_failed（蓝屏），须新建 D3D11 Player。
 bool kotvWin7SoftOnDirectNeedsNewPlayer({

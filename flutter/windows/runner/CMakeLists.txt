@@ -13,10 +13,26 @@ add_executable(${BINARY_NAME} WIN32
   "main.cpp"
   "utils.cpp"
   "win32_window.cpp"
+  "mpv/kotv_mpv_plugin.cpp"
   "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"
   "Runner.rc"
   "runner.exe.manifest"
 )
+
+# kotv_mpv：vo=gpu-next + 子 HWND；头文件在 runner/mpv/include。
+set(KOTV_MPV_WIN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../assets/mpv-libs/windows")
+target_include_directories(${BINARY_NAME} PRIVATE
+  "${CMAKE_SOURCE_DIR}"
+  "${CMAKE_CURRENT_SOURCE_DIR}/mpv/include"
+)
+if(EXISTS "${KOTV_MPV_WIN_DIR}/libmpv.dll.a")
+  target_link_libraries(${BINARY_NAME} PRIVATE "${KOTV_MPV_WIN_DIR}/libmpv.dll.a")
+elseif(EXISTS "${KOTV_MPV_WIN_DIR}/mpv-2.dll")
+  # MinGW 可用 dll 作隐式库名；打包脚本另拷 libmpv-2.dll。
+  target_link_libraries(${BINARY_NAME} PRIVATE "${KOTV_MPV_WIN_DIR}/mpv-2.dll")
+endif()
+target_link_libraries(${BINARY_NAME} PRIVATE "comctl32.lib")
+target_compile_definitions(${BINARY_NAME} PRIVATE "KOTV_NATIVE_MPV=1")
 
 # Apply the standard set of build settings. This can be removed for applications
 # that need different build settings.
