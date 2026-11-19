@@ -4,16 +4,15 @@ import 'package:flutter/services.dart';
 import 'kotv_platform.dart';
 
 /// macOS：画面在 Flutter 之下（contentView.layer 底 ASBDL）。
-/// 洞内透明露出画面；洞外靠原生把 contentView.layer 涂黑，勿在 Flutter 铺满黑挡洞。
 bool kotvMpvUsesUnderlayHole() => kotvUsesNativeMpv() && kotvIsMacOS();
 
-/// 详情/直播视频栈 letterbox：underlay 洞后透明；其它平台黑底。
+/// 视频栈 letterbox：macOS underlay 必须透明，否则挡住 ASBDL；其它平台黑底。
 Widget kotvMpvLetterboxFill({Key? key}) => ColoredBox(
       key: key,
       color: kotvMpvUsesUnderlayHole() ? Colors.transparent : Colors.black,
     );
 
-/// 播放洞：矩形/可见性经 `kotv_mpv` 的 `updateFrame` / `setVisible` 下发（详情/直播共用）。
+/// 播放洞：几何 `updateFrame`；显隐 `setVisible`（macOS 开播后不因遮罩藏层）。
 class KotvMpvUnderlayHole extends StatefulWidget {
   const KotvMpvUnderlayHole({
     super.key,
@@ -81,13 +80,19 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
     if (box == null || !box.hasSize) return;
     final origin = box.localToGlobal(Offset.zero);
     final size = box.size;
-    final show = widget.ready && !widget.coverUntilReady;
     if (_lastOrigin != origin || _lastSize != size) {
       _lastOrigin = origin;
       _lastSize = size;
       _updateFrame(origin & size);
     }
-    _setVisible(show);
+    // 桌面 underlay/HWND：loadfile 期间藏原生层会丢帧。未就绪只用 Flutter 黑遮。
+    if (kotvIsMacOS() || kotvIsWindows()) {
+      if (widget.ready && !widget.coverUntilReady) {
+        _setVisible(true);
+      }
+      return;
+    }
+    _setVisible(widget.ready && !widget.coverUntilReady);
   }
 
   @override
@@ -100,7 +105,6 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
       },
       child: SizeChangedLayoutNotifier(
         child: ColoredBox(
-          // 未就绪黑遮；就绪后透明露出 ASBDL（洞外 contentView.layer 为黑）。
           color: cover ? Colors.black : Colors.transparent,
         ),
       ),

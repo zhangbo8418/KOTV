@@ -38,8 +38,8 @@ bool kotvIsLinux() => !kIsWeb && Platform.isLinux;
 
 /// 原生 libmpv 通道（`kotv_mpv`）。
 ///
-/// 已接通：Android Surface、macOS underlay（vo=avfoundation）、Windows 子 HWND（vo=gpu-next）、
-/// Linux X11 wid（否则 vo=libmpv）。iOS 仍走 media_kit（当前捆绑 Libmpv 无 vo_avfoundation）。
+/// Android Surface；macOS ASBDL underlay；Windows 子 HWND；Linux X11 wid（非 X11 暂无画面）。
+/// iOS 走 media_kit。
 bool kotvUsesNativeMpv() =>
     kotvIsAndroid() || kotvIsMacOS() || kotvIsWindows() || kotvIsLinux();
 

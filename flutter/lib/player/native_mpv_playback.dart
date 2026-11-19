@@ -332,12 +332,14 @@ class NativeMpvPlayback extends KotvPlayback {
     if (!kotvUsesNativeMpv()) {
       return const ColoredBox(color: Colors.black);
     }
+    // macOS/Win/Linux：洞显隐不绑 Android Surface 挂载态。
+    final holeReady = _ready && !_videoOutputSuppressed;
     return Stack(
       key: const ValueKey('kotv_mpv_underlay'),
       fit: StackFit.expand,
       children: [
         KotvMpvUnderlayHole(
-          ready: _ready && _surfaceLayerEnabled && !_videoOutputSuppressed,
+          ready: holeReady,
           coverUntilReady: _underlayCover || !_ready,
         ),
         if (_lastError != null)

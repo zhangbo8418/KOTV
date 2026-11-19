@@ -286,7 +286,8 @@ final class KotvMpvCore {
     mpv_set_option_string(handle, "vo", "avfoundation")
     mpv_set_option_string(handle, "avfoundation-presentation", "host")
     mpv_set_option_string(handle, "avfoundation-composite-osd", "no")
-    mpv_set_option_string(handle, "hwdec", "auto")
+    // 默认 videotoolbox；会话仍可由 Dart 覆盖为 soft/auto。
+    mpv_set_option_string(handle, "hwdec", "videotoolbox")
     mpv_set_option_string(handle, "hwdec-codecs", "all")
     mpv_set_option_string(handle, "hwdec-software-fallback", "yes")
     mpv_set_option_string(handle, "target-colorspace-hint", "auto")
@@ -506,6 +507,8 @@ final class KotvMpvCore {
     guard let videoLayer, containerLayer?.isHidden == false else { return }
     guard videoLayer.status == .failed || videoLayer.requiresFlushToResumeDecoding else { return }
     videoLayer.flush()
+    // 暂停时 flush 后补一帧，否则 ASBDL 可能一直空。
+    asyncMpv { [weak self] in self?.command(["seek", "0", "relative+exact"]) }
   }
 
   private func setContainerHidden(_ hidden: Bool) {
