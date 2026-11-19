@@ -33,6 +33,7 @@ import '../player/media_kit_playback.dart';
 import '../player/mpv_opts.dart';
 import '../player/playback_settings.dart';
 import '../player/native_mpv_playback.dart';
+import '../player/mpv_underlay.dart';
 import '../player/play_headers.dart';
 import '../player/player_normalize.dart';
 import '../player/subtitle_style_util.dart';
@@ -3033,8 +3034,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         child: Stack(
           fit: StackFit.expand,
           children: [
-            // letterbox 默认黑底，避免镂空透出壳壁纸。
-            const ColoredBox(color: Colors.black),
+            // letterbox：非 underlay 用黑底防透壳；macOS underlay 必须透明，否则挡住 ASBDL。
+            kotvMpvLetterboxFill(),
             ExcludeFocus(child: _buildSharedVideo(fit: _aspect.fit)),
             // 仅 Android：解析/无帧/起播缓冲盖住 Hybrid Surface，防叠影。
             // 勿用 stalling：中途 STATE_BUFFERING 也会盖黑最后一帧（Exo 点播极卡）。
@@ -3973,7 +3974,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
                 if (_immersiveFullscreen && !_ambientOn) const ColoredBox(color: Colors.black),
                 if (!_immersiveFullscreen) detailScaffold,
               ] else ...[
-                if (_immersiveFullscreen && !_ambientOn) const ColoredBox(color: Colors.black),
+                // macOS underlay：全屏黑底同样会挡住 ASBDL，改用透明 letterbox。
+                if (_immersiveFullscreen && !_ambientOn) kotvMpvLetterboxFill(),
                 Offstage(
                   offstage: _immersiveFullscreen,
                   child: ExcludeFocus(

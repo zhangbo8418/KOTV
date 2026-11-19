@@ -1856,6 +1856,9 @@ EOF
   cp -f "$dll" "$out"
   verify_mpv_win7_imports "$out"
   harvest_windows_mpv_dlls
+  # MSVC 链接要 .lib；MinGW 要 .dll.a。禁止把 .dll 直接丢给 link.exe（LNK1107）。
+  chmod +x "$ROOT/scripts/kotv-windows-mpv-import-libs.sh"
+  "$ROOT/scripts/kotv-windows-mpv-import-libs.sh" "$out" || true
   if [[ "$AV3A" == "1" ]]; then
     grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$out" \
       || { echo "ERROR: mpv-2.dll missing AV3A symbols" >&2; exit 1; }

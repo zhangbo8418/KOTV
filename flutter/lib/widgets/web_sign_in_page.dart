@@ -93,13 +93,13 @@ class _KotvWebSignInPageState extends ConsumerState<KotvWebSignInPage> {
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                     colors: [
-                      p.dialogBg.withValues(alpha: 0.92),
-                      p.surface.withValues(alpha: 0.88),
+                      p.dialogBg.withOpacity(0.92),
+                      p.surface.withOpacity(0.88),
                     ],
                   ),
                   boxShadow: [
                     BoxShadow(
-                      color: p.primary.withValues(alpha: 0.18),
+                      color: p.primary.withOpacity(0.18),
                       blurRadius: 36,
                       offset: const Offset(0, 18),
                     ),
@@ -126,7 +126,7 @@ class _KotvWebSignInPageState extends ConsumerState<KotvWebSignInPage> {
                               ),
                               boxShadow: [
                                 BoxShadow(
-                                  color: p.primary.withValues(alpha: 0.35),
+                                  color: p.primary.withOpacity(0.35),
                                   blurRadius: 16,
                                   offset: const Offset(0, 8),
                                 ),

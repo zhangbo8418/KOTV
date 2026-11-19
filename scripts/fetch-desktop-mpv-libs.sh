@@ -60,6 +60,10 @@ fetch_windows() {
     && kotv_mpv_src_stamp_ok "$src_stamp" \
     && windows_siblings_ok; then
     echo "ok windows/mpv-2.dll (cached AV3A + dovi + dav1d + sibling dlls, kind=$want_kind)"
+    if [[ ! -f "$ASSET/windows/mpv.lib" && ! -f "$ASSET/windows/libmpv.dll.a" ]]; then
+      chmod +x "$ROOT/scripts/kotv-windows-mpv-import-libs.sh"
+      "$ROOT/scripts/kotv-windows-mpv-import-libs.sh" "$out" || true
+    fi
     return
   fi
   echo "==> windows libmpv: source build with AV3A + libdovi + dav1d (kind=$want_kind)"

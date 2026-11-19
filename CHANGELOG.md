@@ -2,11 +2,11 @@
 
 ## v0.3.5
 
-- 桌面原生 MPV（`kotv_mpv`）：macOS underlay（vo=avfoundation）、Windows 子 HWND（vo=gpu-next）、Linux X11 wid；hwdec 由 Dart `KotvMpvOpts.hwdecValue()` 单点下发。桌面桥为薄宿主（轨表/排队/碟片等尚未齐，碟片导航仅 Android）。
-- macOS：所有 `mpv_*` 离主线程串行，避免与 `vo_avfoundation` 主队列 `dispatch_sync` 死锁卡 UI；进度 300ms 节流。
-- Win7 硬解直出经原生 `setProperty(hwdec=dxva2)`；关直出为 `auto`。
-- FFmpeg Apple 构建：tip 已含 DV 调用但缺 `dovi_convert` 时用 helpers 兜底；Linux EventChannel 签名修正。
-- 清理未链接多余 mpv 副本；iOS 仍走 media_kit（捆绑 Libmpv 无 vo_avfoundation）。
+- 桌面原生 MPV（`kotv_mpv`）：macOS underlay（vo=avfoundation）、Windows 子 HWND（vo=gpu-next）、Linux X11 wid；hwdec 由 Dart `KotvMpvOpts.hwdecValue()` 单点下发。桌面为薄宿主（轨表/排队/碟片等尚未齐；碟片导航仅 Android）。完整 DirectComposition / Wayland 平面需定制 Flutter 引擎，本轮不做。
+- macOS：mpv API 离主线程串行（防 VO 主队列死锁）；letterbox 黑底改为透明以免挡住 ASBDL；进度 300ms 节流；实际解码读 `hwdec-current`。
+- Win7 硬解直出经 `setProperty(hwdec=dxva2)`；关直出为 `auto`。
+- CI：FFmpeg `dovi_convert` helpers；Linux EventChannel 签名；Windows 生成 `mpv.lib`（禁 MSVC 直链 .dll）；Win7 SDK 改用 `withOpacity`。
+- 清理未链接多余 mpv 副本；iOS 仍走 media_kit。
 - 版本号同源升至 `0.3.5`（pubspec `0.3.5+45`）。
 
 ## v0.3.4

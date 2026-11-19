@@ -129,8 +129,13 @@ class NativeMpvPlayback extends KotvPlayback {
   }
 
   @override
-  Future<String?> activeDecoderLabel() async =>
-      kotvMpvHwdecLabel('${(await _videoInfo())?['hwdec'] ?? ''}');
+  Future<String?> activeDecoderLabel() async {
+    final info = await _videoInfo();
+    // 优先实际解码；无则回落请求的 hwdec。
+    final cur = '${info?['hwdec-current'] ?? ''}'.trim();
+    final req = '${info?['hwdec'] ?? ''}'.trim();
+    return kotvMpvHwdecLabel(cur.isNotEmpty ? cur : req);
+  }
 
   @override
   Future<String?> videoColorLabel() async => kotvVideoColorLabel(await _videoInfo());

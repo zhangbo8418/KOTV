@@ -3,6 +3,16 @@ import 'package:flutter/services.dart';
 
 import 'kotv_platform.dart';
 
+/// macOS underlay：画面在 Flutter 视图之下；letterbox 黑底会挡住 ASBDL，必须透明。
+/// Win HWND / Android Surface 画在洞上或同层，仍可用黑底填 letterbox。
+bool kotvMpvUnderlayLetterboxMustBeClear() => kotvUsesNativeMpv() && kotvIsMacOS();
+
+/// 详情/直播 letterbox 底：underlay 用透明，其它平台用黑。
+Widget kotvMpvLetterboxFill({Key? key}) => ColoredBox(
+      key: key,
+      color: kotvMpvUnderlayLetterboxMustBeClear() ? Colors.transparent : Colors.black,
+    );
+
 /// 桌面 underlay：播放洞透明穿透 + 换集黑遮罩。
 ///
 /// 矩形/可见性经 `kotv_mpv` 的 `updateFrame` / `setVisible` 下发（详情/直播共用）。
