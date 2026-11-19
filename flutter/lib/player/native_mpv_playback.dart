@@ -18,7 +18,7 @@ import 'position_coalesce.dart';
 import 'silent_video_guard.dart';
 
 /// 原生 libmpv（MethodChannel `kotv_mpv`）。
-/// Android：PlatformView Surface/Texture；macOS/iOS：underlay ASBDL；Win/Linux：原生 runner。
+/// Android：PlatformView；macOS：underlay ASBDL；Win/Linux：原生 runner。
 class NativeMpvPlayback extends KotvPlayback {
   NativeMpvPlayback({KotvMpvOpts? opts}) : _opts = opts ?? const KotvMpvOpts();
 
@@ -303,7 +303,7 @@ class NativeMpvPlayback extends KotvPlayback {
     );
   }
 
-  /// Android：PlatformView；macOS/iOS/Win/Linux：underlay 洞（黑遮罩防漏底）。
+  /// Android：PlatformView；桌面原生：underlay/HWND 洞（未就绪时黑遮）。
   Widget buildView({BoxFit fit = BoxFit.contain}) {
     if (kotvIsAndroid()) {
       return Stack(

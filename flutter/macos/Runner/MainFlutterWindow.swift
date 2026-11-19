@@ -9,6 +9,8 @@ import ObjectiveC
 class MainFlutterWindow: NSWindow {
   /// 强引用 MethodChannel，避免 awakeFromNib 返回后通道被释放。
   private var hostChannel: FlutterMethodChannel?
+  /// 勿设 contentViewController：否则 contentView 变成 FlutterView，underlay 层无法稳定垫在引擎之下。
+  private var flutterViewController: FlutterViewController?
 
   override func awakeFromNib() {
     // Flutter 3.47 的 Impeller 在 Intel Mac 上滚动界面时整窗闪烁。
@@ -17,12 +19,27 @@ class MainFlutterWindow: NSWindow {
     #if arch(x86_64)
     kotvUseSkiaOnIntel()
     #endif
-    let flutterViewController = FlutterViewController()
-    self.contentViewController = flutterViewController
-    // 窗口不透明；Flutter 视图透明，才能露出底层 mpv underlay。
+
+    let fvc = FlutterViewController()
+    flutterViewController = fvc
+    fvc.backgroundColor = .clear
+
+    // 不透明宿主：mpv stage/ASBDL 挂在 host.layer；Flutter 作子视图叠在上面，透明像素露出 underlay。
+    let host = NSView(frame: NSRect(x: 0, y: 0, width: 1280, height: 720))
+    host.wantsLayer = true
+    host.layer?.backgroundColor = NSColor.black.cgColor
+    host.layer?.isOpaque = true
+
+    let flutterView = fvc.view
+    flutterView.frame = host.bounds
+    flutterView.autoresizingMask = [.width, .height]
+    flutterView.wantsLayer = true
+    flutterView.layer?.zPosition = 100
+    host.addSubview(flutterView)
+
+    self.contentView = host
     self.isOpaque = true
     self.backgroundColor = .black
-    flutterViewController.backgroundColor = .clear
 
     // 默认窗口 1280×720；min 放宽以支持迷你悬浮窗，常态下限由 Dart window_manager 约束
     self.setContentSize(NSSize(width: 1280, height: 720))
@@ -30,9 +47,9 @@ class MainFlutterWindow: NSWindow {
     self.title = "KO影视"
     self.center()
 
-    RegisterGeneratedPlugins(registry: flutterViewController)
+    RegisterGeneratedPlugins(registry: fvc)
     KotvMpvPlugin.register(
-      with: flutterViewController.registrar(forPlugin: "KotvMpvPlugin"),
+      with: fvc.registrar(forPlugin: "KotvMpvPlugin"),
       window: self
     )
 

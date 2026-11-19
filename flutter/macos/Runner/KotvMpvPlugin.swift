@@ -22,6 +22,14 @@ final class KotvMpvPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
     let events = FlutterEventChannel(name: "kotv_mpv/events", binaryMessenger: registrar.messenger)
     registrar.addMethodCallDelegate(instance, channel: method)
     events.setStreamHandler(instance)
+    // 尽早挂上全窗 stage，避免首帧 Flutter 透明洞透出桌面。
+    if let window {
+      let core = KotvMpvCore()
+      core.onEvent = { [weak instance] map in instance?.emit(map) }
+      if core.prepareLayers(in: window) {
+        instance.core = core
+      }
+    }
   }
 
   static func register(with registrar: FlutterPluginRegistrar) {
@@ -114,7 +122,10 @@ final class KotvMpvPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
       DispatchQueue.main.async {
         if ok {
           completion(.success(created))
-        } else {
+          return
+        }
+        // 初始化失败须拆掉已挂 layer，避免残留 stage 与下次 prepare 叠层。
+        created.destroy {
           self?.core = nil
           completion(.failure(NSError(
             domain: "kotv_mpv", code: 3,

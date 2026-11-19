@@ -4,10 +4,13 @@ import QuartzCore
 
 /// macOS 原生 libmpv：`vo=avfoundation` underlay。
 ///
-/// 所有 `mpv_*` 仅在 [mpvQueue] 上调用。`vo_avfoundation` 会在 VO 线程
-/// `dispatch_sync` 主队列；若主线程再同步调 mpv，会死锁卡死 UI。
+/// 层挂在窗口宿主 `contentView`（非 FlutterView）上：stage 全窗黑垫 + 播放洞 ASBDL；
+/// Flutter 为宿主子视图且 `zPosition` 更高，透明洞才露出画面、洞外不透桌面。
+/// 所有 `mpv_*` 仅在 [mpvQueue] 上调用（VO 会 `dispatch_sync` 主队列，主线程同步调 mpv 会死锁）。
 final class KotvMpvCore {
   private weak var window: NSWindow?
+  /// 全窗不透明黑垫（z 低于 Flutter 子视图）。
+  private var stageLayer: CALayer?
   private var containerLayer: KotvMpvContainerLayer?
   private var videoLayer: AVSampleBufferDisplayLayer?
   /// libmpv client API 串行队列（含事件排空）。
@@ -29,18 +32,23 @@ final class KotvMpvCore {
     if containerLayer != nil {
       self.window = window
       if let contentView = window.contentView, let contentLayer = contentView.layer {
-        attachContainer(to: contentLayer, frame: contentView.bounds)
+        layoutLayers(in: contentLayer, videoFrame: containerLayer?.frame ?? contentView.bounds)
       }
       return true
     }
     guard let contentView = window.contentView else { return false }
     self.window = window
 
+    let stage = CALayer()
+    stage.backgroundColor = NSColor.black.cgColor
+    stage.isOpaque = true
+    stage.actions = ["contents": NSNull(), "bounds": NSNull(), "position": NSNull(), "hidden": NSNull()]
+
     let container = KotvMpvContainerLayer()
     container.frame = contentView.bounds
     container.backgroundColor = NSColor.black.cgColor
     container.isOpaque = true
-    container.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
+    container.actions = ["contents": NSNull(), "bounds": NSNull(), "position": NSNull(), "hidden": NSNull()]
 
     let layer = AVSampleBufferDisplayLayer()
     layer.frame = container.bounds
@@ -51,15 +59,18 @@ final class KotvMpvCore {
     container.addSublayer(layer)
     container.videoLayer = layer
 
+    stageLayer = stage
     containerLayer = container
     videoLayer = layer
     contentView.wantsLayer = true
     guard let contentLayer = contentView.layer else {
+      stageLayer = nil
       containerLayer = nil
       videoLayer = nil
       return false
     }
-    attachContainer(to: contentLayer, frame: contentView.bounds)
+    layoutLayers(in: contentLayer, videoFrame: contentView.bounds)
+    // 初始隐藏视频容器；全窗 stage 仍显示，避免透桌面。
     setContainerHidden(true)
 
     NotificationCenter.default.addObserver(
@@ -98,40 +109,30 @@ final class KotvMpvCore {
     assert(Thread.isMainThread)
     guard containerLayer != nil else { return }
     isVisible = visible
-    if visible, let contentView = window?.contentView, let contentLayer = contentView.layer {
+    if let contentView = window?.contentView, let contentLayer = contentView.layer {
       contentView.wantsLayer = true
-      attachContainer(to: contentLayer, frame: contentView.bounds)
+      layoutLayers(in: contentLayer, videoFrame: containerLayer?.frame ?? contentView.bounds)
     }
     setContainerHidden(!visible || layerHiddenForOcclusion)
   }
 
   func updateFrame(_ rect: CGRect?) {
     assert(Thread.isMainThread)
-    guard let containerLayer else { return }
+    guard let contentView = window?.contentView, let contentLayer = contentView.layer else { return }
+    let bounds = contentView.bounds
     let target: CGRect
     if let rect, rect.width > 1, rect.height > 1 {
-      if let bounds = window?.contentView?.bounds {
-        target = CGRect(
-          x: rect.origin.x,
-          y: bounds.height - rect.origin.y - rect.height,
-          width: rect.width,
-          height: rect.height
-        )
-      } else {
-        target = rect
-      }
-    } else if let contentView = window?.contentView {
-      target = contentView.bounds
+      // Dart 逻辑坐标原点左上 → AppKit layer 原点左下。
+      target = CGRect(
+        x: rect.origin.x,
+        y: bounds.height - rect.origin.y - rect.height,
+        width: rect.width,
+        height: rect.height
+      )
     } else {
-      return
+      target = bounds
     }
-    CATransaction.begin()
-    CATransaction.setDisableActions(true)
-    containerLayer.frame = target
-    let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
-    containerLayer.contentsScale = scale
-    videoLayer?.contentsScale = scale
-    CATransaction.commit()
+    layoutLayers(in: contentLayer, videoFrame: target)
   }
 
   /// 投递到 mpv 队列（MethodChannel 路径用，勿在主线程同步等）。
@@ -167,7 +168,8 @@ final class KotvMpvCore {
   }
 
   func open(url: String, startAtMs: Int64 = 0) {
-    DispatchQueue.main.async { [weak self] in self?.setVisible(false) }
+    // 换集时保持 ASBDL 可见：隐藏会导致 vo 丢帧后只剩黑层；遮罩由 Dart hole 负责。
+    DispatchQueue.main.async { [weak self] in self?.setVisible(true) }
     command(["stop"])
     if startAtMs > 0 {
       let sec = String(format: "%.3f", Double(startAtMs) / 1000.0)
@@ -256,8 +258,10 @@ final class KotvMpvCore {
       NotificationCenter.default.removeObserver(self)
       self.videoLayer?.removeFromSuperlayer()
       self.containerLayer?.removeFromSuperlayer()
+      self.stageLayer?.removeFromSuperlayer()
       self.videoLayer = nil
       self.containerLayer = nil
+      self.stageLayer = nil
       self.window = nil
       completion?()
     }
@@ -475,20 +479,39 @@ final class KotvMpvCore {
   }
 
   @objc private func windowDidChangeBacking(_ notification: Notification) {
-    updateFrame(nil)
+    // 只按当前播放洞重排；勿 updateFrame(nil) 扩成全窗盖住 UI。
+    guard let contentView = window?.contentView, let contentLayer = contentView.layer else { return }
+    layoutLayers(in: contentLayer, videoFrame: containerLayer?.frame ?? contentView.bounds)
   }
 
-  private func attachContainer(to superlayer: CALayer, frame: CGRect) {
-    guard let containerLayer else { return }
+  /// stage（全窗黑）与视频容器挂在宿主 layer；zPosition 低于 Flutter 子视图（见 MainFlutterWindow）。
+  private func layoutLayers(in superlayer: CALayer, videoFrame: CGRect) {
+    guard let stageLayer, let containerLayer else { return }
     CATransaction.begin()
     CATransaction.setDisableActions(true)
-    superlayer.backgroundColor = NSColor.black.cgColor
-    superlayer.isOpaque = true
-    if containerLayer.superlayer !== superlayer || superlayer.sublayers?.first !== containerLayer {
-      containerLayer.removeFromSuperlayer()
-      superlayer.insertSublayer(containerLayer, at: 0)
+    let bounds = superlayer.bounds
+    stageLayer.frame = bounds
+    stageLayer.zPosition = -2
+    containerLayer.zPosition = -1
+    if stageLayer.superlayer !== superlayer {
+      stageLayer.removeFromSuperlayer()
+      superlayer.insertSublayer(stageLayer, at: 0)
     }
-    containerLayer.frame = frame
+    let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+    containerLayer.contentsScale = scale
+    videoLayer?.contentsScale = scale
+    stageLayer.contentsScale = scale
+    if containerLayer.superlayer !== superlayer {
+      containerLayer.removeFromSuperlayer()
+      superlayer.insertSublayer(containerLayer, above: stageLayer)
+    } else if let subs = superlayer.sublayers,
+              let si = subs.firstIndex(of: stageLayer),
+              let ci = subs.firstIndex(of: containerLayer),
+              ci < si
+    {
+      superlayer.insertSublayer(containerLayer, above: stageLayer)
+    }
+    containerLayer.frame = videoFrame
     CATransaction.commit()
   }
 
@@ -496,6 +519,8 @@ final class KotvMpvCore {
     CATransaction.begin()
     CATransaction.setDisableActions(true)
     containerLayer?.isHidden = hidden
+    // stage 始终显示，挡住 Flutter α=0 处的桌面。
+    stageLayer?.isHidden = false
     CATransaction.commit()
   }
 }
