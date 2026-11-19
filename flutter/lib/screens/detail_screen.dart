@@ -3034,7 +3034,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         child: Stack(
           fit: StackFit.expand,
           children: [
-            // letterbox：Texture/HWND 用黑底；macOS underlay 洞后透明（洞外黑由原生 stage）。
+            // letterbox：Texture/HWND 用黑底；macOS underlay 洞后透明（洞外 contentView.layer 黑）。
             kotvMpvLetterboxFill(),
             ExcludeFocus(child: _buildSharedVideo(fit: _aspect.fit)),
             // 仅 Android：解析/无帧/起播缓冲盖住 Hybrid Surface，防叠影。
@@ -3974,7 +3974,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
                 if (_immersiveFullscreen && !_ambientOn) const ColoredBox(color: Colors.black),
                 if (!_immersiveFullscreen) detailScaffold,
               ] else ...[
-                // 全屏 letterbox：underlay 透明（原生 stage 挡桌面），其它平台黑底。
+                // 全屏 letterbox：underlay 透明，其它平台黑底。
                 if (_immersiveFullscreen && !_ambientOn) kotvMpvLetterboxFill(),
                 Offstage(
                   offstage: _immersiveFullscreen,

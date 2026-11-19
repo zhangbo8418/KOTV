@@ -3,11 +3,11 @@ import 'package:flutter/services.dart';
 
 import 'kotv_platform.dart';
 
-/// macOS underlay：画面在 Flutter 之下。
-/// 洞内须透明才能露出 ASBDL；洞外黑底由原生全窗 stage 层提供（勿在 Flutter 侧铺满黑挡住洞）。
+/// macOS：画面在 Flutter 之下（contentView.layer 底 ASBDL）。
+/// 洞内透明露出画面；洞外靠原生把 contentView.layer 涂黑，勿在 Flutter 铺满黑挡洞。
 bool kotvMpvUsesUnderlayHole() => kotvUsesNativeMpv() && kotvIsMacOS();
 
-/// 详情/直播视频栈 letterbox：underlay 洞后不再铺黑；其它平台仍黑底。
+/// 详情/直播视频栈 letterbox：underlay 洞后透明；其它平台黑底。
 Widget kotvMpvLetterboxFill({Key? key}) => ColoredBox(
       key: key,
       color: kotvMpvUsesUnderlayHole() ? Colors.transparent : Colors.black,
@@ -100,7 +100,7 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
       },
       child: SizeChangedLayoutNotifier(
         child: ColoredBox(
-          // 加载期黑遮；就绪后透明露出 ASBDL（洞外由原生 stage 挡桌面）。
+          // 未就绪黑遮；就绪后透明露出 ASBDL（洞外 contentView.layer 为黑）。
           color: cover ? Colors.black : Colors.transparent,
         ),
       ),

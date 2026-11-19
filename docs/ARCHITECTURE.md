@@ -133,7 +133,7 @@ Go Engine（单进程，:9978）
 
 | 引擎 | 平台 | 说明 |
 |------|------|------|
-| **MPV** | Android / macOS / Windows / Linux：原生 `kotv_mpv`（Android 功能完整；桌面薄桥：macOS `vo=avfoundation` underlay、Win `gpu-next`+HWND、Linux X11 wid）；iOS：`media_kit` | hwdec：`KotvMpvOpts.hwdecValue()`；Win7 直出=`dxva2`；macOS：宿主 NSView 垫 stage+ASBDL，Flutter 子视图透明洞露画面；碟片导航仅 Android；ISO 见 `disc_play.dart` |
+| **MPV** | Android / macOS / Windows / Linux：原生 `kotv_mpv`（Android 功能完整；桌面薄桥：macOS `vo=avfoundation`+ASBDL 垫在 contentView.layer、Win `gpu-next`+子 HWND、Linux X11 wid / 非 X11 暂 `libmpv`）；iOS：`media_kit` | hwdec：`KotvMpvOpts.hwdecValue()`；Win7 直出=`dxva2`；macOS 窗口不透明黑 + Flutter `.clear`，洞内透明露画面；碟片导航仅 Android；ISO 见 `disc_play.dart` |
 | **FVP**（libmdk） | 桌面 / iOS（Android 仅 Exo + MPV） | 备选页内引擎，硬/软/自动解码列表由设置下发 |
 | 外部播放器 | 全平台 | 安卓 Intent；桌面网格选本机视频应用后把当前播放地址（含代理）原样交给该应用；引擎 API 仅无 GUI 兜底 |
 

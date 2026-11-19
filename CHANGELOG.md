@@ -3,7 +3,7 @@
 ## v0.3.5
 
 - 桌面原生 MPV（`kotv_mpv`）：macOS underlay（vo=avfoundation）、Windows 子 HWND（vo=gpu-next）、Linux X11 wid；hwdec 由 Dart `KotvMpvOpts.hwdecValue()` 单点下发。桌面为薄宿主（轨表/排队/碟片等尚未齐；碟片导航仅 Android）。完整 DirectComposition / Wayland 平面需定制 Flutter 引擎，本轮不做。
-- macOS：mpv API 离主线程串行；窗口改用宿主 NSView 垫 stage+ASBDL（Flutter 作子视图），洞外不透桌面、洞内露画面；开播保持容器可见；进度 300ms 节流；实际解码读 `hwdec-current`。
+- macOS：mpv API 离主线程串行；ASBDL 插 contentView.layer 底层并涂黑挡桌面；Flutter `.clear` 洞内露画面；开播保持可见并 flush 失败 ASBDL；进度 300ms 节流；实际解码读 `hwdec-current`。
 - Win7 硬解直出经 `setProperty(hwdec=dxva2)`；关直出为 `auto`。
 - CI：FFmpeg `dovi_convert` helpers；Linux EventChannel 签名；Windows 生成 `mpv.lib`（禁 MSVC 直链 .dll）；Win7 SDK 改用 `withOpacity`。
 - 清理未链接多余 mpv 副本；iOS 仍走 media_kit。
