@@ -55,7 +55,7 @@ class MainFlutterWindow: NSWindow {
 
     let ch = FlutterMethodChannel(
       name: "kotv_host",
-      binaryMessenger: flutterViewController.engine.binaryMessenger
+      binaryMessenger: fvc.engine.binaryMessenger
     )
     ch.setMethodCallHandler { call, result in
       switch call.method {
