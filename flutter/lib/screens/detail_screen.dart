@@ -2950,7 +2950,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       final s = (stackSize != null && stackSize.width >= 1 && stackSize.height >= 1)
           ? stackSize
           : MediaQuery.sizeOf(context);
-      final r = Offset.zero & s;
+      var r = Offset.zero & s;
+      // Windows 子 HWND 画在 Flutter 之上：全屏勿铺满，否则顶底栏/选集/手势 HUD 被挡住。
+      if (kotvIsWindows() && r.width > 120 && r.height > 160) {
+        r = Rect.fromLTRB(r.left, r.top + 52, r.right - 12, r.bottom - 92);
+      }
       // 氛围模式：画面略内缩，四周透出壳层壁纸（默认适应仍是黑边）。
       if (_ambientOn && r.width > 80 && r.height > 96) {
         return Rect.fromLTRB(r.left + 28, r.top + 36, r.right - 28, r.bottom - 36);
@@ -2958,6 +2962,22 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       return r;
     }
     return _videoLayerRect ?? Rect.zero;
+  }
+
+  /// 顶栏下内容区 → 窗口全局坐标，供 [KotvMpvUnderlayClip] 裁 Windows HWND。
+  Rect? _underlayGlobalClip() {
+    if (_immersiveFullscreen || _holdImmersiveVideoGeom) return null;
+    final clip = _bodyClipRect;
+    final stackBox = _detailStackKey.currentContext?.findRenderObject() as RenderBox?;
+    if (clip == null || stackBox == null || !stackBox.hasSize || !stackBox.attached) {
+      return null;
+    }
+    try {
+      final o = stackBox.localToGlobal(clip.topLeft);
+      return o & clip.size;
+    } catch (_) {
+      return null;
+    }
   }
 
   Widget _buildStableVideoLayer(BuildContext context, {Size? stackSize}) {
@@ -3000,29 +3020,35 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       clip = paint;
     }
 
+    final underlayClip = _underlayGlobalClip();
     return ValueListenableBuilder<double>(
       valueListenable: _fsSwipeDy,
       builder: (context, swipeDy, child) {
         final dy = _immersiveFullscreen ? swipeDy : 0.0;
+        Widget layer = ClipRect(
+          child: Stack(
+            clipBehavior: Clip.hardEdge,
+            children: [
+              Positioned(
+                left: paint!.left - clip!.left,
+                top: paint.top - clip.top + dy,
+                width: paint.width,
+                height: paint.height,
+                child: child!,
+              ),
+            ],
+          ),
+        );
+        // Windows：把「顶栏下可见区」传给洞组件，HWND 与之求交，避免盖住返回/搜索/弹窗。
+        if (underlayClip != null) {
+          layer = KotvMpvUnderlayClip(globalClip: underlayClip, child: layer);
+        }
         return Positioned(
           left: clip!.left,
           top: clip.top,
           width: clip.width,
           height: clip.height,
-          child: ClipRect(
-            child: Stack(
-              clipBehavior: Clip.hardEdge,
-              children: [
-                Positioned(
-                  left: paint!.left - clip.left,
-                  top: paint.top - clip.top + dy,
-                  width: paint.width,
-                  height: paint.height,
-                  child: child!,
-                ),
-              ],
-            ),
-          ),
+          child: layer,
         );
       },
       child: GestureDetector(

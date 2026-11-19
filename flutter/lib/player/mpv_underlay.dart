@@ -12,6 +12,35 @@ Widget kotvMpvLetterboxFill({Key? key}) => ColoredBox(
       color: kotvMpvUsesUnderlayHole() ? Colors.transparent : Colors.black,
     );
 
+/// 可选：原生洞的全局裁剪矩形（窗口逻辑坐标）。
+/// Windows 子 HWND 画在 Flutter 之上，须与顶栏下内容区求交，否则会盖住顶栏/弹窗。
+class KotvMpvUnderlayClip extends InheritedWidget {
+  const KotvMpvUnderlayClip({
+    super.key,
+    required this.globalClip,
+    required super.child,
+  });
+
+  /// 允许露出视频的全局矩形；null 表示不额外裁剪。
+  final Rect? globalClip;
+
+  static Rect? maybeOf(BuildContext context) {
+    return context.dependOnInheritedWidgetOfExactType<KotvMpvUnderlayClip>()?.globalClip;
+  }
+
+  @override
+  bool updateShouldNotify(covariant KotvMpvUnderlayClip oldWidget) {
+    final a = globalClip;
+    final b = oldWidget.globalClip;
+    if (identical(a, b)) return false;
+    if (a == null || b == null) return a != b;
+    return (a.left - b.left).abs() > 0.5 ||
+        (a.top - b.top).abs() > 0.5 ||
+        (a.width - b.width).abs() > 0.5 ||
+        (a.height - b.height).abs() > 0.5;
+  }
+}
+
 /// 播放洞：下发几何 `updateFrame`；未就绪黑遮。
 /// macOS 显隐只由原生 open/stop 驱动；Win 仍经通道 `setVisible`。
 /// 就绪后须 [BlendMode.clear] 清掉同帧已画像素，单靠 transparent 透不出 ASBDL。
@@ -31,6 +60,9 @@ class KotvMpvUnderlayHole extends StatefulWidget {
 
 class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
   static const _ch = MethodChannel('kotv_mpv');
+  Offset? _lastOrigin;
+  Size? _lastSize;
+  Rect? _lastSent;
   bool? _lastVisible;
 
   @override
@@ -50,10 +82,14 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
   @override
   void didUpdateWidget(covariant KotvMpvUnderlayHole oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.ready != widget.ready ||
-        oldWidget.coverUntilReady != widget.coverUntilReady) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _sync());
-    }
+    // 父级 Positioned 位移也会走到这里；不能只盯 ready/cover。
+    WidgetsBinding.instance.addPostFrameCallback((_) => _sync());
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _sync());
   }
 
   Future<void> _setVisible(bool visible) async {
@@ -80,11 +116,43 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
     if (!mounted) return;
     final box = context.findRenderObject() as RenderBox?;
     if (box == null || !box.hasSize) return;
+
+    // 弹窗等路由盖在详情上时：Win HWND 在 Flutter 之上，必须藏层，否则挡住对话框。
+    final route = ModalRoute.of(context);
+    if (kotvIsWindows() && route != null && !route.isCurrent) {
+      _setVisible(false);
+      return;
+    }
+
     final origin = box.localToGlobal(Offset.zero);
     final size = box.size;
-    // 每次都下发：core 重建时几何未变但原生 pending 可能刚清空。
-    _updateFrame(origin & size);
-    // Win：就绪后显 HWND。macOS：原生 open/首帧负责显层；未就绪只用 Flutter 黑遮。
+    var hole = origin & size;
+
+    final clip = KotvMpvUnderlayClip.maybeOf(context);
+    if (clip != null) {
+      hole = hole.intersect(clip);
+    }
+
+    final moved = _lastOrigin != origin || _lastSize != size;
+    _lastOrigin = origin;
+    _lastSize = size;
+
+    if (hole.width < 1 || hole.height < 1) {
+      if (kotvIsWindows()) _setVisible(false);
+      return;
+    }
+
+    final sameSent = _lastSent != null &&
+        (_lastSent!.left - hole.left).abs() < 0.5 &&
+        (_lastSent!.top - hole.top).abs() < 0.5 &&
+        (_lastSent!.width - hole.width).abs() < 0.5 &&
+        (_lastSent!.height - hole.height).abs() < 0.5;
+    // 位移或裁剪变化都要下发；尺寸未变但 origin 变时 SizeChangedLayoutNotifier 不会响。
+    if (!sameSent || moved) {
+      _lastSent = hole;
+      _updateFrame(hole);
+    }
+
     if (kotvIsWindows()) {
       if (widget.ready && !widget.coverUntilReady) {
         _setVisible(true);
@@ -95,6 +163,8 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
   @override
   Widget build(BuildContext context) {
     final cover = !widget.ready || widget.coverUntilReady;
+    // 每帧后核对全局原点：仅靠 SizeChangedLayoutNotifier 感知不到平移。
+    WidgetsBinding.instance.addPostFrameCallback((_) => _sync());
     return NotificationListener<SizeChangedLayoutNotification>(
       onNotification: (_) {
         WidgetsBinding.instance.addPostFrameCallback((_) => _sync());

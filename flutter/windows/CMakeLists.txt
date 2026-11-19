@@ -141,7 +141,7 @@ foreach(_kotv_mpv_dll IN LISTS KOTV_MPV_WIN_DLLS)
   endif()
   install(FILES "${_kotv_mpv_dll}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}" COMPONENT Runtime)
 endforeach()
-# media_kit 优先 LoadLibrary("libmpv-2.dll")；自编译产物在 assets 为 mpv-2.dll，安装时统一命名。
+# 自编译产物多为 mpv-2.dll；安装名统一 libmpv-2.dll（与 mpv.lib 的 LIBRARY、media_kit LoadLibrary 一致）。
 if(EXISTS "${KOTV_MPV_WIN_DIR}/mpv-2.dll")
   install(FILES "${KOTV_MPV_WIN_DIR}/mpv-2.dll"
     DESTINATION "${INSTALL_BUNDLE_LIB_DIR}" RENAME "libmpv-2.dll" COMPONENT Runtime)
@@ -149,8 +149,10 @@ elseif(EXISTS "${KOTV_MPV_WIN_DIR}/libmpv-2.dll")
   install(FILES "${KOTV_MPV_WIN_DIR}/libmpv-2.dll"
     DESTINATION "${INSTALL_BUNDLE_LIB_DIR}" COMPONENT Runtime)
 endif()
+# 勿再留 mpv-2.dll / mpv.dll，避免与 libmpv-2.dll 双份；导入库须指向 libmpv-2.dll。
 install(CODE "
   file(REMOVE \"${CMAKE_INSTALL_PREFIX}/mpv-2.dll\")
+  file(REMOVE \"${CMAKE_INSTALL_PREFIX}/mpv.dll\")
 " COMPONENT Runtime)
 # Engine binary from Flutter assets if present (Windows: only .exe).
 set(KOTV_ENGINE_BIN "${CMAKE_CURRENT_SOURCE_DIR}/../assets/engine/kotv-engine.exe")

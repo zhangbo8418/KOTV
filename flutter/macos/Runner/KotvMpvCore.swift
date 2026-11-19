@@ -2,13 +2,13 @@ import AVFoundation
 import Cocoa
 import QuartzCore
 
-
 /// macOS 原生 libmpv：`vo=avfoundation`，ASBDL 插在 `contentView.layer` 最底层。
 ///
 /// 窗口不透明黑底 + Flutter VC `.clear`；`attachContainerLayer` 把 contentView.layer
 /// 涂黑并 `insertSublayer(..., at: 0)`，透明洞露出画面、洞外不透桌面。
-/// 几何：`updateFrame(frame?)` 有洞矩形则用之，否则铺满 contentView。
-/// EDR：仅软解 + sigPeak>1（硬解 underlay 开 EDR 色偏，已验证整窗方案无效）。
+/// 几何：`updateFrame` 按洞矩形裁 ASBDL；续播点在 FILE_LOADED 后再 seek（勿 loadfile start=）。
+/// EDR：仅软解且 sigPeak>1。硬解 VT 零拷贝不走 soft 的 `tag_pixel_buffer_color_metadata`，
+/// 开 EDR 易色偏（根因在 CV 附件路径，非整窗/洞几何）；故硬解保持关 EDR。
 /// 所有 `mpv_*` 仅在 [mpvQueue]（VO 会 `dispatch_sync` 主队列，主线程同步调 mpv 会死锁）。
 final class KotvMpvCore {
   private weak var window: NSWindow?
@@ -19,7 +19,7 @@ final class KotvMpvCore {
   private var wakeup: (() -> Void)?
   private var positionTimer: DispatchSourceTimer?
   private var lastSigPeak = 0.0
-  /// 会话 HDR 偏好；实际 EDR 仅软解且 sigPeak>1 时开启（硬解 underlay 开 EDR 无效）。
+  /// 会话 HDR 偏好；EDR 门闩见 [updateEDRMode]。
   private var hdrEnabled = true
   private var isVisible = false
   private var layerHiddenForOcclusion = false
@@ -576,7 +576,6 @@ final class KotvMpvCore {
     emit(info)
   }
 
-  /// 当前是否软解（hwdec=no）。硬解 underlay 开 EDR 无效，仅软解开。
   private func isSoftDecode() -> Bool {
     guard let handle = mpv else { return false }
     if let raw = mpv_get_property_string(handle, "hwdec") {
@@ -590,7 +589,7 @@ final class KotvMpvCore {
     return false
   }
 
-  /// EDR：仅软解 + HDR 片；硬解保持关（洞口下无效；整窗方案已验证无效）。
+  /// 见类型注释：仅软解 + sigPeak>1 开 EDR。
   private func updateEDRMode(sigPeak: Double) {
     lastSigPeak = sigPeak
     let soft = isSoftDecode()

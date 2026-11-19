@@ -1273,8 +1273,9 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       _chromeKey.currentState?.openEpisodes();
       setState(() {});
     }
-    // 被动：栏隐不因 hover reveal；栏已显才续命。
-    _bumpChrome();
+    // 桌面：栏隐时移入也亮栏（Win HWND 压在画面上时否则播控不可达）。
+    // 移动端仍被动续命，避免滑动误亮栏。
+    _bumpChrome(intentional: kotvIsDesktop());
   }
 
   void _onPointerExit() {
