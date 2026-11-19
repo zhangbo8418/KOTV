@@ -266,7 +266,7 @@ void method_call(FlMethodChannel*, FlMethodCall* call, gpointer) {
     apply_decode();
     std::string url = map_str(args, "url");
     int64_t start = map_int(args, "startAtMs");
-    command({"stop"});
+    // replace 即可换片；勿 stop（打断无缝换集）。
     if (start > 0) {
       char start_opt[64];
       snprintf(start_opt, sizeof(start_opt), "start=%.3f", start / 1000.0);

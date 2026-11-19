@@ -446,12 +446,14 @@ class NativeMpvPlayback extends KotvPlayback {
       case 'ready':
         final nw = (m['width'] as num?)?.toInt() ?? _w;
         final nh = (m['height'] as num?)?.toInt() ?? _h;
-        if (nw > 0) _w = nw;
-        if (nh > 0) _h = nh;
+        // 忽略 0 尺寸 ready（loadfile/stop 抖动），避免提前揭盖与 silent 误判。
+        if (nw <= 0 || nh <= 0) break;
+        _w = nw;
+        _h = nh;
         _ready = true;
         _underlayCover = false;
         _lastError = null;
-        if (_w > 0 && _h > 0) _buffering = false;
+        _buffering = false;
         unawaited(_refreshTracks());
         // 出尺寸只 notify；勿 _bumpSurface，否则易卸掉已挂的 PlatformView。
         notifyListeners();

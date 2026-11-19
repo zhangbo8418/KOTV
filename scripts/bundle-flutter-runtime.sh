@@ -11,6 +11,12 @@ ENGINE_SRC="$ROOT/flutter/assets/engine/kotv-engine"
 [[ -f "$ENGINE_SRC" ]] || ENGINE_SRC="$ROOT/flutter/assets/engine/kotv-engine.exe"
 DEST_ROOT="${1:-}"
 
+# 本地磁盘紧时只编 Runner 二进制：跳过 runtime 拷贝（发行包勿设）。
+if [[ "${KOTV_SKIP_RUNTIME_BUNDLE:-}" == "1" ]]; then
+  echo "==> skip Bundle KOTV runtime (KOTV_SKIP_RUNTIME_BUNDLE=1)"
+  exit 0
+fi
+
 if [[ -z "$DEST_ROOT" ]]; then
   echo "usage: $0 <KO影视.app | install-dir>" >&2
   exit 1

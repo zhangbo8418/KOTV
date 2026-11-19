@@ -31,8 +31,6 @@ class KotvMpvUnderlayHole extends StatefulWidget {
 
 class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
   static const _ch = MethodChannel('kotv_mpv');
-  Offset? _lastOrigin;
-  Size? _lastSize;
   bool? _lastVisible;
 
   @override
@@ -84,11 +82,8 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
     if (box == null || !box.hasSize) return;
     final origin = box.localToGlobal(Offset.zero);
     final size = box.size;
-    if (_lastOrigin != origin || _lastSize != size) {
-      _lastOrigin = origin;
-      _lastSize = size;
-      _updateFrame(origin & size);
-    }
+    // 每次都下发：core 重建时几何未变但原生 pending 可能刚清空。
+    _updateFrame(origin & size);
     // Win：就绪后显 HWND。macOS：原生 open/首帧负责显层；未就绪只用 Flutter 黑遮。
     if (kotvIsWindows()) {
       if (widget.ready && !widget.coverUntilReady) {

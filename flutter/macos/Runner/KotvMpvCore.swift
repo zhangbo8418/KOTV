@@ -2,11 +2,13 @@ import AVFoundation
 import Cocoa
 import QuartzCore
 
+
 /// macOS 原生 libmpv：`vo=avfoundation`，ASBDL 插在 `contentView.layer` 最底层。
 ///
 /// 窗口不透明黑底 + Flutter VC `.clear`；`attachContainerLayer` 把 contentView.layer
 /// 涂黑并 `insertSublayer(..., at: 0)`，透明洞露出画面、洞外不透桌面。
 /// 几何：`updateFrame(frame?)` 有洞矩形则用之，否则铺满 contentView。
+/// EDR：仅软解 + sigPeak>1（硬解 underlay 开 EDR 色偏，已验证整窗方案无效）。
 /// 所有 `mpv_*` 仅在 [mpvQueue]（VO 会 `dispatch_sync` 主队列，主线程同步调 mpv 会死锁）。
 final class KotvMpvCore {
   private weak var window: NSWindow?
@@ -17,7 +19,7 @@ final class KotvMpvCore {
   private var wakeup: (() -> Void)?
   private var positionTimer: DispatchSourceTimer?
   private var lastSigPeak = 0.0
-  /// 默认开 HDR/EDR；关则 target-colorspace-hint=no 并由系统压到 SDR。
+  /// 会话 HDR 偏好；实际 EDR 仅软解且 sigPeak>1 时开启（硬解 underlay 开 EDR 无效）。
   private var hdrEnabled = true
   private var isVisible = false
   private var layerHiddenForOcclusion = false
@@ -25,6 +27,8 @@ final class KotvMpvCore {
   private var destroyed = false
   /// 最近一次洞矩形（逻辑坐标已转 contentView）；无参 updateFrame 时复用。
   private var lastHoleFrame: CGRect?
+  /// loadfile 勿带 start=（VT+avfoundation 会卡住不出 FILE_LOADED）；FILE_LOADED 后再 seek，且不 pause。
+  private var pendingStartMs: Int64 = 0
   private var playbackActivity: NSObjectProtocol?
   private var pausedState = true
 
@@ -159,7 +163,6 @@ final class KotvMpvCore {
   /// Dart 逻辑坐标（顶左原点）→ AppKit layer（底左原点）。nil/无效则铺满或复用上次洞。
   func updateFrame(_ rect: CGRect? = nil) {
     assert(Thread.isMainThread)
-    guard let containerLayer else { return }
     let target: CGRect
     if let rect, rect.width > 1, rect.height > 1, let bounds = window?.contentView?.bounds {
       target = CGRect(
@@ -168,6 +171,7 @@ final class KotvMpvCore {
         width: rect.width,
         height: rect.height
       )
+      // 即使 layer 尚未建好也先记下洞，open/setVisible 时用。
       lastHoleFrame = target
     } else if let lastHoleFrame {
       target = lastHoleFrame
@@ -176,6 +180,7 @@ final class KotvMpvCore {
     } else {
       return
     }
+    guard let containerLayer else { return }
     withoutLayerAnimations {
       containerLayer.frame = target
       updateContentsScale()
@@ -210,6 +215,9 @@ final class KotvMpvCore {
       return
     }
     mpv_set_property_string(handle, name, value)
+    if name == "hwdec" {
+      updateEDRMode(sigPeak: lastSigPeak)
+    }
   }
 
   func command(_ args: [String]) {
@@ -227,15 +235,12 @@ final class KotvMpvCore {
   }
 
   func open(url: String, startAtMs: Int64 = 0) {
+    pendingStartMs = max(0, startAtMs)
     // loadfile 前显示层；遮罩由 Dart 洞负责。
     DispatchQueue.main.async { [weak self] in self?.setVisible(true) }
-    command(["stop"])
-    if startAtMs > 0 {
-      let sec = String(format: "%.3f", Double(startAtMs) / 1000.0)
-      command(["loadfile", url, "replace", "start=\(sec)"])
-    } else {
-      command(["loadfile", url, "replace"])
-    }
+    // replace 即可换片；勿 stop（会打断无缝换集），勿 pause。
+    // 勿把 start= 写进 loadfile：硬解 VT 在 underlay 上会长期不出 FILE_LOADED。
+    command(["loadfile", url, "replace"])
     command(["set", "pause", "no"])
     pausedState = false
   }
@@ -317,7 +322,8 @@ final class KotvMpvCore {
     mpv_get_property(handle, "video-params/sig-peak", MPV_FORMAT_DOUBLE, &peak)
     mpv_get_property(handle, "dwidth", MPV_FORMAT_INT64, &w)
     mpv_get_property(handle, "dheight", MPV_FORMAT_INT64, &h)
-    let edrOn = hdrEnabled && peak > 1.0
+    let soft = hwdec == "no" || hwcur == "no"
+    let edrOn = hdrEnabled && soft && peak > 1.0
     return [
       "hwdec": hwdec,
       "hwdec-current": hwcur.isEmpty ? hwdec : hwcur,
@@ -473,6 +479,7 @@ final class KotvMpvCore {
         updateEDRMode(sigPeak: peak)
       case "hwdec-current":
         emitVideoInfo()
+        updateEDRMode(sigPeak: lastSigPeak)
       default:
         break
       }
@@ -485,6 +492,12 @@ final class KotvMpvCore {
         mpv_get_property(handle, "video-params/sig-peak", MPV_FORMAT_DOUBLE, &peak)
       }
       updateEDRMode(sigPeak: peak)
+      // 续播点：首帧就绪后 seek，保持播放（不 pause），避免无缝换集卡死。
+      if pendingStartMs > 0 {
+        let ms = pendingStartMs
+        pendingStartMs = 0
+        seek(positionMs: ms)
+      }
       DispatchQueue.main.async { [weak self] in
         guard let self else { return }
         if let contentView = self.window?.contentView, let layer = contentView.layer {
@@ -550,6 +563,10 @@ final class KotvMpvCore {
       mpv_get_property(handle, "video-params/w", MPV_FORMAT_INT64, &w)
       mpv_get_property(handle, "video-params/h", MPV_FORMAT_INT64, &h)
     }
+    // loadfile 抖动时 dwidth=0：禁止发 ready，否则 Dart 提前揭盖与 silent 误判。
+    if ready && (w <= 0 || h <= 0) {
+      return
+    }
     emit(["event": ready ? "ready" : "size", "width": Int(w), "height": Int(h)])
   }
 
@@ -559,10 +576,25 @@ final class KotvMpvCore {
     emit(info)
   }
 
-  /// EDR 开：显示器可出 HDR 白以上；关：系统把 HDR 帧压成 SDR。
+  /// 当前是否软解（hwdec=no）。硬解 underlay 开 EDR 无效，仅软解开。
+  private func isSoftDecode() -> Bool {
+    guard let handle = mpv else { return false }
+    if let raw = mpv_get_property_string(handle, "hwdec") {
+      let hw = String(cString: raw); mpv_free(raw)
+      if hw == "no" { return true }
+    }
+    if let raw = mpv_get_property_string(handle, "hwdec-current") {
+      let cur = String(cString: raw); mpv_free(raw)
+      return cur == "no"
+    }
+    return false
+  }
+
+  /// EDR：仅软解 + HDR 片；硬解保持关（洞口下无效；整窗方案已验证无效）。
   private func updateEDRMode(sigPeak: Double) {
     lastSigPeak = sigPeak
-    let shouldEnableEDR = hdrEnabled && sigPeak > 1.0
+    let soft = isSoftDecode()
+    let shouldEnableEDR = hdrEnabled && soft && sigPeak > 1.0
     let apply: () -> Void = { [weak self] in
       guard let self, let videoLayer = self.videoLayer else { return }
       self.withoutLayerAnimations {
@@ -607,12 +639,11 @@ final class KotvMpvCore {
   }
 
   @objc private func windowDidEnterFullScreen(_ notification: Notification) {
-    lastHoleFrame = nil
+    // 勿清空 lastHoleFrame：退出/缩放后 Dart 会再下发洞；清空会导致 ASBDL 铺满、洞内只露一角。
     updateFrame()
   }
 
   @objc private func windowDidExitFullScreen(_ notification: Notification) {
-    lastHoleFrame = nil
     updateFrame()
   }
 

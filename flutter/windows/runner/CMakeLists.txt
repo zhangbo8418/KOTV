@@ -71,7 +71,8 @@ target_compile_definitions(${BINARY_NAME} PRIVATE
 
 # Add dependency libraries and include directories. Add any application-specific
 # dependencies here.
-target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app)
+# kotv_mpv_plugin 使用 PluginRegistrar*，须链 flutter_wrapper_plugin（否则 LNK2019）。
+target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app flutter_wrapper_plugin)
 target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "iphlpapi.lib")
 # 外部播放器：关联枚举 + HICON→PNG（WIC，Win7+）。

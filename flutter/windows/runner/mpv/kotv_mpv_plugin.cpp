@@ -357,7 +357,7 @@ class KotvMpvPlugin : public flutter::Plugin {
       ShowWindow(hwnd_, SW_HIDE);
       const std::string url = ArgString(args, "url");
       const int64_t start = ArgInt64(args, "startAtMs");
-      Command({"stop"});
+      // replace 即可换片；勿 stop（打断无缝换集）。
       if (start > 0) {
         char start_opt[64];
         snprintf(start_opt, sizeof(start_opt), "start=%.3f", start / 1000.0);

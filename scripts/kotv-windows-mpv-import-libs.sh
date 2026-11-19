@@ -24,7 +24,9 @@ elif [[ -n "${VSINSTALLDIR:-}" ]]; then
   libexe="$(find "${VSINSTALLDIR}/VC/Tools/MSVC" -name lib.exe 2>/dev/null | head -1 || true)"
 fi
 if [[ -s "$dest_def" && -n "$libexe" ]]; then
-  "$libexe" /nologo /machine:x64 /def:"$dest_def" /out:"$dir/mpv.lib" \
+  # Git Bash/MSYS 会把 /nologo 误转成 C:\Program Files\Git\nologo → LNK1181。
+  # 用 -nologo，并对其余 / 开关关闭路径转换。
+  MSYS2_ARG_CONV_EXCL='*' "$libexe" -nologo -machine:x64 "-def:$dest_def" "-out:$dir/mpv.lib" \
     && echo "ok windows/mpv.lib (MSVC import)"
 fi
 

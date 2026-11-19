@@ -1,6 +1,7 @@
 import Cocoa
 import FlutterMacOS
 
+
 /// MethodChannel `kotv_mpv` / EventChannel `kotv_mpv/events`。
 ///
 /// mpv API 一律经 [KotvMpvCore.asyncMpv]；layer 显隐/几何留在主线程。
@@ -14,6 +15,8 @@ final class KotvMpvPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
   private var livePlayback = false
   private var dolbyVisionPolicy = 0
   private weak var hostWindow: NSWindow?
+  /// Dart 洞（顶左原点）。core 重建间隙 updateFrame 可能落到 nil，须缓存到 ensureCore 后再应用。
+  private var pendingHoleFlutter: CGRect?
 
   static func register(with registrar: FlutterPluginRegistrar, window: NSWindow?) {
     let instance = KotvMpvPlugin()
@@ -109,11 +112,13 @@ final class KotvMpvPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
       return
     }
     core = created
+    applyPendingHole(to: created)
     created.startMpv { [weak self] ok in
       DispatchQueue.main.async {
         if ok {
           // 初始化后先隐藏，等 open/首帧再显。
           created.setVisible(false)
+          self?.applyPendingHole(to: created)
           completion(.success(created))
           return
         }
@@ -126,6 +131,11 @@ final class KotvMpvPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
         }
       }
     }
+  }
+
+  private func applyPendingHole(to core: KotvMpvCore) {
+    guard let hole = pendingHoleFlutter, hole.width > 1, hole.height > 1 else { return }
+    core.updateFrame(hole)
   }
 
   func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
@@ -159,6 +169,8 @@ final class KotvMpvPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
       ensureCore { [weak self] res in
         switch res {
         case .success(let c):
+          // 主线程先套洞，再进 mpvQueue open，避免 hasHole=false → 一角。
+          self?.applyPendingHole(to: c)
           c.asyncMpv {
             self?.applySessionOpts(c)
             if let props {
@@ -302,7 +314,11 @@ final class KotvMpvPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
           ?? (args?["height"] as? NSNumber)?.doubleValue,
          w > 1, h > 1
       {
-        core?.updateFrame(CGRect(x: x, y: y, width: w, height: h))
+        let hole = CGRect(x: x, y: y, width: w, height: h)
+        pendingHoleFlutter = hole
+        if let c = core {
+          c.updateFrame(hole)
+        }
       } else {
         core?.updateFrame()
       }
