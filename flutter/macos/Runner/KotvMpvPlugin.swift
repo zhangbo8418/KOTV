@@ -289,12 +289,23 @@ final class KotvMpvPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
       }
 
     case "setVisible":
-      core?.setVisible((args?["visible"] as? Bool) ?? false)
+      // macOS：显隐只由原生 open/stop/occlusion/sleep 驱动；忽略通道，避免洞组件双写。
       result(nil)
 
     case "updateFrame", "setVideoRect":
-      // macOS：忽略洞口矩形，始终铺满 contentView（Win/Linux 另走 HWND/wid）。
-      core?.updateFrame()
+      // Dart 逻辑坐标（顶左原点）；Core 内翻成 contentView 底左。
+      if let x = (args?["x"] as? NSNumber)?.doubleValue,
+         let y = (args?["y"] as? NSNumber)?.doubleValue,
+         let w = (args?["w"] as? NSNumber)?.doubleValue
+          ?? (args?["width"] as? NSNumber)?.doubleValue,
+         let h = (args?["h"] as? NSNumber)?.doubleValue
+          ?? (args?["height"] as? NSNumber)?.doubleValue,
+         w > 1, h > 1
+      {
+        core?.updateFrame(CGRect(x: x, y: y, width: w, height: h))
+      } else {
+        core?.updateFrame()
+      }
       result(nil)
 
     case "videoInfo":

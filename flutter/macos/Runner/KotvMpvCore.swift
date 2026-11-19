@@ -6,6 +6,7 @@ import QuartzCore
 ///
 /// 窗口不透明黑底 + Flutter VC `.clear`；`attachContainerLayer` 把 contentView.layer
 /// 涂黑并 `insertSublayer(..., at: 0)`，透明洞露出画面、洞外不透桌面。
+/// 几何：`updateFrame(frame?)` 有洞矩形则用之，否则铺满 contentView。
 /// 所有 `mpv_*` 仅在 [mpvQueue]（VO 会 `dispatch_sync` 主队列，主线程同步调 mpv 会死锁）。
 final class KotvMpvCore {
   private weak var window: NSWindow?
@@ -20,7 +21,17 @@ final class KotvMpvCore {
   private var hdrEnabled = true
   private var isVisible = false
   private var layerHiddenForOcclusion = false
+  private var layerHiddenForScreenSleep = false
   private var destroyed = false
+  /// 最近一次洞矩形（逻辑坐标已转 contentView）；无参 updateFrame 时复用。
+  private var lastHoleFrame: CGRect?
+  private var playbackActivity: NSObjectProtocol?
+  private var pausedState = true
+
+  /// 遮挡或屏幕睡眠时需要藏层。
+  private var hasLayerHideReason: Bool {
+    layerHiddenForOcclusion || layerHiddenForScreenSleep
+  }
 
   var onEvent: (([String: Any]) -> Void)?
   var isReady: Bool { mpv != nil && !destroyed }
@@ -41,7 +52,10 @@ final class KotvMpvCore {
     if containerLayer != nil {
       self.window = window
       if let contentView = window.contentView, let contentLayer = contentView.layer {
-        attachContainerLayer(to: contentLayer, frame: containerLayer?.frame ?? contentView.bounds)
+        attachContainerLayer(
+          to: contentLayer,
+          frame: lastHoleFrame ?? containerLayer?.frame ?? contentView.bounds
+        )
       }
       return true
     }
@@ -73,13 +87,31 @@ final class KotvMpvCore {
     attachContainerLayer(to: contentLayer, frame: contentView.bounds)
     setContainerHidden(true)
 
-    NotificationCenter.default.addObserver(
+    let center = NotificationCenter.default
+    center.addObserver(
       self, selector: #selector(windowOcclusionDidChange),
       name: NSWindow.didChangeOcclusionStateNotification, object: window
     )
-    NotificationCenter.default.addObserver(
+    center.addObserver(
       self, selector: #selector(windowDidChangeBacking),
       name: NSWindow.didChangeBackingPropertiesNotification, object: window
+    )
+    center.addObserver(
+      self, selector: #selector(windowDidEnterFullScreen),
+      name: NSWindow.didEnterFullScreenNotification, object: window
+    )
+    center.addObserver(
+      self, selector: #selector(windowDidExitFullScreen),
+      name: NSWindow.didExitFullScreenNotification, object: window
+    )
+    let workspace = NSWorkspace.shared.notificationCenter
+    workspace.addObserver(
+      self, selector: #selector(screensDidSleep),
+      name: NSWorkspace.screensDidSleepNotification, object: nil
+    )
+    workspace.addObserver(
+      self, selector: #selector(screensDidWake),
+      name: NSWorkspace.screensDidWakeNotification, object: nil
     )
     return true
   }
@@ -111,21 +143,39 @@ final class KotvMpvCore {
     if visible, let contentView = window?.contentView {
       contentView.wantsLayer = true
       if let superlayer = contentView.layer {
-        attachContainerLayer(to: superlayer, frame: containerLayer?.frame ?? contentView.bounds)
+        let frame = lastHoleFrame ?? containerLayer?.frame ?? contentView.bounds
+        attachContainerLayer(to: superlayer, frame: frame)
       }
+      beginPlaybackActivity()
+    } else {
+      endPlaybackActivity()
     }
-    setContainerHidden(!visible || layerHiddenForOcclusion)
+    setContainerHidden(!visible || hasLayerHideReason)
     if visible {
       recoverDisplayLayerIfNeeded()
     }
   }
 
-  /// 容器始终铺满 contentView；洞口裁切由 Flutter 黑遮完成，勿按 Dart 矩形缩小 ASBDL。
+  /// Dart 逻辑坐标（顶左原点）→ AppKit layer（底左原点）。nil/无效则铺满或复用上次洞。
   func updateFrame(_ rect: CGRect? = nil) {
     assert(Thread.isMainThread)
     guard let containerLayer else { return }
-    guard let contentView = window?.contentView else { return }
-    let target = contentView.bounds
+    let target: CGRect
+    if let rect, rect.width > 1, rect.height > 1, let bounds = window?.contentView?.bounds {
+      target = CGRect(
+        x: rect.origin.x,
+        y: bounds.height - rect.origin.y - rect.height,
+        width: rect.width,
+        height: rect.height
+      )
+      lastHoleFrame = target
+    } else if let lastHoleFrame {
+      target = lastHoleFrame
+    } else if let contentView = window?.contentView {
+      target = contentView.bounds
+    } else {
+      return
+    }
     withoutLayerAnimations {
       containerLayer.frame = target
       updateContentsScale()
@@ -141,8 +191,9 @@ final class KotvMpvCore {
 
   func setProperty(_ name: String, _ value: String) {
     guard let handle = mpv else { return }
-    if name == "vo" || name == "wid" || name == "gpu-api" || name == "gpu-context"
-      || name.hasPrefix("avfoundation-")
+    // video-zoom 会逼 vo_avfoundation 走 Core Image，毁掉 HDR/DV 直出。
+    if name == "video-zoom" || name == "vo" || name == "wid" || name == "gpu-api"
+      || name == "gpu-context" || name.hasPrefix("avfoundation-")
     {
       return
     }
@@ -186,12 +237,27 @@ final class KotvMpvCore {
       command(["loadfile", url, "replace"])
     }
     command(["set", "pause", "no"])
+    pausedState = false
   }
 
-  func play() { command(["set", "pause", "no"]) }
-  func pause() { command(["set", "pause", "yes"]) }
+  func play() {
+    command(["set", "pause", "no"])
+    pausedState = false
+    DispatchQueue.main.async { [weak self] in
+      guard let self, self.isVisible else { return }
+      self.beginPlaybackActivity()
+    }
+  }
+
+  func pause() {
+    command(["set", "pause", "yes"])
+    pausedState = true
+    DispatchQueue.main.async { [weak self] in self?.endPlaybackActivity() }
+  }
+
   func stop() {
     command(["stop"])
+    pausedState = true
     DispatchQueue.main.async { [weak self] in self?.setVisible(false) }
   }
 
@@ -265,22 +331,34 @@ final class KotvMpvCore {
     ]
   }
 
+  /// 卸 mpv 后延迟再摘层，避免 WindowServer 在可见 sample-buffer 层上被拆 VO 时卡死。
+  private static let layerRetireDelay: TimeInterval = 0.2
+
   func destroy(completion: (() -> Void)? = nil) {
     destroyed = true
     positionTimer?.cancel()
     positionTimer = nil
+    endPlaybackActivity()
+    NotificationCenter.default.removeObserver(self)
+    NSWorkspace.shared.notificationCenter.removeObserver(self)
+
     let tearDownUI = { [weak self] in
       guard let self else {
         completion?()
         return
       }
-      NotificationCenter.default.removeObserver(self)
-      self.videoLayer?.removeFromSuperlayer()
-      self.containerLayer?.removeFromSuperlayer()
+      self.setContainerHidden(true)
+      let layer = self.videoLayer
+      let container = self.containerLayer
       self.videoLayer = nil
       self.containerLayer = nil
+      self.lastHoleFrame = nil
       self.window = nil
-      completion?()
+      DispatchQueue.main.asyncAfter(deadline: .now() + Self.layerRetireDelay) {
+        layer?.removeFromSuperlayer()
+        container?.removeFromSuperlayer()
+        completion?()
+      }
     }
     mpvQueue.async { [weak self] in
       guard let self else {
@@ -398,7 +476,7 @@ final class KotvMpvCore {
       default:
         break
       }
-      case MPV_EVENT_FILE_LOADED, MPV_EVENT_PLAYBACK_RESTART:
+    case MPV_EVENT_FILE_LOADED, MPV_EVENT_PLAYBACK_RESTART:
       emitSize(ready: true)
       emitPosition()
       emitVideoInfo()
@@ -407,13 +485,7 @@ final class KotvMpvCore {
         mpv_get_property(handle, "video-params/sig-peak", MPV_FORMAT_DOUBLE, &peak)
       }
       updateEDRMode(sigPeak: peak)
-      DispatchQueue.main.async { [weak self] in
-        guard let self else { return }
-        if let contentView = self.window?.contentView, let layer = contentView.layer {
-          self.ensureFlutterSurfacesAllowUnderlay(on: layer)
-        }
-        self.setVisible(true)
-      }
+      DispatchQueue.main.async { [weak self] in self?.setVisible(true) }
     case MPV_EVENT_END_FILE:
       if let data = event.data?.assumingMemoryBound(to: mpv_event_end_file.self).pointee {
         if data.reason == MPV_END_FILE_REASON_EOF {
@@ -451,6 +523,7 @@ final class KotvMpvCore {
 
     let playing = pause == 0 && idle == 0 && coreIdle == 0
     let buffering = seeking != 0 || cache != 0 || (!playing && eof == 0 && pos <= 0.05)
+    pausedState = pause != 0
     emit([
       "event": "position",
       "positionMs": Int64((pos.isFinite ? pos : 0) * 1000),
@@ -508,11 +581,17 @@ final class KotvMpvCore {
     if !visible && !layerHiddenForOcclusion {
       layerHiddenForOcclusion = true
       setContainerHidden(true)
+      endPlaybackActivity()
     } else if visible && layerHiddenForOcclusion {
       layerHiddenForOcclusion = false
-      setContainerHidden(!isVisible)
-      if isVisible {
-        recoverDisplayLayerIfNeeded()
+      if !layerHiddenForScreenSleep {
+        setContainerHidden(!isVisible)
+        if isVisible {
+          recoverDisplayLayerIfNeeded()
+        }
+      }
+      if isVisible && !pausedState {
+        beginPlaybackActivity()
       }
     }
   }
@@ -521,13 +600,41 @@ final class KotvMpvCore {
     updateFrame()
   }
 
+  @objc private func windowDidEnterFullScreen(_ notification: Notification) {
+    lastHoleFrame = nil
+    updateFrame()
+  }
+
+  @objc private func windowDidExitFullScreen(_ notification: Notification) {
+    lastHoleFrame = nil
+    updateFrame()
+  }
+
+  @objc private func screensDidSleep(_ notification: Notification) {
+    guard containerLayer != nil, mpv != nil, !layerHiddenForScreenSleep else { return }
+    layerHiddenForScreenSleep = true
+    setContainerHidden(true)
+    endPlaybackActivity()
+  }
+
+  @objc private func screensDidWake(_ notification: Notification) {
+    guard containerLayer != nil, mpv != nil, layerHiddenForScreenSleep else { return }
+    layerHiddenForScreenSleep = false
+    if !layerHiddenForOcclusion {
+      setContainerHidden(!isVisible)
+      if isVisible && !pausedState {
+        beginPlaybackActivity()
+      }
+    }
+    recoverDisplayLayerIfNeeded()
+  }
+
   /// 涂黑 contentView.layer 并插入容器到 index 0（Flutter 表面层之下）。
   private func attachContainerLayer(to superlayer: CALayer, frame: CGRect) {
     guard let containerLayer else { return }
     withoutLayerAnimations {
       superlayer.backgroundColor = NSColor.black.cgColor
       superlayer.isOpaque = true
-      containerLayer.zPosition = -1
       let needsReorder = superlayer.sublayers?.first !== containerLayer
       if containerLayer.superlayer !== superlayer || needsReorder {
         containerLayer.removeFromSuperlayer()
@@ -535,18 +642,6 @@ final class KotvMpvCore {
       }
       containerLayer.frame = frame
       updateContentsScale()
-      ensureFlutterSurfacesAllowUnderlay(on: superlayer)
-    }
-  }
-
-  /// Flutter 表面层默认可能按不透明合成；强制可透出下层 ASBDL。
-  private func ensureFlutterSurfacesAllowUnderlay(on superlayer: CALayer) {
-    guard let containerLayer else { return }
-    for layer in superlayer.sublayers ?? [] {
-      if layer === containerLayer { continue }
-      if layer.isOpaque {
-        layer.isOpaque = false
-      }
     }
   }
 
@@ -565,6 +660,20 @@ final class KotvMpvCore {
     videoLayer.flush()
     // 暂停时 flush 后补一帧，否则 ASBDL 可能一直空。
     asyncMpv { [weak self] in self?.command(["seek", "0", "relative+exact"]) }
+  }
+
+  private func beginPlaybackActivity() {
+    guard playbackActivity == nil else { return }
+    playbackActivity = ProcessInfo.processInfo.beginActivity(
+      options: [.userInitiated, .latencyCritical],
+      reason: "Video playback"
+    )
+  }
+
+  private func endPlaybackActivity() {
+    guard let playbackActivity else { return }
+    ProcessInfo.processInfo.endActivity(playbackActivity)
+    self.playbackActivity = nil
   }
 
   private func setContainerHidden(_ hidden: Bool) {

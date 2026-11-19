@@ -110,7 +110,7 @@ class KotvPlaybackFailover {
     if (kotvIsIOS()) {
       return const ['innie#html', 'innie#mpv', 'innie#fvp'];
     }
-    // 桌面（含 Windows）：media_kit MPV + FVP；macOS 可用 KOTV_MACOS_NO_FVP=1 打纯 MPV 包。
+    // 桌面：原生 MPV + FVP；macOS 可用 KOTV_MACOS_NO_FVP=1 打纯 MPV 包。
     if (Platform.isMacOS && kotvMacosNoFvp) {
       return const ['innie#mpv'];
     }
@@ -169,7 +169,7 @@ class KotvFailoverStep {
 
 /// 起播无画面后的恢复动作（决策集中在此，页面只负责拆机/换引擎）。
 enum KotvSilentRecoverAction {
-  /// 同引擎再建（桌面 MPV 半开实例须先 dispose Player）。
+  /// 同引擎再建（桌面 media_kit 半开实例须先 dispose Player）。
   retrySameEngine,
 
   /// 采用 [KotvSilentRecover.step] 换解码或换播放器。
@@ -192,7 +192,7 @@ class KotvSilentRecover {
 /// 无画面后的恢复策略。若返回 [KotvSilentRecoverAction.applyStep]，
 /// [failover.nextStep] 已写入新的 player/decode。
 ///
-/// [canRecreateDesktopMpv]：当前是桌面 media_kit 半开实例，可拆掉再建。
+/// [canRecreateDesktopMpv]：当前是桌面 media_kit 半开实例时，可拆掉再建。
 KotvSilentRecover kotvPlanSilentRecover({
   required KotvPlaybackFailover failover,
   required bool canRecreateDesktopMpv,

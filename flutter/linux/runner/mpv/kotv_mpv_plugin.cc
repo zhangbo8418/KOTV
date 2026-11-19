@@ -27,6 +27,8 @@ struct KotvMpvState {
   std::string hwdec;
   GtkWidget* view_widget = nullptr;
   int64_t wid = 0;
+  bool visible = true;
+  double hole_x = 0, hole_y = 0, hole_w = 0, hole_h = 0;
   std::chrono::steady_clock::time_point last_pos{};
 };
 
@@ -222,6 +224,16 @@ int64_t map_int(FlValue* args, const char* key, int64_t def = 0) {
   return def;
 }
 
+double map_double(FlValue* args, const char* key, double def = 0) {
+  if (!args || fl_value_get_type(args) != FL_VALUE_TYPE_MAP) return def;
+  FlValue* v = fl_value_lookup_string(args, key);
+  if (!v) return def;
+  if (fl_value_get_type(v) == FL_VALUE_TYPE_FLOAT) return fl_value_get_float(v);
+  if (fl_value_get_type(v) == FL_VALUE_TYPE_INT)
+    return static_cast<double>(fl_value_get_int(v));
+  return def;
+}
+
 void method_call(FlMethodChannel*, FlMethodCall* call, gpointer) {
   const gchar* method = fl_method_call_get_name(call);
   FlValue* args = fl_method_call_get_args(call);
@@ -299,10 +311,60 @@ void method_call(FlMethodChannel*, FlMethodCall* call, gpointer) {
     fl_method_call_respond_success(call, nullptr, nullptr);
     return;
   }
-  if (strcmp(method, "setVisible") == 0 || strcmp(method, "updateFrame") == 0 ||
-      strcmp(method, "setVideoRect") == 0 || strcmp(method, "setAspect") == 0 ||
-      strcmp(method, "setVolume") == 0 || strcmp(method, "setRate") == 0 ||
-      strcmp(method, "setRenderMode") == 0 ||
+  if (strcmp(method, "setVisible") == 0) {
+    // X11 wid 绑在 Flutter 视口上，无独立子窗可藏；记下状态供后续 VO 使用。
+    if (g_state) g_state->visible = map_bool(args, "visible", true);
+    fl_method_call_respond_success(call, nullptr, nullptr);
+    return;
+  }
+  if (strcmp(method, "updateFrame") == 0 || strcmp(method, "setVideoRect") == 0) {
+    // 记录洞矩形（与 Win 通道语义一致）。当前 X11 整窗 wid 无法裁切子矩形。
+    if (g_state) {
+      g_state->hole_x = map_double(args, "x");
+      g_state->hole_y = map_double(args, "y");
+      g_state->hole_w = map_double(args, "w", map_double(args, "width"));
+      g_state->hole_h = map_double(args, "h", map_double(args, "height"));
+    }
+    fl_method_call_respond_success(call, nullptr, nullptr);
+    return;
+  }
+  if (strcmp(method, "setVolume") == 0) {
+    if (g_state && g_state->mpv) {
+      double v = 100;
+      if (args && fl_value_get_type(args) == FL_VALUE_TYPE_MAP) {
+        FlValue* raw = fl_value_lookup_string(args, "volume");
+        if (raw && fl_value_get_type(raw) == FL_VALUE_TYPE_FLOAT) {
+          v = fl_value_get_float(raw);
+        } else if (raw && fl_value_get_type(raw) == FL_VALUE_TYPE_INT) {
+          v = static_cast<double>(fl_value_get_int(raw));
+        }
+      }
+      if (v < 0) v = 0;
+      if (v > 100) v = 100;
+      mpv_set_property(g_state->mpv, "volume", MPV_FORMAT_DOUBLE, &v);
+    }
+    fl_method_call_respond_success(call, nullptr, nullptr);
+    return;
+  }
+  if (strcmp(method, "setRate") == 0) {
+    if (g_state && g_state->mpv) {
+      double r = 1;
+      if (args && fl_value_get_type(args) == FL_VALUE_TYPE_MAP) {
+        FlValue* raw = fl_value_lookup_string(args, "rate");
+        if (raw && fl_value_get_type(raw) == FL_VALUE_TYPE_FLOAT) {
+          r = fl_value_get_float(raw);
+        } else if (raw && fl_value_get_type(raw) == FL_VALUE_TYPE_INT) {
+          r = static_cast<double>(fl_value_get_int(raw));
+        }
+      }
+      if (r < 0.25) r = 0.25;
+      if (r > 4.0) r = 4.0;
+      mpv_set_property(g_state->mpv, "speed", MPV_FORMAT_DOUBLE, &r);
+    }
+    fl_method_call_respond_success(call, nullptr, nullptr);
+    return;
+  }
+  if (strcmp(method, "setAspect") == 0 || strcmp(method, "setRenderMode") == 0 ||
       strcmp(method, "setSurfaceLayerEnabled") == 0) {
     fl_method_call_respond_success(call, nullptr, nullptr);
     return;

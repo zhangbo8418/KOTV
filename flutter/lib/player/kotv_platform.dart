@@ -43,7 +43,7 @@ bool kotvIsLinux() => !kIsWeb && Platform.isLinux;
 bool kotvUsesNativeMpv() =>
     kotvIsAndroid() || kotvIsMacOS() || kotvIsWindows() || kotvIsLinux();
 
-/// 设为 true 时 macOS 发行包不链 FVP/mdk（仅 MPV/media_kit）；默认 false，MPV+FVP 全功能。
+/// 设为 true 时 macOS 发行包不链 FVP/mdk（仅原生 MPV）；默认 false，MPV+FVP 全功能。
 const bool kotvMacosNoFvp = bool.fromEnvironment('KOTV_MACOS_NO_FVP', defaultValue: false);
 
 /// Surface=0（默认 HDR），Texture=1。
@@ -62,7 +62,7 @@ String kotvPlayerRenderLabel(String raw) =>
     kotvNormalizePlayerRender(raw) == 'texture' ? 'Texture' : 'Surface';
 
 /// Surface/Texture：Android 内置 Exo / MPV（设置项 `playerRender`）。
-/// macOS 原生层固定 AVSampleBufferDisplayLayer；media_kit 固定 Flutter Texture。
+/// macOS 原生层固定 AVSampleBufferDisplayLayer。
 bool kotvPlayerRenderApplies(String playerVal) {
   if (!kotvIsAndroid()) return false;
   final b = kotvEmbedBackend(playerVal);

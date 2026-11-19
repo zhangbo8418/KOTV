@@ -41,7 +41,7 @@ void kotvPushPlayerSettings(
 bool kotvShowDirectOutput(KotvPlayback playback, String decodeMode) =>
     playback.supportsDirectOutput && !KotvMpvOpts(decodeMode: decodeMode).soft;
 
-/// 页内画面：Android 原生 MPV PlatformView；桌面/Windows/iOS media_kit Video；FVP 各平台独立。
+/// 页内画面：Android PlatformView；macOS/Win/Linux 原生 kotv_mpv；iOS media_kit；FVP 各平台独立。
 Widget kotvPlaybackView({
   required String playerVal,
   required KotvPlayback playback,

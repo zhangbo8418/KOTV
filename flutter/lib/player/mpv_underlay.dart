@@ -12,7 +12,8 @@ Widget kotvMpvLetterboxFill({Key? key}) => ColoredBox(
       color: kotvMpvUsesUnderlayHole() ? Colors.transparent : Colors.black,
     );
 
-/// 播放洞：几何 `updateFrame`；显隐 `setVisible`（macOS 开播后不因遮罩藏层）。
+/// 播放洞：下发几何 `updateFrame`；未就绪黑遮。
+/// macOS 显隐只由原生 open/stop 驱动；Win 仍经通道 `setVisible`。
 class KotvMpvUnderlayHole extends StatefulWidget {
   const KotvMpvUnderlayHole({
     super.key,
@@ -41,7 +42,9 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
 
   @override
   void dispose() {
-    _setVisible(false);
+    if (!kotvIsMacOS()) {
+      _setVisible(false);
+    }
     super.dispose();
   }
 
@@ -57,20 +60,14 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
   Future<void> _setVisible(bool visible) async {
     if (_lastVisible == visible) return;
     _lastVisible = visible;
-    if (!kotvIsMacOS() && !kotvIsWindows()) return;
+    if (!kotvIsWindows()) return;
     try {
       await _ch.invokeMethod('setVisible', {'visible': visible});
     } catch (_) {}
   }
 
-  Future<void> _updateFrame(Rect? r) async {
+  Future<void> _updateFrame(Rect r) async {
     try {
-      if (kotvIsMacOS()) {
-        // macOS：原生层铺满窗口；洞口只负责 Flutter 黑遮，不下发裁切矩形。
-        await _ch.invokeMethod('updateFrame');
-        return;
-      }
-      if (r == null) return;
       await _ch.invokeMethod('updateFrame', {
         'x': r.left,
         'y': r.top,
@@ -86,24 +83,17 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
     if (box == null || !box.hasSize) return;
     final origin = box.localToGlobal(Offset.zero);
     final size = box.size;
-    final moved = _lastOrigin != origin || _lastSize != size;
-    if (moved) {
+    if (_lastOrigin != origin || _lastSize != size) {
       _lastOrigin = origin;
       _lastSize = size;
-    }
-    if (kotvIsMacOS()) {
-      if (moved) _updateFrame(null);
-    } else if (moved) {
       _updateFrame(origin & size);
     }
-    // 桌面 underlay/HWND：loadfile 期间藏原生层会丢帧。未就绪只用 Flutter 黑遮。
-    if (kotvIsMacOS() || kotvIsWindows()) {
+    // Win：就绪后显 HWND。macOS：原生 open/首帧负责显层；未就绪只用 Flutter 黑遮。
+    if (kotvIsWindows()) {
       if (widget.ready && !widget.coverUntilReady) {
         _setVisible(true);
       }
-      return;
     }
-    _setVisible(widget.ready && !widget.coverUntilReady);
   }
 
   @override
@@ -115,30 +105,10 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
         return false;
       },
       child: SizeChangedLayoutNotifier(
-        // 就绪后须清掉同帧已画的壁纸/黑槽像素，否则 Colors.transparent 只是不画、透不出底层 ASBDL。
-        child: cover
-            ? const ColoredBox(color: Colors.black)
-            : const CustomPaint(
-                painter: _KotvUnderlayClearPainter(),
-                child: SizedBox.expand(),
-              ),
+        child: ColoredBox(
+          color: cover ? Colors.black : Colors.transparent,
+        ),
       ),
     );
   }
-}
-
-/// 把本矩形清成透明，露出 contentView.layer 下的视频层。
-class _KotvUnderlayClearPainter extends CustomPainter {
-  const _KotvUnderlayClearPainter();
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    canvas.drawRect(
-      Offset.zero & size,
-      Paint()..blendMode = BlendMode.clear,
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
