@@ -648,10 +648,39 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     if (!mounted) return;
     switch (e['type'] as String? ?? '') {
       case 'liveLeft':
+      case 'channel':
         final idx = (e['index'] as num?)?.toInt() ?? -1;
         if (idx >= 0 && idx < _channels.length) {
           _selectChannelFromList(idx);
         }
+        break;
+      case 'group':
+        final idx = (e['index'] as num?)?.toInt() ?? -1;
+        if (idx >= 0 && idx < _groups.length) {
+          unawaited(_selectGroup(idx));
+          _syncWinChrome();
+        }
+        break;
+      case 'epgDay':
+        final idx = (e['index'] as num?)?.toInt() ?? -1;
+        if (idx >= 0 && idx < _epgDays.length) {
+          _selectEpgDay(idx);
+          _syncWinChrome();
+        }
+        break;
+      case 'epg':
+        final idx = (e['index'] as num?)?.toInt() ?? -1;
+        if (idx >= 0 && idx < _programs.length) {
+          final prog = _programs[idx];
+          if (prog['catchup'] == true) unawaited(_playCatchup(idx));
+        }
+        break;
+      case 'collapseLiveLeft':
+        setState(() {
+          _leftOpen = false;
+          _epgOpen = false;
+        });
+        _syncWinChrome();
         break;
       case 'liveRight':
         final idx = (e['index'] as num?)?.toInt() ?? -1;
@@ -729,8 +758,36 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       for (var i = 0; i < chs.length; i++)
         '${chs[i]['number'] ?? chs[i]['n'] ?? (i + 1)}  ${chs[i]['name'] ?? ''}',
     ];
-    final right = [for (final a in _winLiveRightActions()) a.label];
+    final acts = _winLiveRightActions();
+    final right = [for (final a in acts) a.label];
+    final rightItems = [
+      for (final a in acts)
+        KotvWinChrome.lineItem(id: a.id, label: a.label, chevron: false),
+    ];
+    final groups = [for (final g in _groups) '${g['name'] ?? ''}'];
+    final epgDays = [
+      for (final d in _epgDays)
+        () {
+          final s = '${d['date'] ?? ''}';
+          return s.length >= 10 ? s.substring(5, 10) : (s.isEmpty ? '日' : s);
+        }(),
+    ];
+    final epgPrograms = [
+      for (final p in _programs)
+        [
+          if ('${p['start'] ?? ''}'.trim().isNotEmpty) '${p['start']}'.trim(),
+          if ('${p['title'] ?? p['label'] ?? ''}'.trim().isNotEmpty)
+            '${p['title'] ?? p['label']}'.trim(),
+        ].join('  '),
+    ];
     final chName = _playChName.isEmpty ? _title : _playChName;
+    var progTitle = '';
+    for (final p in _programs) {
+      if (p['now'] == true) {
+        progTitle = '${p['title'] ?? p['label'] ?? ''}'.trim();
+        break;
+      }
+    }
     final channelText = [
       if (_chIdx >= 0) '#${_chIdx + 1}',
       chName,
@@ -744,9 +801,22 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       liveLeft: left,
       liveLeftSelected: _chIdx,
       liveRight: right,
+      liveRightItems: rightItems,
       leftOpen: _leftOpen,
       rightOpen: _rightOpen,
       channelVisible: _channelInfoVisible,
+      groups: groups,
+      groupSelected: _groupIdx,
+      channels: left,
+      channelSelected: _chIdx,
+      epgDays: epgDays,
+      epgDaySelected: _dayIdx,
+      epgPrograms: epgPrograms,
+      epgProgramSelected: _epgHighlightIndex(),
+      channelNo: _chIdx >= 0 ? '${_chIdx + 1}' : '',
+      channelName: chName,
+      channelProgram: progTitle,
+      channelTicker: _lineName.isNotEmpty ? _lineName : _status,
       danmakuItems: _danmakuItems.value,
     ));
   }

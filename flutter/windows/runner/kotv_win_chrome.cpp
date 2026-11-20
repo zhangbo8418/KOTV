@@ -3,261 +3,261 @@
 #include <flutter/method_channel.h>
 #include <flutter/plugin_registrar_windows.h>
 #include <flutter/standard_method_codec.h>
-
-#include <windowsx.h>
+#include <flutter_windows.h>
 
 #include <algorithm>
 #include <cmath>
-#include <functional>
 #include <memory>
+#include <sstream>
 
 namespace {
 
-using flutter::EncodableList;
-using flutter::EncodableMap;
-using flutter::EncodableValue;
-
-// Win7 顶层 layered 色键透明（子窗 layered 仅 Win8+）。
+constexpr wchar_t kClass[] = L"KotvWinChromePanel";
+constexpr wchar_t kDanmakuClass[] = L"KotvWinChromeDanmaku";
+constexpr wchar_t kModalClass[] = L"KotvWinChromeModal";
+constexpr int kTopH = 56;
+constexpr int kBottomH = 108;
+constexpr int kEpW = 280;
+constexpr int kLiveLeftW = 520;
+constexpr int kLiveRightW = 220;
+constexpr int kChannelH = 48;
+constexpr int kCenterSz = 72;
+constexpr int kModalW = 320;
+constexpr int kModalMaxH = 520;
+constexpr COLORREF kPink = RGB(229, 45, 39);       // #E52D27
+constexpr COLORREF kPinkMuted = RGB(180, 90, 110);
+constexpr COLORREF kPanelDark = RGB(18, 10, 28);    // #120A1C
+constexpr COLORREF kBarDark = RGB(12, 8, 18);
+constexpr COLORREF kBarAlpha = RGB(28, 20, 36);
 constexpr COLORREF kDanmakuKey = RGB(1, 0, 1);
-constexpr UINT_PTR kDanmakuTimerId = 77;
+constexpr COLORREF kSheetLight = RGB(248, 246, 250);
+constexpr COLORREF kGreenOn = RGB(52, 199, 89);
 
-std::string ArgString(const EncodableMap* m, const char* key,
-                      const std::string& def = "") {
-  if (!m) return def;
-  auto it = m->find(EncodableValue(key));
-  if (it == m->end()) return def;
-  if (const auto* s = std::get_if<std::string>(&it->second)) return *s;
-  return def;
-}
-
-bool ArgBool(const EncodableMap* m, const char* key, bool def = false) {
-  if (!m) return def;
-  auto it = m->find(EncodableValue(key));
-  if (it == m->end()) return def;
-  if (const auto* b = std::get_if<bool>(&it->second)) return *b;
-  return def;
-}
-
-double ArgDouble(const EncodableMap* m, const char* key, double def = 0) {
-  if (!m) return def;
-  auto it = m->find(EncodableValue(key));
-  if (it == m->end()) return def;
-  if (const auto* d = std::get_if<double>(&it->second)) return *d;
-  if (const auto* i = std::get_if<int32_t>(&it->second)) return *i;
-  if (const auto* i = std::get_if<int64_t>(&it->second)) return static_cast<double>(*i);
-  return def;
-}
-
-int ArgInt(const EncodableMap* m, const char* key, int def = 0) {
-  return static_cast<int>(ArgDouble(m, key, def));
-}
-
-std::vector<std::string> ArgStringList(const EncodableMap* m, const char* key) {
-  std::vector<std::string> out;
-  if (!m) return out;
-  auto it = m->find(EncodableValue(key));
-  if (it == m->end()) return out;
-  const auto* list = std::get_if<EncodableList>(&it->second);
-  if (!list) return out;
-  for (const auto& v : *list) {
-    if (const auto* s = std::get_if<std::string>(&v)) out.push_back(*s);
-  }
-  return out;
-}
-
-std::wstring Utf8ToWide(const std::string& s) {
-  if (s.empty()) return L"";
-  int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
+std::wstring Utf8ToWide(const std::string& utf8) {
+  if (utf8.empty()) return L"";
+  const int n = MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), -1, nullptr, 0);
   if (n <= 0) return L"";
-  std::wstring w(static_cast<size_t>(n - 1), L'\0');
-  MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, w.data(), n);
-  return w;
-}
-
-std::vector<std::wstring> ToWideList(const std::vector<std::string>& in) {
-  std::vector<std::wstring> out;
-  out.reserve(in.size());
-  for (const auto& s : in) out.push_back(Utf8ToWide(s));
+  std::wstring out(static_cast<size_t>(n - 1), L'\0');
+  MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), -1, out.data(), n);
   return out;
 }
 
-COLORREF RgbFromDanmaku(int color) {
-  // B 站色通常为 0xRRGGBB
-  const int r = (color >> 16) & 0xFF;
-  const int g = (color >> 8) & 0xFF;
-  const int b = color & 0xFF;
-  return RGB(r, g, b);
+std::string GetString(const flutter::EncodableMap& m, const char* key) {
+  const auto it = m.find(flutter::EncodableValue(key));
+  if (it == m.end() || !std::holds_alternative<std::string>(it->second)) return {};
+  return std::get<std::string>(it->second);
 }
 
-class KotvWinChromePlugin : public flutter::Plugin {
- public:
-  static void RegisterWithRegistrar(flutter::PluginRegistrarWindows* registrar) {
-    auto plugin = std::make_unique<KotvWinChromePlugin>(registrar);
-    registrar->AddPlugin(std::move(plugin));
-  }
+bool GetBool(const flutter::EncodableMap& m, const char* key, bool def = false) {
+  const auto it = m.find(flutter::EncodableValue(key));
+  if (it == m.end() || !std::holds_alternative<bool>(it->second)) return def;
+  return std::get<bool>(it->second);
+}
 
-  explicit KotvWinChromePlugin(flutter::PluginRegistrarWindows* registrar)
-      : chrome_(std::make_unique<KotvWinChrome>(registrar)) {
-    channel_ = std::make_unique<flutter::MethodChannel<EncodableValue>>(
-        registrar->messenger(), "kotv_win_chrome",
-        &flutter::StandardMethodCodec::GetInstance());
-    channel_->SetMethodCallHandler(
-        [this](const auto& call, auto result) {
-          const auto* args = std::get_if<EncodableMap>(call.arguments());
-          auto shared =
-              std::shared_ptr<flutter::MethodResult<EncodableValue>>(
-                  std::move(result));
-          chrome_->HandleMethod(
-              call.method_name(), args,
-              [shared](EncodableValue v) { shared->Success(v); },
-              [shared](const std::string& code, const std::string& msg) {
-                shared->Error(code, msg);
-              });
-        });
-    chrome_->SetEventSink([this](EncodableMap map) {
-      channel_->InvokeMethod(
-          "event", std::make_unique<EncodableValue>(EncodableValue(map)));
-    });
-  }
+double GetDouble(const flutter::EncodableMap& m, const char* key, double def = 0) {
+  const auto it = m.find(flutter::EncodableValue(key));
+  if (it == m.end()) return def;
+  if (std::holds_alternative<double>(it->second)) return std::get<double>(it->second);
+  if (std::holds_alternative<int32_t>(it->second)) return std::get<int32_t>(it->second);
+  if (std::holds_alternative<int64_t>(it->second))
+    return static_cast<double>(std::get<int64_t>(it->second));
+  return def;
+}
 
- private:
-  std::unique_ptr<KotvWinChrome> chrome_;
-  std::unique_ptr<flutter::MethodChannel<EncodableValue>> channel_;
-};
+int GetInt(const flutter::EncodableMap& m, const char* key, int def = 0) {
+  return static_cast<int>(GetDouble(m, key, def));
+}
+
+std::vector<std::wstring> GetStringList(const flutter::EncodableMap& m, const char* key) {
+  std::vector<std::wstring> out;
+  const auto it = m.find(flutter::EncodableValue(key));
+  if (it == m.end() || !std::holds_alternative<flutter::EncodableList>(it->second)) return out;
+  for (const auto& v : std::get<flutter::EncodableList>(it->second)) {
+    if (std::holds_alternative<std::string>(v)) out.push_back(Utf8ToWide(std::get<std::string>(v)));
+  }
+  return out;
+}
+
+std::vector<std::string> GetUtf8List(const flutter::EncodableMap& m, const char* key) {
+  std::vector<std::string> out;
+  const auto it = m.find(flutter::EncodableValue(key));
+  if (it == m.end() || !std::holds_alternative<flutter::EncodableList>(it->second)) return out;
+  for (const auto& v : std::get<flutter::EncodableList>(it->second)) {
+    if (std::holds_alternative<std::string>(v)) out.push_back(std::get<std::string>(v));
+  }
+  return out;
+}
+
+std::vector<KotvWinChrome::LineItem> ParseLineItems(const flutter::EncodableMap& m,
+                                                    const char* key) {
+  std::vector<KotvWinChrome::LineItem> out;
+  const auto it = m.find(flutter::EncodableValue(key));
+  if (it == m.end() || !std::holds_alternative<flutter::EncodableList>(it->second)) return out;
+  for (const auto& v : std::get<flutter::EncodableList>(it->second)) {
+    if (!std::holds_alternative<flutter::EncodableMap>(v)) continue;
+    const auto& row = std::get<flutter::EncodableMap>(v);
+    KotvWinChrome::LineItem item;
+    item.id = GetString(row, "id");
+    item.label = Utf8ToWide(GetString(row, "label"));
+    item.trailing = Utf8ToWide(GetString(row, "trailing"));
+    item.toggle = GetBool(row, "toggle");
+    item.on = GetBool(row, "on");
+    item.chevron = GetBool(row, "chevron", true);
+    if (item.id.empty() && !item.label.empty()) {
+      item.id = GetString(row, "label");
+    }
+    out.push_back(std::move(item));
+  }
+  return out;
+}
+
+void FillRectColor(HDC hdc, const RECT& rc, COLORREF c) {
+  HBRUSH br = CreateSolidBrush(c);
+  FillRect(hdc, &rc, br);
+  DeleteObject(br);
+}
+
+void FillRoundRect(HDC hdc, const RECT& rc, int radius, COLORREF fill, COLORREF border = 0,
+                   int border_w = 0) {
+  HBRUSH br = CreateSolidBrush(fill);
+  HPEN pen = border_w > 0 ? CreatePen(PS_SOLID, border_w, border) : CreatePen(PS_NULL, 0, 0);
+  HGDIOBJ old_br = SelectObject(hdc, br);
+  HGDIOBJ old_pen = SelectObject(hdc, pen);
+  RoundRect(hdc, rc.left, rc.top, rc.right, rc.bottom, radius * 2, radius * 2);
+  SelectObject(hdc, old_br);
+  SelectObject(hdc, old_pen);
+  DeleteObject(br);
+  DeleteObject(pen);
+}
+
+void DrawTextLine(HDC hdc, const RECT& rc, const std::wstring& text, COLORREF color, int px,
+                  bool bold = false, UINT align = DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS) {
+  HFONT font = CreateFontW(-px, 0, 0, 0, bold ? FW_SEMIBOLD : FW_NORMAL, FALSE, FALSE, FALSE,
+                           DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                           DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+  HGDIOBJ old = SelectObject(hdc, font);
+  SetBkMode(hdc, TRANSPARENT);
+  SetTextColor(hdc, color);
+  RECT r = rc;
+  DrawTextW(hdc, text.c_str(), -1, &r, align);
+  SelectObject(hdc, old);
+  DeleteObject(font);
+}
+
+COLORREF Blend(COLORREF a, COLORREF b, double t) {
+  auto ch = [&](int shift) {
+    const int ca = (a >> shift) & 0xFF;
+    const int cb = (b >> shift) & 0xFF;
+    return static_cast<int>(ca + (cb - ca) * t);
+  };
+  return RGB(ch(0), ch(8), ch(16));
+}
 
 }  // namespace
 
-void KotvWinChromeRegisterWithRegistrar(
-    FlutterDesktopPluginRegistrarRef registrar) {
-  KotvWinChromePlugin::RegisterWithRegistrar(
-      flutter::PluginRegistrarManager::GetInstance()
-          ->GetRegistrar<flutter::PluginRegistrarWindows>(registrar));
-}
-
-KotvWinChrome::KotvWinChrome(flutter::PluginRegistrarWindows* registrar)
-    : registrar_(registrar) {}
+KotvWinChrome::KotvWinChrome(flutter::PluginRegistrarWindows* registrar) : registrar_(registrar) {}
 
 KotvWinChrome::~KotvWinChrome() { DestroyAll(); }
 
 void KotvWinChrome::SetEventSink(EventFn fn) { event_fn_ = std::move(fn); }
 
-void KotvWinChrome::Emit(EncodableMap map) {
-  if (event_fn_) event_fn_(std::move(map));
-}
-
 HWND KotvWinChrome::FlutterHwnd() const {
-  return registrar_->GetView() ? registrar_->GetView()->GetNativeWindow()
-                               : nullptr;
+  return registrar_ ? registrar_->GetView()->GetNativeWindow() : nullptr;
 }
 
 HWND KotvWinChrome::RootHwnd() const {
-  HWND f = FlutterHwnd();
-  return f ? GetAncestor(f, GA_ROOT) : nullptr;
+  HWND flutter = FlutterHwnd();
+  return flutter ? GetAncestor(flutter, GA_ROOT) : nullptr;
 }
 
 void KotvWinChrome::EnsureClasses() {
   if (classes_ready_) return;
   WNDCLASSW wc{};
-  wc.lpfnWndProc = KotvWinChrome::WndProc;
+  wc.lpfnWndProc = WndProc;
   wc.hInstance = GetModuleHandleW(nullptr);
+  wc.lpszClassName = kClass;
   wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
   wc.hbrBackground = reinterpret_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
-  wc.lpszClassName = L"KotvWinChromePanel";
   RegisterClassW(&wc);
 
   WNDCLASSW dc{};
-  dc.lpfnWndProc = KotvWinChrome::DanmakuWndProc;
+  dc.lpfnWndProc = DanmakuWndProc;
   dc.hInstance = GetModuleHandleW(nullptr);
+  dc.lpszClassName = kDanmakuClass;
   dc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-  dc.hbrBackground = nullptr;
-  dc.lpszClassName = L"KotvWinChromeDanmaku";
+  dc.hbrBackground = CreateSolidBrush(kDanmakuKey);
   RegisterClassW(&dc);
+
+  WNDCLASSW mc{};
+  mc.lpfnWndProc = ModalWndProc;
+  mc.hInstance = GetModuleHandleW(nullptr);
+  mc.lpszClassName = kModalClass;
+  mc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+  mc.hbrBackground = reinterpret_cast<HBRUSH>(GetStockObject(NULL_BRUSH));
+  RegisterClassW(&mc);
   classes_ready_ = true;
 }
 
 HWND KotvWinChrome::CreateChildPanel(const wchar_t* title) {
   HWND parent = FlutterHwnd();
   if (!parent) return nullptr;
-  HWND hwnd = CreateWindowExW(
-      WS_EX_NOPARENTNOTIFY, L"KotvWinChromePanel", title,
-      WS_CHILD | WS_CLIPSIBLINGS, 0, 0, 10, 10, parent, nullptr,
-      GetModuleHandleW(nullptr), this);
+  HWND hwnd = CreateWindowExW(WS_EX_NOACTIVATE, kClass, title,
+                              WS_CHILD | WS_CLIPSIBLINGS, 0, 0, 0, 0, parent, nullptr,
+                              GetModuleHandleW(nullptr), this);
+  if (hwnd) SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
+  return hwnd;
+}
+
+HWND KotvWinChrome::CreateLayeredPopup(const wchar_t* class_name) {
+  HWND owner = RootHwnd();
+  if (!owner) return nullptr;
+  HWND hwnd = CreateWindowExW(WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+                              class_name, L"", WS_POPUP, 0, 0, 0, 0, owner, nullptr,
+                              GetModuleHandleW(nullptr), this);
   if (hwnd) {
     SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
+    SetLayeredWindowAttributes(hwnd, 0, 235, LWA_ALPHA);
   }
   return hwnd;
 }
 
-HWND KotvWinChrome::CreateDanmakuLayer() {
-  HWND owner = RootHwnd();
-  if (!owner) return nullptr;
-  HWND hwnd = CreateWindowExW(
-      WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE |
-          WS_EX_TOPMOST,
-      L"KotvWinChromeDanmaku", L"", WS_POPUP, 0, 0, 10, 10, owner, nullptr,
-      GetModuleHandleW(nullptr), this);
-  if (!hwnd) return nullptr;
-  SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
-  SetLayeredWindowAttributes(hwnd, kDanmakuKey, 0, LWA_COLORKEY);
-  return hwnd;
+void KotvWinChrome::ApplyRoundRegion(HWND hwnd, int w, int h, int radius) {
+  if (!hwnd || w <= 0 || h <= 0) return;
+  HRGN rgn = CreateRoundRectRgn(0, 0, w + 1, h + 1, radius * 2, radius * 2);
+  SetWindowRgn(hwnd, rgn, TRUE);
 }
 
 void KotvWinChrome::DestroyAll() {
+  CloseSheet();
   if (danmaku_timer_ && danmaku_hwnd_) {
     KillTimer(danmaku_hwnd_, danmaku_timer_);
     danmaku_timer_ = 0;
   }
-  auto kill = [](Panel& p) {
-    if (p.hwnd) {
-      DestroyWindow(p.hwnd);
-      p.hwnd = nullptr;
+  auto destroy = [](HWND& h) {
+    if (h) {
+      DestroyWindow(h);
+      h = nullptr;
     }
   };
-  kill(top_);
-  kill(bottom_);
-  kill(episodes_);
-  kill(live_left_);
-  kill(live_right_);
-  kill(channel_info_);
-  kill(center_play_);
-  if (danmaku_hwnd_) {
-    DestroyWindow(danmaku_hwnd_);
-    danmaku_hwnd_ = nullptr;
-  }
-  enabled_ = false;
+  destroy(top_.hwnd);
+  destroy(bottom_.hwnd);
+  destroy(episodes_.hwnd);
+  destroy(live_left_.hwnd);
+  destroy(live_right_.hwnd);
+  destroy(channel_info_.hwnd);
+  destroy(center_play_.hwnd);
+  destroy(danmaku_hwnd_);
+  destroy(modal_hwnd_);
 }
 
 void KotvWinChrome::ShowPanel(Panel& p, bool show, int x, int y, int w, int h) {
   if (!p.hwnd) return;
-  if (!show || w < 1 || h < 1) {
+  if (!show || w <= 0 || h <= 0) {
     ShowWindow(p.hwnd, SW_HIDE);
     return;
   }
-  SetWindowPos(p.hwnd, HWND_TOP, x, y, w, h,
-               SWP_NOACTIVATE | SWP_SHOWWINDOW);
+  SetWindowPos(p.hwnd, HWND_TOP, x, y, w, h, SWP_SHOWWINDOW | SWP_NOACTIVATE);
   InvalidateRect(p.hwnd, nullptr, TRUE);
-}
-
-void KotvWinChrome::LayoutDanmaku() {
-  HWND root = RootHwnd();
-  HWND flutter = FlutterHwnd();
-  if (!danmaku_hwnd_ || !root || !flutter) return;
-  RECT rc{};
-  GetClientRect(flutter, &rc);
-  POINT tl{rc.left, rc.top};
-  POINT br{rc.right, rc.bottom};
-  ClientToScreen(flutter, &tl);
-  ClientToScreen(flutter, &br);
-  const int w = br.x - tl.x;
-  const int h = br.y - tl.y;
-  const bool show = enabled_ && (danmaku_enabled_ || buffering_);
-  if (!show || w < 1 || h < 1) {
-    ShowWindow(danmaku_hwnd_, SW_HIDE);
-    return;
-  }
-  SetWindowPos(danmaku_hwnd_, HWND_TOPMOST, tl.x, tl.y, w, h,
-               SWP_NOACTIVATE | SWP_SHOWWINDOW);
-  InvalidateRect(danmaku_hwnd_, nullptr, TRUE);
 }
 
 void KotvWinChrome::Layout() {
@@ -268,177 +268,426 @@ void KotvWinChrome::Layout() {
   const int W = rc.right - rc.left;
   const int H = rc.bottom - rc.top;
 
-  const int top_h = 52;
-  const int bottom_h = 92;
-  const int ep_w = 280;
-  const int live_w = 320;
-  const int ch_h = 72;
-  const int center_s = 64;
+  if (!top_.hwnd) top_.hwnd = CreateChildPanel(L"kotv_top");
+  if (!bottom_.hwnd) bottom_.hwnd = CreateChildPanel(L"kotv_bottom");
+  if (!episodes_.hwnd) episodes_.hwnd = CreateChildPanel(L"kotv_ep");
+  if (!live_left_.hwnd) live_left_.hwnd = CreateChildPanel(L"kotv_live_l");
+  if (!live_right_.hwnd) live_right_.hwnd = CreateChildPanel(L"kotv_live_r");
+  if (!channel_info_.hwnd) channel_info_.hwnd = CreateChildPanel(L"kotv_ch");
+  if (!center_play_.hwnd) center_play_.hwnd = CreateChildPanel(L"kotv_center");
+  if (!danmaku_hwnd_) {
+    danmaku_hwnd_ = CreateWindowExW(
+        WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE, kDanmakuClass, L"",
+        WS_CHILD | WS_CLIPSIBLINGS, 0, 0, 0, 0, parent, nullptr, GetModuleHandleW(nullptr), this);
+    if (danmaku_hwnd_) {
+      SetWindowLongPtrW(danmaku_hwnd_, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
+      SetLayeredWindowAttributes(danmaku_hwnd_, kDanmakuKey, 0, LWA_COLORKEY);
+      danmaku_timer_ = SetTimer(danmaku_hwnd_, 1, 33, nullptr);
+    }
+  }
 
-  ShowPanel(top_, top_visible_, 0, 0, W, top_h);
-  ShowPanel(bottom_, bottom_visible_, 0, H - bottom_h, W, bottom_h);
-  ShowPanel(episodes_, episodes_visible_, W - ep_w, top_visible_ ? top_h : 0, ep_w,
-            H - (top_visible_ ? top_h : 0) - (bottom_visible_ ? bottom_h : 0));
-  ShowPanel(live_left_, live_left_visible_, 0, 0, live_w, H);
-  ShowPanel(live_right_, live_right_visible_, W - live_w, 0, live_w, H);
-  ShowPanel(channel_info_, channel_visible_, live_left_visible_ ? live_w : 0,
-            H - ch_h - (bottom_visible_ ? bottom_h : 0),
-            W - (live_left_visible_ ? live_w : 0) -
-                (live_right_visible_ ? live_w : 0),
-            ch_h);
-  ShowPanel(center_play_, center_visible_ && !buffering_, (W - center_s) / 2,
-            (H - center_s) / 2, center_s, center_s);
+  ShowPanel(top_, top_visible_, 0, 0, W, kTopH);
+  ShowPanel(bottom_, bottom_visible_, 0, H - kBottomH, W, kBottomH);
+  ShowPanel(episodes_, episodes_visible_, W - kEpW, kTopH, kEpW, H - kTopH - kBottomH);
+  const int live_top = kTopH + 8;
+  const int live_h = H - live_top - (channel_visible_ ? kChannelH + 12 : 12) - (bottom_visible_ ? kBottomH : 0);
+  ShowPanel(live_left_, live_left_visible_, 12, live_top, kLiveLeftW, std::max(120, live_h));
+  ShowPanel(live_right_, live_right_visible_, W - kLiveRightW - 12, live_top, kLiveRightW,
+            std::max(120, live_h));
+  ShowPanel(channel_info_, channel_visible_, 24, H - kBottomH - kChannelH - 10, W - 48, kChannelH);
+  ShowPanel(center_play_, center_visible_, (W - kCenterSz) / 2, (H - kCenterSz) / 2, kCenterSz, kCenterSz);
   LayoutDanmaku();
+  LayoutModal();
 }
 
-void KotvWinChrome::PaintDark(HWND hwnd, HDC hdc, const RECT& rc,
-                              const std::wstring& title,
-                              const std::vector<std::wstring>* lines,
-                              int selected) {
-  // 接近 Flutter 全屏栏：0xF0120A1C / 半透明黑感
-  HBRUSH bg = CreateSolidBrush(RGB(18, 10, 28));
-  FillRect(hdc, &rc, bg);
-  DeleteObject(bg);
+void KotvWinChrome::LayoutDanmaku() {
+  HWND parent = FlutterHwnd();
+  if (!parent || !danmaku_hwnd_) return;
+  RECT rc{};
+  GetClientRect(parent, &rc);
+  const int W = rc.right - rc.left;
+  const int H = rc.bottom - rc.top;
+  if (!danmaku_enabled_ || W <= 0 || H <= 0) {
+    ShowWindow(danmaku_hwnd_, SW_HIDE);
+    return;
+  }
+  SetWindowPos(danmaku_hwnd_, HWND_TOP, 0, 0, W, H, SWP_SHOWWINDOW | SWP_NOACTIVATE);
+  if (top_.hwnd && top_visible_) SetWindowPos(top_.hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+  if (bottom_.hwnd && bottom_visible_)
+    SetWindowPos(bottom_.hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+  if (live_left_.hwnd && live_left_visible_)
+    SetWindowPos(live_left_.hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+  if (live_right_.hwnd && live_right_visible_)
+    SetWindowPos(live_right_.hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+  if (episodes_.hwnd && episodes_visible_)
+    SetWindowPos(episodes_.hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+  if (channel_info_.hwnd && channel_visible_)
+    SetWindowPos(channel_info_.hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+  if (center_play_.hwnd && center_visible_)
+    SetWindowPos(center_play_.hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+}
 
-  SetBkMode(hdc, TRANSPARENT);
-  SetTextColor(hdc, RGB(255, 255, 255));
-  HFONT font = CreateFontW(18, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
-                           DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
-                           CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-                           DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
-  HFONT old = (HFONT)SelectObject(hdc, font);
+void KotvWinChrome::LayoutModal() {
+  if (sheet_kind_.empty()) {
+    if (modal_hwnd_) ShowWindow(modal_hwnd_, SW_HIDE);
+    return;
+  }
+  HWND parent = FlutterHwnd();
+  HWND root = RootHwnd();
+  if (!parent || !root) return;
+  if (!modal_hwnd_) modal_hwnd_ = CreateLayeredPopup(kModalClass);
+  if (!modal_hwnd_) return;
 
-  if (hwnd == top_.hwnd) {
-    // 左侧红条（Flutter 0xFFE52D27）
-    RECT accent = {rc.left + 10, rc.top + 12, rc.left + 14, rc.bottom - 12};
-    HBRUSH red = CreateSolidBrush(RGB(229, 45, 39));
-    FillRect(hdc, &accent, red);
-    DeleteObject(red);
-    RECT tr = rc;
-    tr.left += 24;
-    tr.top += 10;
-    tr.right -= 72;
-    if (!title.empty()) {
-      DrawTextW(hdc, title.c_str(), -1, &tr,
-                DT_LEFT | DT_TOP | DT_END_ELLIPSIS | DT_SINGLELINE);
-    }
-    RECT exit_rc = {rc.right - 64, rc.top + 12, rc.right - 12, rc.bottom - 12};
-    SetTextColor(hdc, RGB(230, 230, 235));
-    DrawTextW(hdc, L"退出", -1, &exit_rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-  } else if (!title.empty() && hwnd != bottom_.hwnd) {
-    RECT tr = rc;
-    tr.left += 16;
-    tr.top += 12;
-    tr.right -= (hwnd == episodes_.hwnd ? 48 : 16);
-    DrawTextW(hdc, title.c_str(), -1, &tr,
-              DT_LEFT | DT_TOP | DT_END_ELLIPSIS | DT_SINGLELINE);
-    if (hwnd == episodes_.hwnd) {
-      RECT close_rc = {rc.right - 40, rc.top + 8, rc.right - 8, rc.top + 36};
-      DrawTextW(hdc, L"×", -1, &close_rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-    }
+  RECT prc{}, rrc{};
+  GetClientRect(parent, &prc);
+  GetWindowRect(root, &rrc);
+  POINT origin{0, 0};
+  ClientToScreen(parent, &origin);
+
+  const bool light = sheet_kind_ == "danmaku";
+  const int rows = static_cast<int>(sheet_items_.size());
+  const int row_h = light ? 52 : 48;
+  const int header = light ? 52 : 40;
+  const int h = std::min(kModalMaxH, header + rows * row_h + 24);
+  const int w = light ? 360 : kModalW;
+  const int x = origin.x + (prc.right - w) / 2;
+  const int y = origin.y + (prc.bottom - h) / 2;
+  SetLayeredWindowAttributes(modal_hwnd_, 0, light ? 245 : 230, LWA_ALPHA);
+  SetWindowPos(modal_hwnd_, HWND_TOPMOST, x, y, w, h, SWP_SHOWWINDOW | SWP_NOACTIVATE);
+  ApplyRoundRegion(modal_hwnd_, w, h, 16);
+  InvalidateRect(modal_hwnd_, nullptr, TRUE);
+}
+
+void KotvWinChrome::CloseSheet() {
+  sheet_kind_.clear();
+  sheet_items_.clear();
+  sheet_title_.clear();
+  sheet_subtitle_.clear();
+  if (modal_hwnd_) ShowWindow(modal_hwnd_, SW_HIDE);
+}
+
+void KotvWinChrome::Emit(EncodableMap map) {
+  if (event_fn_) event_fn_(std::move(map));
+}
+
+void KotvWinChrome::PaintTop(HDC hdc, const RECT& rc) {
+  FillRectColor(hdc, rc, kBarDark);
+  RECT accent{rc.left, rc.top, rc.left + 4, rc.bottom};
+  FillRectColor(hdc, accent, kPink);
+
+  RECT title_rc{rc.left + 18, rc.top + 8, rc.right - 100, rc.top + 32};
+  DrawTextLine(hdc, title_rc, title_.empty() ? L"播放中" : title_, RGB(255, 255, 255), 16, true);
+  if (!subtitle_.empty()) {
+    RECT sub{rc.left + 18, rc.top + 30, rc.right - 100, rc.bottom - 6};
+    DrawTextLine(hdc, sub, subtitle_, RGB(170, 170, 180), 12, false);
   }
 
-  if (hwnd == bottom_.hwnd) {
-    if (!bottom_text_.empty()) {
-      RECT tr = {rc.left + 16, rc.top + 6, rc.right - 16, rc.top + 28};
-      SetTextColor(hdc, RGB(220, 220, 225));
-      DrawTextW(hdc, bottom_text_.c_str(), -1, &tr,
-                DT_LEFT | DT_TOP | DT_END_ELLIPSIS | DT_SINGLELINE);
+  RECT exit_rc{rc.right - 88, rc.top + 12, rc.right - 16, rc.bottom - 12};
+  FillRoundRect(hdc, exit_rc, 8, RGB(40, 32, 48), RGB(80, 70, 90), 1);
+  DrawTextLine(hdc, exit_rc, L"退出", RGB(240, 240, 245), 13, true, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+}
+
+void KotvWinChrome::PaintBottom(HDC hdc, const RECT& rc) {
+  FillRectColor(hdc, rc, kBarDark);
+  const int W = rc.right - rc.left;
+  const int track_y = rc.top + 14;
+  const int track_h = 4;
+  RECT track{rc.left + 16, track_y, rc.right - 16, track_y + track_h};
+  FillRoundRect(hdc, track, 2, RGB(55, 48, 62));
+  const int filled = static_cast<int>((W - 32) * std::clamp(progress_, 0.0, 1.0));
+  if (filled > 0) {
+    RECT prog{track.left, track.top, track.left + filled, track.bottom};
+    FillRoundRect(hdc, prog, 2, kPink);
+    const int knob = track.left + filled;
+    Ellipse(hdc, knob - 6, track_y - 4, knob + 6, track_y + track_h + 4);
+  }
+
+  RECT tL{rc.left + 16, track_y + 10, rc.left + 90, track_y + 28};
+  RECT tR{rc.right - 90, track_y + 10, rc.right - 16, track_y + 28};
+  DrawTextLine(hdc, tL, pos_label_.empty() ? L"0:00" : pos_label_, RGB(200, 200, 210), 11);
+  DrawTextLine(hdc, tR, dur_label_.empty() ? L"0:00" : dur_label_, RGB(200, 200, 210), 11,
+               false, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+
+  // 动作行
+  const int ay = rc.top + 44;
+  const int icon = 36;
+  int ax = rc.left + 20;
+  auto paint_icon = [&](const std::wstring& glyph, bool accent = false) {
+    RECT ir{ax, ay, ax + icon, ay + icon};
+    if (accent) FillRoundRect(hdc, ir, 8, RGB(50, 28, 36));
+    DrawTextLine(hdc, ir, glyph, accent ? kPink : RGB(235, 235, 240), 16, true,
+                 DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    ax += icon + 10;
+  };
+  paint_icon(L"⏮");
+  paint_icon(playing_ ? L"❚❚" : L"▶", true);
+  paint_icon(L"⏭");
+  paint_icon(L"≡");  // 更多
+
+  // 右侧时钟
+  RECT clock_rc{rc.right - 150, ay - 4, rc.right - 16, ay + 22};
+  DrawTextLine(hdc, clock_rc, clock_.empty() ? L"--:--" : clock_, RGB(255, 255, 255), 22, true,
+               DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+  if (!ends_at_.empty()) {
+    RECT ends{rc.right - 150, ay + 20, rc.right - 16, ay + 38};
+    DrawTextLine(hdc, ends, ends_at_, RGB(160, 160, 170), 11, false,
+                 DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+  }
+
+  if (buffering_) {
+    RECT b{rc.left + W / 2 - 40, rc.top + 4, rc.left + W / 2 + 40, rc.top + 22};
+    DrawTextLine(hdc, b, L"加载中…", RGB(220, 180, 190), 11, false,
+                 DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+  }
+}
+
+void KotvWinChrome::PaintEpisodes(HDC hdc, const RECT& rc) {
+  FillRectColor(hdc, rc, Blend(kPanelDark, RGB(0, 0, 0), 0.15));
+  RECT head{rc.left + 12, rc.top + 10, rc.right - 12, rc.top + 36};
+  DrawTextLine(hdc, head, L"选集", RGB(255, 255, 255), 15, true);
+  const int row_h = 40;
+  for (size_t i = 0; i < episode_lines_.size(); ++i) {
+    const int y = rc.top + 44 + static_cast<int>(i) * row_h;
+    if (y + row_h > rc.bottom) break;
+    RECT row{rc.left + 8, y, rc.right - 8, y + row_h - 4};
+    if (static_cast<int>(i) == episode_selected_) {
+      FillRoundRect(hdc, row, 8, Blend(kPink, kPanelDark, 0.55));
     }
-    // 动作行
-    if (!actions_.empty()) {
-      HFONT act = CreateFontW(15, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
-                              DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
-                              CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-                              DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
-      SelectObject(hdc, act);
-      const int n = static_cast<int>(actions_.size());
-      const int slot = (std::max)(48, (rc.right - rc.left - 24) / (std::max)(1, n));
-      for (int i = 0; i < n; ++i) {
-        RECT ar = {rc.left + 12 + i * slot, rc.top + 30,
-                   rc.left + 12 + (i + 1) * slot - 4, rc.top + 54};
-        std::wstring label;
-        const auto& a = actions_[i];
-        if (a == "prev")
-          label = L"上一集";
-        else if (a == "toggle")
-          label = playing_ ? L"暂停" : L"播放";
-        else if (a == "next")
-          label = L"下一集";
-        else if (a == "speed")
-          label = L"倍速";
-        else if (a == "replay")
-          label = L"重播";
-        else if (a == "episodes")
-          label = L"选集";
-        else
-          label = Utf8ToWide(a);
-        SetTextColor(hdc, RGB(255, 255, 255));
-        DrawTextW(hdc, label.c_str(), -1, &ar,
-                  DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+    DrawTextLine(hdc, row, episode_lines_[i],
+                 static_cast<int>(i) == episode_selected_ ? RGB(255, 220, 225) : RGB(210, 210, 220), 13);
+  }
+}
+
+void KotvWinChrome::PaintLiveLeft(HDC hdc, const RECT& rc) {
+  FillRoundRect(hdc, rc, 12, Blend(kPanelDark, RGB(0, 0, 0), 0.1));
+  const int W = rc.right - rc.left;
+  const int H = rc.bottom - rc.top;
+
+  if (groups_.empty()) {
+    RECT head{rc.left + 12, rc.top + 10, rc.right - 12, rc.top + 36};
+    DrawTextLine(hdc, head, L"频道", RGB(255, 255, 255), 15, true);
+    for (size_t i = 0; i < channels_.size(); ++i) {
+      const int y = rc.top + 44 + static_cast<int>(i) * 36;
+      if (y + 32 > rc.bottom - 36) break;
+      RECT row{rc.left + 8, y, rc.right - 8, y + 32};
+      if (static_cast<int>(i) == channel_selected_) {
+        FillRoundRect(hdc, row, 8, Blend(kPink, kPanelDark, 0.55));
       }
-      DeleteObject(act);
-      SelectObject(hdc, font);
+      DrawTextLine(hdc, row, channels_[i],
+                   static_cast<int>(i) == channel_selected_ ? RGB(255, 230, 235) : RGB(210, 210, 220),
+                   12);
     }
-    RECT bar = {rc.left + 16, rc.bottom - 22, rc.right - 16, rc.bottom - 14};
-    HBRUSH track = CreateSolidBrush(RGB(60, 60, 70));
-    FillRect(hdc, &bar, track);
-    DeleteObject(track);
-    int fill = static_cast<int>((bar.right - bar.left) *
-                                (std::max)(0.0, (std::min)(1.0, progress_)));
-    RECT fill_rc = {bar.left, bar.top, bar.left + fill, bar.bottom};
-    HBRUSH fill_br = CreateSolidBrush(RGB(80, 160, 255));
-    FillRect(hdc, &fill_rc, fill_br);
-    DeleteObject(fill_br);
+    RECT collapse{rc.left + 8, rc.bottom - 32, rc.right - 8, rc.bottom - 8};
+    FillRoundRect(hdc, collapse, 8, Blend(kPink, kPanelDark, 0.35));
+    DrawTextLine(hdc, collapse, L"收起", RGB(255, 230, 235), 12, true,
+                 DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    (void)W;
+    (void)H;
+    return;
   }
 
-  if (hwnd == center_play_.hwnd) {
-    HBRUSH disc = CreateSolidBrush(RGB(20, 20, 24));
-    HGDIOBJ old_br = SelectObject(hdc, disc);
-    HPEN pen = CreatePen(PS_SOLID, 1, RGB(80, 80, 90));
-    HGDIOBJ old_pen = SelectObject(hdc, pen);
-    Ellipse(hdc, rc.left + 4, rc.top + 4, rc.right - 4, rc.bottom - 4);
-    SelectObject(hdc, old_br);
-    SelectObject(hdc, old_pen);
-    DeleteObject(disc);
-    DeleteObject(pen);
-    const wchar_t* glyph = playing_ ? L"❚❚" : L"▶";
-    DrawTextW(hdc, glyph, -1, const_cast<RECT*>(&rc),
-              DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+  const int gW = 72;
+  const int cW = 150;
+  const int eW = W - gW - cW - 8;
+
+  // 分组列
+  RECT gcol{rc.left, rc.top, rc.left + gW, rc.bottom};
+  FillRectColor(hdc, gcol, RGB(22, 14, 30));
+  for (size_t i = 0; i < groups_.size(); ++i) {
+    const int y = rc.top + 8 + static_cast<int>(i) * 40;
+    if (y + 36 > rc.bottom - 36) break;
+    RECT row{rc.left + 4, y, rc.left + gW - 4, y + 36};
+    if (static_cast<int>(i) == group_selected_) {
+      FillRoundRect(hdc, row, 8, Blend(kPink, kPanelDark, 0.5));
+    }
+    DrawTextLine(hdc, row, groups_[i],
+                 static_cast<int>(i) == group_selected_ ? RGB(255, 230, 235) : RGB(180, 180, 190), 12,
+                 static_cast<int>(i) == group_selected_, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
   }
 
-  if (lines) {
-    int y = title.empty() ? 12 : 40;
-    HFONT row = CreateFontW(16, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-                            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
-                            CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-                            DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
-    SelectObject(hdc, row);
-    for (int i = 0; i < static_cast<int>(lines->size()); ++i) {
-      RECT lr = {rc.left + 12, y, rc.right - 12, y + 28};
-      if (i == selected) {
-        HBRUSH hi = CreateSolidBrush(RGB(40, 80, 140));
-        FillRect(hdc, &lr, hi);
-        DeleteObject(hi);
+  // 频道列
+  for (size_t i = 0; i < channels_.size(); ++i) {
+    const int y = rc.top + 8 + static_cast<int>(i) * 36;
+    if (y + 32 > rc.bottom - 36) break;
+    RECT row{rc.left + gW + 4, y, rc.left + gW + cW - 4, y + 32};
+    if (static_cast<int>(i) == channel_selected_) {
+      FillRoundRect(hdc, row, 6, Blend(kPink, kPanelDark, 0.6));
+    }
+    DrawTextLine(hdc, row, channels_[i],
+                 static_cast<int>(i) == channel_selected_ ? RGB(255, 235, 238) : RGB(205, 205, 215), 12);
+  }
+
+  // EPG 列
+  RECT ecol{rc.left + gW + cW, rc.top, rc.right - 4, rc.bottom - 36};
+  // day tabs
+  int tx = ecol.left + 4;
+  for (size_t i = 0; i < epg_days_.size() && i < 5; ++i) {
+    RECT tab{tx, ecol.top + 6, tx + 52, ecol.top + 30};
+    if (static_cast<int>(i) == epg_day_selected_) {
+      FillRoundRect(hdc, tab, 6, Blend(kPink, kPanelDark, 0.45));
+    }
+    DrawTextLine(hdc, tab, epg_days_[i],
+                 static_cast<int>(i) == epg_day_selected_ ? RGB(255, 255, 255) : RGB(170, 170, 180), 11,
+                 false, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    tx += 56;
+  }
+  for (size_t i = 0; i < epg_programs_.size(); ++i) {
+    const int y = ecol.top + 38 + static_cast<int>(i) * 32;
+    if (y + 28 > ecol.bottom) break;
+    RECT row{ecol.left + 4, y, ecol.right - 4, y + 28};
+    if (static_cast<int>(i) == epg_program_selected_) {
+      FillRoundRect(hdc, row, 6, Blend(kPinkMuted, kPanelDark, 0.4));
+    }
+    DrawTextLine(hdc, row, epg_programs_[i], RGB(210, 210, 220), 11);
+  }
+
+  // 收起条
+  RECT collapse{rc.left + 8, rc.bottom - 32, rc.right - 8, rc.bottom - 8};
+  FillRoundRect(hdc, collapse, 8, Blend(kPink, kPanelDark, 0.35));
+  DrawTextLine(hdc, collapse, L"收起", RGB(255, 230, 235), 12, true,
+               DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+  (void)eW;
+  (void)H;
+}
+
+void KotvWinChrome::PaintLiveRight(HDC hdc, const RECT& rc) {
+  FillRoundRect(hdc, rc, 12, Blend(kPanelDark, RGB(0, 0, 0), 0.12));
+  RECT head{rc.left + 14, rc.top + 12, rc.right - 14, rc.top + 36};
+  DrawTextLine(hdc, head, L"直播设置", RGB(255, 255, 255), 14, true);
+
+  const int start = rc.top + 48;
+  const int gap = 10;
+  const int pill_h = 40;
+  for (size_t i = 0; i < live_right_items_.size(); ++i) {
+    const int y = start + static_cast<int>(i) * (pill_h + gap);
+    if (y + pill_h > rc.bottom - 12) break;
+    RECT pill{rc.left + 12, y, rc.right - 12, y + pill_h};
+    const bool focus = static_cast<int>(i) == 0;
+    FillRoundRect(hdc, pill, 20, RGB(255, 255, 255), focus ? kPink : RGB(220, 220, 225), focus ? 2 : 1);
+    std::wstring label = live_right_items_[i].label;
+    if (!live_right_items_[i].trailing.empty()) {
+      label += L"  ";
+      label += live_right_items_[i].trailing;
+    }
+    DrawTextLine(hdc, pill, label, RGB(40, 40, 48), 12, true,
+                 DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+  }
+}
+
+void KotvWinChrome::PaintChannelInfo(HDC hdc, const RECT& rc) {
+  // 浅半透明白底条
+  FillRoundRect(hdc, rc, 10, RGB(245, 245, 248), RGB(220, 220, 228), 1);
+  RECT no{rc.left + 12, rc.top + 8, rc.left + 48, rc.bottom - 8};
+  DrawTextLine(hdc, no, channel_no_.empty() ? L"-" : channel_no_, RGB(60, 60, 70), 18, true,
+               DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+  RECT name{rc.left + 52, rc.top + 6, rc.left + 200, rc.top + 24};
+  DrawTextLine(hdc, name, channel_name_, RGB(30, 30, 36), 13, true);
+  RECT prog{rc.left + 52, rc.top + 24, rc.right - 16, rc.bottom - 6};
+  const std::wstring prog_text =
+      channel_ticker_.empty()
+          ? channel_prog_
+          : (channel_prog_.empty() ? channel_ticker_ : channel_prog_ + L"  ·  " + channel_ticker_);
+  DrawTextLine(hdc, prog, prog_text, kPink, 12, false);
+}
+
+void KotvWinChrome::PaintCenter(HDC hdc, const RECT& rc) {
+  FillRoundRect(hdc, rc, 36, Blend(kPanelDark, RGB(0, 0, 0), 0.2), RGB(90, 80, 100), 1);
+  DrawTextLine(hdc, rc, playing_ ? L"❚❚" : L"▶", RGB(255, 255, 255), 22, true,
+               DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+}
+
+void KotvWinChrome::PaintModal(HDC hdc, const RECT& rc) {
+  const bool light = sheet_kind_ == "danmaku";
+  FillRoundRect(hdc, rc, 16, light ? kSheetLight : Blend(kPanelDark, RGB(0, 0, 0), 0.05));
+
+  if (light) {
+    RECT title{rc.left + 16, rc.top + 12, rc.right - 48, rc.top + 40};
+    DrawTextLine(hdc, title, sheet_title_.empty() ? L"弹幕设置" : sheet_title_, RGB(30, 30, 36), 16,
+                 true);
+    RECT close{rc.right - 40, rc.top + 10, rc.right - 12, rc.top + 38};
+    DrawTextLine(hdc, close, L"✕", RGB(90, 90, 100), 16, true, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+
+    for (size_t i = 0; i < sheet_items_.size(); ++i) {
+      const auto& it = sheet_items_[i];
+      const int y = rc.top + 52 + static_cast<int>(i) * 52;
+      RECT row{rc.left + 16, y, rc.right - 16, y + 44};
+      DrawTextLine(hdc, row, it.label, RGB(40, 40, 48), 13, false,
+                   DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+      if (it.toggle) {
+        RECT sw{rc.right - 70, y + 10, rc.right - 24, y + 34};
+        FillRoundRect(hdc, sw, 12, it.on ? kGreenOn : RGB(200, 200, 208));
+        const int knob_x = it.on ? sw.right - 22 : sw.left + 2;
+        Ellipse(hdc, knob_x, sw.top + 2, knob_x + 20, sw.bottom - 2);
+      } else if (!it.trailing.empty()) {
+        RECT tr{rc.right - 100, y, rc.right - 24, y + 44};
+        DrawTextLine(hdc, tr, it.trailing, RGB(100, 100, 110), 12, false,
+                     DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+        // 简易滑条示意
+        RECT track{rc.left + 16, y + 34, rc.right - 16, y + 38};
+        FillRoundRect(hdc, track, 2, RGB(210, 210, 218));
       }
-      DrawTextW(hdc, (*lines)[i].c_str(), -1, &lr,
-                DT_LEFT | DT_VCENTER | DT_END_ELLIPSIS | DT_SINGLELINE);
-      y += 30;
-      if (y > rc.bottom - 8) break;
     }
-    DeleteObject(row);
+    return;
   }
 
-  if (hwnd == channel_info_.hwnd && !channel_text_.empty()) {
-    RECT tr = rc;
-    tr.left += 16;
-    tr.top += 16;
-    DrawTextW(hdc, channel_text_.c_str(), -1, &tr,
-              DT_LEFT | DT_TOP | DT_WORDBREAK);
+  // 暗色更多 / 选播放器
+  if (!sheet_title_.empty()) {
+    RECT title{rc.left + 16, rc.top + 10, rc.right - 16, rc.top + 34};
+    DrawTextLine(hdc, title, sheet_title_, RGB(255, 255, 255), 14, true);
   }
+  if (!sheet_subtitle_.empty()) {
+    RECT sub{rc.left + 16, rc.top + 32, rc.right - 16, rc.top + 50};
+    DrawTextLine(hdc, sub, sheet_subtitle_, RGB(170, 170, 180), 11);
+  }
+  const int header = sheet_subtitle_.empty() ? 40 : 54;
+  for (size_t i = 0; i < sheet_items_.size(); ++i) {
+    const auto& it = sheet_items_[i];
+    const int y = rc.top + header + static_cast<int>(i) * 48;
+    RECT row{rc.left + 10, y, rc.right - 10, y + 44};
+    const bool sel = static_cast<int>(i) == sheet_selected_ ||
+                     (sheet_kind_ == "player" && static_cast<int>(i) == sheet_selected_);
+    if (sel && sheet_kind_ == "player") {
+      FillRoundRect(hdc, row, 10, Blend(kPink, kPanelDark, 0.45));
+    } else if (static_cast<int>(i) == sheet_selected_ && sheet_kind_ == "more") {
+      FillRoundRect(hdc, row, 10, RGB(40, 28, 48));
+    }
+    DrawTextLine(hdc, row, it.label, RGB(240, 240, 245), 13, false,
+                 DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    RECT trail{rc.right - 90, y, rc.right - 16, y + 44};
+    if (it.toggle) {
+      RECT sw{rc.right - 70, y + 10, rc.right - 18, y + 34};
+      FillRoundRect(hdc, sw, 12, it.on ? kPink : RGB(70, 60, 80));
+      const int knob_x = it.on ? sw.right - 22 : sw.left + 2;
+      HBRUSH white = CreateSolidBrush(RGB(255, 255, 255));
+      HGDIOBJ old = SelectObject(hdc, white);
+      HPEN pen = CreatePen(PS_NULL, 0, 0);
+      HGDIOBJ oldp = SelectObject(hdc, pen);
+      Ellipse(hdc, knob_x, sw.top + 2, knob_x + 20, sw.bottom - 2);
+      SelectObject(hdc, old);
+      SelectObject(hdc, oldp);
+      DeleteObject(white);
+      DeleteObject(pen);
+    } else if (!it.trailing.empty()) {
+      DrawTextLine(hdc, trail, it.trailing, RGB(180, 180, 190), 11, false,
+                   DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+    } else if (it.chevron) {
+      DrawTextLine(hdc, trail, L"›", RGB(160, 160, 170), 18, false,
+                   DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+    }
+    if (sheet_kind_ == "player" && static_cast<int>(i) == sheet_selected_) {
+      DrawTextLine(hdc, trail, L"✓", kPink, 14, true, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+    }
+  }
+}
 
-  SelectObject(hdc, old);
-  DeleteObject(font);
+void KotvWinChrome::PaintPanel(HWND hwnd, HDC hdc, const RECT& rc) {
+  if (hwnd == top_.hwnd) PaintTop(hdc, rc);
+  else if (hwnd == bottom_.hwnd) PaintBottom(hdc, rc);
+  else if (hwnd == episodes_.hwnd) PaintEpisodes(hdc, rc);
+  else if (hwnd == live_left_.hwnd) PaintLiveLeft(hdc, rc);
+  else if (hwnd == live_right_.hwnd) PaintLiveRight(hdc, rc);
+  else if (hwnd == channel_info_.hwnd) PaintChannelInfo(hdc, rc);
+  else if (hwnd == center_play_.hwnd) PaintCenter(hdc, rc);
 }
 
 void KotvWinChrome::PaintDanmaku(HWND hwnd) {
@@ -446,185 +695,106 @@ void KotvWinChrome::PaintDanmaku(HWND hwnd) {
   GetClientRect(hwnd, &rc);
   const int W = rc.right - rc.left;
   const int H = rc.bottom - rc.top;
-  if (W < 1 || H < 1) return;
+  if (W <= 0 || H <= 0) return;
 
-  HDC screen = GetDC(hwnd);
-  HDC mem = CreateCompatibleDC(screen);
-  BITMAPINFO bmi{};
-  bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-  bmi.bmiHeader.biWidth = W;
-  bmi.bmiHeader.biHeight = -H;
-  bmi.bmiHeader.biPlanes = 1;
-  bmi.bmiHeader.biBitCount = 32;
-  bmi.bmiHeader.biCompression = BI_RGB;
-  void* bits = nullptr;
-  HBITMAP bmp = CreateDIBSection(mem, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
-  HGDIOBJ old_bmp = SelectObject(mem, bmp);
+  HDC hdc = GetDC(hwnd);
+  HDC mem = CreateCompatibleDC(hdc);
+  HBITMAP bmp = CreateCompatibleBitmap(hdc, W, H);
+  HGDIOBJ old = SelectObject(mem, bmp);
+  FillRectColor(mem, rc, kDanmakuKey);
 
-  // 填色键
-  HBRUSH key = CreateSolidBrush(kDanmakuKey);
-  FillRect(mem, &rc, key);
-  DeleteObject(key);
+  if (danmaku_enabled_ && !danmaku_items_.empty()) {
+    const int row_h = std::max(18, static_cast<int>(danmaku_font_ + 8));
+    const int rows = std::max(1, danmaku_rows_);
+    HFONT font = CreateFontW(-static_cast<int>(danmaku_font_), 0, 0, 0, FW_NORMAL, FALSE, FALSE,
+                             FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                             CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Microsoft YaHei UI");
+    HGDIOBJ oldf = SelectObject(mem, font);
+    SetBkMode(mem, TRANSPARENT);
 
-  // 避开顶/底/侧栏，避免画在原生播控上
-  const int pad_top = top_visible_ ? 52 : 8;
-  const int pad_bottom = bottom_visible_ ? 92 : (channel_visible_ ? 72 : 8);
-  const int pad_left = live_left_visible_ ? 320 : 0;
-  const int pad_right = (live_right_visible_ || episodes_visible_) ? 280 : 0;
-  const int usable_w = W - pad_left - pad_right;
-  const int usable_h = H - pad_top - pad_bottom;
-
-  SetBkMode(mem, TRANSPARENT);
-
-  if (buffering_) {
-    HFONT bf = CreateFontW(22, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
-                           DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
-                           CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-                           DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
-    HGDIOBJ oldf = SelectObject(mem, bf);
-    SetTextColor(mem, RGB(240, 240, 245));
-    RECT tr = rc;
-    DrawTextW(mem, L"缓冲中…", -1, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-    SelectObject(mem, oldf);
-    DeleteObject(bf);
-  }
-
-  if (danmaku_enabled_ && !danmaku_items_.empty() && usable_w > 40 &&
-      usable_h > 40) {
-    const double dur = (std::max)(1.0, danmaku_duration_ms_ / 1000.0);
-    const double fixed = (std::max)(1.0, danmaku_fixed_ms_ / 1000.0);
-    const double now = position_sec_;
-    const int rows = (std::max)(1, danmaku_rows_);
-    const int row_h = (std::max)(18, usable_h / rows);
-    int on_screen = 0;
-    const int max_on = 120;
-
-    for (const auto& it : danmaku_items_) {
-      if (on_screen >= max_on) break;
-      const bool scroll = it.mode == 1 || it.mode == 6;
-      const bool top = it.mode == 5;
-      const bool bottom = it.mode == 4;
+    for (size_t i = 0; i < danmaku_items_.size(); ++i) {
+      const auto& d = danmaku_items_[i];
+      const bool scroll = d.mode == 1 || d.mode == 6;
+      const bool top = d.mode == 5;
+      const bool bottom = d.mode == 4;
       if (scroll && !danmaku_show_scroll_) continue;
-      if (it.mode == 6 && !danmaku_show_reverse_) continue;
       if (top && !danmaku_show_top_) continue;
       if (bottom && !danmaku_show_bottom_) continue;
-      if (!scroll && !top && !bottom) continue;
+      if (d.mode == 6 && !danmaku_show_reverse_) continue;
 
-      const double life = scroll ? dur : fixed;
-      const double age = now - it.time;
-      if (age < -0.05 || age > life) continue;
+      const double age = position_sec_ - d.time;
+      if (age < -0.2) continue;
+      const int dur = scroll ? danmaku_duration_ms_ : danmaku_fixed_ms_;
+      if (age * 1000.0 > dur + 200) continue;
 
-      const double t = age / life;  // 0..1
-      const int font_px = (std::max)(
-          12, static_cast<int>(danmaku_font_ *
-                               (it.size <= 18 ? 12.0 / 14.0
-                                              : (it.size >= 36 ? 18.0 / 14.0 : 1.0))));
-      HFONT font = CreateFontW(font_px, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
-                               DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
-                               CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-                               DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
-      HGDIOBJ oldf = SelectObject(mem, font);
+      const int row = static_cast<int>(i % rows);
+      const int y = top ? 8 + row * row_h
+                        : (bottom ? H - (rows - row) * row_h - 8 : 8 + row * row_h);
       SIZE sz{};
-      GetTextExtentPoint32W(mem, it.content.c_str(),
-                            static_cast<int>(it.content.size()), &sz);
-
+      GetTextExtentPoint32W(mem, d.content.c_str(), static_cast<int>(d.content.size()), &sz);
       int x = 0;
-      int y = pad_top;
       if (scroll) {
-        // 用内容哈希稳到轨
-        size_t hsh = 1469598103u;
-        for (wchar_t c : it.content) hsh = (hsh ^ static_cast<size_t>(c)) * 1099511628211u;
-        const int track = static_cast<int>(hsh % static_cast<size_t>(rows));
-        y = pad_top + track * row_h;
-        if (it.mode == 6) {
-          // 逆向：左→右
-          x = pad_left + static_cast<int>((usable_w + sz.cx) * t) - sz.cx;
+        const double t = std::clamp(age * 1000.0 / dur, 0.0, 1.0);
+        if (d.mode == 6) {
+          x = static_cast<int>(-sz.cx + t * (W + sz.cx));
         } else {
-          // 滚动：右→左
-          x = pad_left + usable_w -
-              static_cast<int>((usable_w + sz.cx) * t);
+          x = static_cast<int>(W - t * (W + sz.cx));
         }
-      } else if (top) {
-        size_t hsh = 2166136261u;
-        for (wchar_t c : it.content) hsh = (hsh ^ static_cast<size_t>(c)) * 16777619u;
-        const int track = static_cast<int>(hsh % static_cast<size_t>((std::max)(1, rows / 2)));
-        y = pad_top + track * row_h;
-        x = pad_left + (usable_w - sz.cx) / 2;
       } else {
-        size_t hsh = 2166136261u;
-        for (wchar_t c : it.content) hsh = (hsh ^ static_cast<size_t>(c)) * 16777619u;
-        const int track = static_cast<int>(hsh % static_cast<size_t>((std::max)(1, rows / 2)));
-        y = H - pad_bottom - (track + 1) * row_h;
-        x = pad_left + (usable_w - sz.cx) / 2;
+        x = (W - sz.cx) / 2;
       }
-
-      COLORREF rgb = RgbFromDanmaku(it.color);
-      // 近似透明度：opacity 低时略压暗
-      if (danmaku_opacity_ < 0.99) {
-        const double o = (std::max)(0.2, danmaku_opacity_);
-        rgb = RGB(static_cast<int>(GetRValue(rgb) * o),
-                  static_cast<int>(GetGValue(rgb) * o),
-                  static_cast<int>(GetBValue(rgb) * o));
-      }
-      // 描边
-      SetTextColor(mem, RGB(0, 0, 0));
-      for (int dx = -1; dx <= 1; ++dx) {
-        for (int dy = -1; dy <= 1; ++dy) {
-          if (dx == 0 && dy == 0) continue;
-          TextOutW(mem, x + dx, y + dy, it.content.c_str(),
-                  static_cast<int>(it.content.size()));
-        }
-      }
-      SetTextColor(mem, rgb);
-      TextOutW(mem, x, y, it.content.c_str(), static_cast<int>(it.content.size()));
-      SelectObject(mem, oldf);
-      DeleteObject(font);
-      ++on_screen;
+      const int r = (d.color >> 16) & 0xFF;
+      const int g = (d.color >> 8) & 0xFF;
+      const int b = d.color & 0xFF;
+      SetTextColor(mem, RGB(r, g, b));
+      TextOutW(mem, x, y, d.content.c_str(), static_cast<int>(d.content.size()));
     }
+    SelectObject(mem, oldf);
+    DeleteObject(font);
   }
 
-  BitBlt(screen, 0, 0, W, H, mem, 0, 0, SRCCOPY);
-  SelectObject(mem, old_bmp);
+  BitBlt(hdc, 0, 0, W, H, mem, 0, 0, SRCCOPY);
+  SelectObject(mem, old);
   DeleteObject(bmp);
   DeleteDC(mem);
-  ReleaseDC(hwnd, screen);
+  ReleaseDC(hwnd, hdc);
 }
 
-LRESULT CALLBACK KotvWinChrome::WndProc(HWND hwnd, UINT msg, WPARAM wp,
-                                        LPARAM lp) {
-  auto* self =
-      reinterpret_cast<KotvWinChrome*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
-  if (!self && msg == WM_NCCREATE) {
-    auto* cs = reinterpret_cast<CREATESTRUCTW*>(lp);
-    self = reinterpret_cast<KotvWinChrome*>(cs->lpCreateParams);
-    SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(self));
+LRESULT CALLBACK KotvWinChrome::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+  if (msg == WM_NCCREATE) {
+    auto* cs = reinterpret_cast<CREATESTRUCTW*>(lParam);
+    SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(cs->lpCreateParams));
   }
-  if (self) return self->OnMessage(hwnd, msg, wp, lp);
-  return DefWindowProcW(hwnd, msg, wp, lp);
+  auto* self = reinterpret_cast<KotvWinChrome*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+  if (self) return self->OnMessage(hwnd, msg, wParam, lParam);
+  return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
-LRESULT CALLBACK KotvWinChrome::DanmakuWndProc(HWND hwnd, UINT msg, WPARAM wp,
-                                               LPARAM lp) {
-  auto* self =
-      reinterpret_cast<KotvWinChrome*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
-  if (!self && msg == WM_NCCREATE) {
-    auto* cs = reinterpret_cast<CREATESTRUCTW*>(lp);
-    self = reinterpret_cast<KotvWinChrome*>(cs->lpCreateParams);
-    SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(self));
+LRESULT CALLBACK KotvWinChrome::DanmakuWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+  if (msg == WM_NCCREATE) {
+    auto* cs = reinterpret_cast<CREATESTRUCTW*>(lParam);
+    SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(cs->lpCreateParams));
   }
-  if (self) return self->OnDanmakuMessage(hwnd, msg, wp, lp);
-  return DefWindowProcW(hwnd, msg, wp, lp);
+  auto* self = reinterpret_cast<KotvWinChrome*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+  if (self) return self->OnDanmakuMessage(hwnd, msg, wParam, lParam);
+  return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
-LRESULT KotvWinChrome::OnDanmakuMessage(HWND hwnd, UINT msg, WPARAM wp,
-                                        LPARAM lp) {
+LRESULT CALLBACK KotvWinChrome::ModalWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+  if (msg == WM_NCCREATE) {
+    auto* cs = reinterpret_cast<CREATESTRUCTW*>(lParam);
+    SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(cs->lpCreateParams));
+  }
+  auto* self = reinterpret_cast<KotvWinChrome*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+  if (self) return self->OnModalMessage(hwnd, msg, wParam, lParam);
+  return DefWindowProcW(hwnd, msg, wParam, lParam);
+}
+
+LRESULT KotvWinChrome::OnDanmakuMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
   switch (msg) {
     case WM_TIMER:
-      if (wp == kDanmakuTimerId) {
-        LayoutDanmaku();
-        return 0;
-      }
-      break;
+      PaintDanmaku(hwnd);
+      return 0;
     case WM_PAINT: {
       PAINTSTRUCT ps;
       BeginPaint(hwnd, &ps);
@@ -635,99 +805,205 @@ LRESULT KotvWinChrome::OnDanmakuMessage(HWND hwnd, UINT msg, WPARAM wp,
     case WM_ERASEBKGND:
       return 1;
     default:
-      break;
+      return DefWindowProcW(hwnd, msg, wParam, lParam);
   }
-  return DefWindowProcW(hwnd, msg, wp, lp);
 }
 
-LRESULT KotvWinChrome::OnMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+LRESULT KotvWinChrome::OnModalMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
   switch (msg) {
     case WM_PAINT: {
       PAINTSTRUCT ps;
       HDC hdc = BeginPaint(hwnd, &ps);
-      RECT rc;
+      RECT rc{};
       GetClientRect(hwnd, &rc);
-      std::wstring title;
-      const std::vector<std::wstring>* lines = nullptr;
-      int selected = -1;
-      if (hwnd == top_.hwnd) {
-        title = title_;
-        if (!subtitle_.empty()) title += L"  ·  " + subtitle_;
-      } else if (hwnd == episodes_.hwnd) {
-        title = L"选集";
-        lines = &episode_lines_;
-        selected = episode_selected_;
-      } else if (hwnd == live_left_.hwnd) {
-        title = L"频道";
-        lines = &live_left_lines_;
-        selected = live_left_selected_;
-      } else if (hwnd == live_right_.hwnd) {
-        title = L"设置";
-        lines = &live_right_lines_;
-      }
-      PaintDark(hwnd, hdc, rc, title, lines, selected);
+      PaintModal(hdc, rc);
       EndPaint(hwnd, &ps);
       return 0;
     }
     case WM_LBUTTONUP: {
-      const int x = GET_X_LPARAM(lp);
-      const int y = GET_Y_LPARAM(lp);
-      if (hwnd == center_play_.hwnd) {
-        Emit({{EncodableValue("type"), EncodableValue("togglePlay")}});
+      const int x = LOWORD(lParam);
+      const int y = HIWORD(lParam);
+      RECT rc{};
+      GetClientRect(hwnd, &rc);
+      const bool light = sheet_kind_ == "danmaku";
+      if (light && x > rc.right - 48 && y < 48) {
+        CloseSheet();
+        Emit({{EncodableValue("type"), EncodableValue("sheetClose")},
+              {EncodableValue("kind"), EncodableValue(std::string("danmaku"))}});
         return 0;
       }
+      const int header = light ? 52 : (sheet_subtitle_.empty() ? 40 : 54);
+      const int row_h = light ? 52 : 48;
+      if (y >= header) {
+        const int idx = (y - header) / row_h;
+        if (idx >= 0 && idx < static_cast<int>(sheet_items_.size())) {
+          sheet_selected_ = idx;
+          const auto& it = sheet_items_[idx];
+          if (it.toggle) {
+            sheet_items_[idx].on = !sheet_items_[idx].on;
+            Emit({{EncodableValue("type"), EncodableValue("toggleItem")},
+                  {EncodableValue("id"), EncodableValue(it.id)},
+                  {EncodableValue("on"), EncodableValue(sheet_items_[idx].on)},
+                  {EncodableValue("sheet"), EncodableValue(sheet_kind_)}});
+            InvalidateRect(hwnd, nullptr, TRUE);
+          } else if (sheet_kind_ == "player") {
+            Emit({{EncodableValue("type"), EncodableValue("pickPlayer")},
+                  {EncodableValue("id"), EncodableValue(it.id)}});
+            CloseSheet();
+          } else if (sheet_kind_ == "more" || sheet_kind_ == "danmaku") {
+            Emit({{EncodableValue("type"), EncodableValue("more")},
+                  {EncodableValue("id"), EncodableValue(it.id)},
+                  {EncodableValue("sheet"), EncodableValue(sheet_kind_)}});
+            if (!it.toggle) CloseSheet();
+          } else {
+            Emit({{EncodableValue("type"), EncodableValue("sheet")},
+                  {EncodableValue("id"), EncodableValue(it.id)},
+                  {EncodableValue("kind"), EncodableValue(sheet_kind_)}});
+            CloseSheet();
+          }
+        }
+      }
+      return 0;
+    }
+    case WM_ERASEBKGND:
+      return 1;
+    default:
+      return DefWindowProcW(hwnd, msg, wParam, lParam);
+  }
+}
+
+LRESULT KotvWinChrome::OnMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+  switch (msg) {
+    case WM_PAINT: {
+      PAINTSTRUCT ps;
+      HDC hdc = BeginPaint(hwnd, &ps);
+      RECT rc{};
+      GetClientRect(hwnd, &rc);
+      PaintPanel(hwnd, hdc, rc);
+      EndPaint(hwnd, &ps);
+      return 0;
+    }
+    case WM_LBUTTONUP: {
+      const int x = LOWORD(lParam);
+      const int y = HIWORD(lParam);
+      RECT rc{};
+      GetClientRect(hwnd, &rc);
+
       if (hwnd == top_.hwnd) {
-        RECT rc;
-        GetClientRect(hwnd, &rc);
-        if (x >= rc.right - 64) {
+        if (x > rc.right - 100) {
           Emit({{EncodableValue("type"), EncodableValue("exit")}});
         }
         return 0;
       }
       if (hwnd == bottom_.hwnd) {
-        RECT rc;
-        GetClientRect(hwnd, &rc);
-        if (y > rc.bottom - 28) {
-          double p = (x - 16) / (std::max)(1.0, static_cast<double>(rc.right - 32));
-          p = (std::max)(0.0, (std::min)(1.0, p));
+        if (y < 36) {
+          const double p = std::clamp((x - 16.0) / std::max(1, rc.right - 32), 0.0, 1.0);
           Emit({{EncodableValue("type"), EncodableValue("seekFraction")},
                 {EncodableValue("value"), EncodableValue(p)}});
-        } else if (y >= 28 && y <= 56 && !actions_.empty()) {
-          const int n = static_cast<int>(actions_.size());
-          const int slot =
-              (std::max)(48, (rc.right - rc.left - 24) / (std::max)(1, n));
-          const int idx = (x - 12) / slot;
-          if (idx >= 0 && idx < n) {
-            Emit({{EncodableValue("type"), EncodableValue(actions_[idx])}});
+          return 0;
+        }
+        const int ay = 44;
+        if (y >= ay && y <= ay + 36) {
+          const int slot = (x - 20) / 46;
+          if (slot == 0) {
+            Emit({{EncodableValue("type"), EncodableValue(std::string("prev"))}});
+          } else if (slot == 1) {
+            Emit({{EncodableValue("type"), EncodableValue(std::string("toggle"))}});
+          } else if (slot == 2) {
+            Emit({{EncodableValue("type"), EncodableValue(std::string("next"))}});
+          } else if (slot == 3) {
+            // 更多：有快照则原生弹层，否则回 Dart
+            if (!more_items_.empty()) {
+              sheet_kind_ = "more";
+              sheet_title_ = L"更多";
+              sheet_subtitle_.clear();
+              sheet_items_ = more_items_;
+              sheet_selected_ = 0;
+              EnsureClasses();
+              LayoutModal();
+            } else {
+              Emit({{EncodableValue("type"), EncodableValue("more")},
+                    {EncodableValue("id"), EncodableValue(std::string("open"))}});
+            }
           }
         }
         return 0;
       }
-      auto pick = [&](const std::vector<std::wstring>& lines, int y0,
-                      const char* type) {
-        int idx = (y - y0) / 30;
-        if (idx >= 0 && idx < static_cast<int>(lines.size())) {
-          Emit({{EncodableValue("type"), EncodableValue(type)},
-                {EncodableValue("index"),
-                 EncodableValue(static_cast<int32_t>(idx))}});
-        }
-      };
+      if (hwnd == center_play_.hwnd) {
+        Emit({{EncodableValue("type"), EncodableValue("togglePlay")}});
+        return 0;
+      }
       if (hwnd == episodes_.hwnd) {
-        RECT rc;
-        GetClientRect(hwnd, &rc);
-        if (y < 40 && x >= rc.right - 40) {
-          Emit({{EncodableValue("type"), EncodableValue("closeEpisodes")}});
-          return 0;
+        const int idx = (y - 44) / 40;
+        if (idx >= 0 && idx < static_cast<int>(episode_lines_.size())) {
+          Emit({{EncodableValue("type"), EncodableValue("episode")},
+                {EncodableValue("index"), EncodableValue(idx)}});
         }
-        pick(episode_lines_, 40, "episode");
         return 0;
       }
       if (hwnd == live_left_.hwnd) {
-        pick(live_left_lines_, 40, "liveLeft");
+        if (y > rc.bottom - 36) {
+          Emit({{EncodableValue("type"), EncodableValue("collapseLiveLeft")}});
+          return 0;
+        }
+        // 无分组时退化为单列频道（兼容旧 liveLeft）
+        if (groups_.empty()) {
+          const int idx = (y - 8) / 36;
+          if (idx >= 0 && idx < static_cast<int>(channels_.size())) {
+            channel_selected_ = idx;
+            Emit({{EncodableValue("type"), EncodableValue("liveLeft")},
+                  {EncodableValue("index"), EncodableValue(idx)}});
+            InvalidateRect(hwnd, nullptr, TRUE);
+          }
+          return 0;
+        }
+        const int gW = 72;
+        const int cW = 150;
+        if (x < gW) {
+          const int idx = (y - 8) / 40;
+          if (idx >= 0 && idx < static_cast<int>(groups_.size())) {
+            group_selected_ = idx;
+            Emit({{EncodableValue("type"), EncodableValue("group")},
+                  {EncodableValue("index"), EncodableValue(idx)}});
+            InvalidateRect(hwnd, nullptr, TRUE);
+          }
+        } else if (x < gW + cW) {
+          const int idx = (y - 8) / 36;
+          if (idx >= 0 && idx < static_cast<int>(channels_.size())) {
+            channel_selected_ = idx;
+            Emit({{EncodableValue("type"), EncodableValue("liveLeft")},
+                  {EncodableValue("index"), EncodableValue(idx)}});
+            Emit({{EncodableValue("type"), EncodableValue("channel")},
+                  {EncodableValue("index"), EncodableValue(idx)}});
+            InvalidateRect(hwnd, nullptr, TRUE);
+          }
+        } else {
+          if (y < 36) {
+            const int idx = (x - gW - cW - 4) / 56;
+            if (idx >= 0 && idx < static_cast<int>(epg_days_.size())) {
+              epg_day_selected_ = idx;
+              Emit({{EncodableValue("type"), EncodableValue("epgDay")},
+                    {EncodableValue("index"), EncodableValue(idx)}});
+              InvalidateRect(hwnd, nullptr, TRUE);
+            }
+          } else {
+            const int idx = (y - 38) / 32;
+            if (idx >= 0 && idx < static_cast<int>(epg_programs_.size())) {
+              epg_program_selected_ = idx;
+              Emit({{EncodableValue("type"), EncodableValue("epg")},
+                    {EncodableValue("index"), EncodableValue(idx)}});
+            }
+          }
+        }
         return 0;
       }
       if (hwnd == live_right_.hwnd) {
-        pick(live_right_lines_, 40, "liveRight");
+        const int idx = (y - 48) / 50;
+        if (idx >= 0 && idx < static_cast<int>(live_right_items_.size())) {
+          Emit({{EncodableValue("type"), EncodableValue("liveRight")},
+                {EncodableValue("index"), EncodableValue(idx)},
+                {EncodableValue("id"), EncodableValue(live_right_items_[idx].id)}});
+        }
         return 0;
       }
       return 0;
@@ -735,84 +1011,180 @@ LRESULT KotvWinChrome::OnMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_ERASEBKGND:
       return 1;
     default:
-      break;
+      return DefWindowProcW(hwnd, msg, wParam, lParam);
   }
-  return DefWindowProcW(hwnd, msg, wp, lp);
 }
 
 void KotvWinChrome::IngestDanmaku(const EncodableMap* args) {
   if (!args) return;
   if (args->count(EncodableValue("enabled")))
-    danmaku_enabled_ = ArgBool(args, "enabled");
+    danmaku_enabled_ = GetBool(*args, "enabled", danmaku_enabled_);
   if (args->count(EncodableValue("fontSize")))
-    danmaku_font_ = ArgDouble(args, "fontSize", danmaku_font_);
+    danmaku_font_ = GetDouble(*args, "fontSize", danmaku_font_);
   if (args->count(EncodableValue("opacity")))
-    danmaku_opacity_ = ArgDouble(args, "opacity", danmaku_opacity_);
+    danmaku_opacity_ = GetDouble(*args, "opacity", danmaku_opacity_);
   if (args->count(EncodableValue("durationMs")))
-    danmaku_duration_ms_ = ArgInt(args, "durationMs", danmaku_duration_ms_);
+    danmaku_duration_ms_ = GetInt(*args, "durationMs", danmaku_duration_ms_);
   if (args->count(EncodableValue("fixedDurationMs")))
-    danmaku_fixed_ms_ = ArgInt(args, "fixedDurationMs", danmaku_fixed_ms_);
+    danmaku_fixed_ms_ = GetInt(*args, "fixedDurationMs", danmaku_fixed_ms_);
+  else if (args->count(EncodableValue("fixedMs")))
+    danmaku_fixed_ms_ = GetInt(*args, "fixedMs", danmaku_fixed_ms_);
   if (args->count(EncodableValue("rows")))
-    danmaku_rows_ = ArgInt(args, "rows", danmaku_rows_);
+    danmaku_rows_ = GetInt(*args, "rows", danmaku_rows_);
   if (args->count(EncodableValue("showScroll")))
-    danmaku_show_scroll_ = ArgBool(args, "showScroll", danmaku_show_scroll_);
+    danmaku_show_scroll_ = GetBool(*args, "showScroll", danmaku_show_scroll_);
   if (args->count(EncodableValue("showTop")))
-    danmaku_show_top_ = ArgBool(args, "showTop", danmaku_show_top_);
+    danmaku_show_top_ = GetBool(*args, "showTop", danmaku_show_top_);
   if (args->count(EncodableValue("showBottom")))
-    danmaku_show_bottom_ = ArgBool(args, "showBottom", danmaku_show_bottom_);
+    danmaku_show_bottom_ = GetBool(*args, "showBottom", danmaku_show_bottom_);
   if (args->count(EncodableValue("showReverse")))
-    danmaku_show_reverse_ = ArgBool(args, "showReverse", danmaku_show_reverse_);
+    danmaku_show_reverse_ = GetBool(*args, "showReverse", danmaku_show_reverse_);
 
-  auto it = args->find(EncodableValue("items"));
-  if (it != args->end()) {
+  const auto it = args->find(EncodableValue("items"));
+  if (it != args->end() && std::holds_alternative<flutter::EncodableList>(it->second)) {
     danmaku_items_.clear();
-    const auto* list = std::get_if<EncodableList>(&it->second);
-    if (list) {
-      danmaku_items_.reserve(list->size());
-      for (const auto& v : *list) {
-        const auto* m = std::get_if<EncodableMap>(&v);
-        if (!m) continue;
-        DanmakuItem d;
-        d.time = ArgDouble(m, "t");
-        d.content = Utf8ToWide(ArgString(m, "c"));
-        d.mode = ArgInt(m, "m", 1);
-        d.color = ArgInt(m, "color", 0xFFFFFF);
-        d.size = ArgInt(m, "size", 25);
-        if (!d.content.empty()) danmaku_items_.push_back(std::move(d));
-      }
-      std::sort(danmaku_items_.begin(), danmaku_items_.end(),
-                [](const DanmakuItem& a, const DanmakuItem& b) {
-                  return a.time < b.time;
-                });
+    for (const auto& v : std::get<flutter::EncodableList>(it->second)) {
+      if (!std::holds_alternative<EncodableMap>(v)) continue;
+      const auto& row = std::get<EncodableMap>(v);
+      DanmakuItem d;
+      d.time = GetDouble(row, "t");
+      if (d.time == 0) d.time = GetDouble(row, "time");
+      d.content = Utf8ToWide(GetString(row, "c"));
+      if (d.content.empty()) d.content = Utf8ToWide(GetString(row, "content"));
+      d.mode = GetInt(row, "m", GetInt(row, "mode", 1));
+      d.color = GetInt(row, "color", 0xFFFFFF);
+      d.size = GetInt(row, "size", 25);
+      if (!d.content.empty()) danmaku_items_.push_back(std::move(d));
     }
+    std::sort(danmaku_items_.begin(), danmaku_items_.end(),
+              [](const DanmakuItem& a, const DanmakuItem& b) { return a.time < b.time; });
+  }
+  if (enabled_) LayoutDanmaku();
+  if (danmaku_hwnd_) InvalidateRect(danmaku_hwnd_, nullptr, FALSE);
+}
+
+void KotvWinChrome::IngestSheet(const EncodableMap* args) {
+  if (!args) return;
+  sheet_kind_ = GetString(*args, "kind");
+  if (sheet_kind_.empty()) {
+    CloseSheet();
+    return;
+  }
+  sheet_title_ = Utf8ToWide(GetString(*args, "title"));
+  sheet_subtitle_ = Utf8ToWide(GetString(*args, "subtitle"));
+  sheet_items_ = ParseLineItems(*args, "items");
+  sheet_selected_ = GetInt(*args, "selected", 0);
+  EnsureClasses();
+  LayoutModal();
+}
+
+void KotvWinChrome::IngestUpdate(const EncodableMap* args) {
+  if (!args) return;
+  if (args->count(EncodableValue("title"))) title_ = Utf8ToWide(GetString(*args, "title"));
+  if (args->count(EncodableValue("subtitle")))
+    subtitle_ = Utf8ToWide(GetString(*args, "subtitle"));
+  if (args->count(EncodableValue("resolution"))) {
+    const auto res = GetString(*args, "resolution");
+    if (!res.empty()) subtitle_ = L"[ " + Utf8ToWide(res) + L" ]";
+  }
+  if (args->count(EncodableValue("clock"))) clock_ = Utf8ToWide(GetString(*args, "clock"));
+  if (args->count(EncodableValue("endsAt"))) ends_at_ = Utf8ToWide(GetString(*args, "endsAt"));
+  if (args->count(EncodableValue("positionLabel")))
+    pos_label_ = Utf8ToWide(GetString(*args, "positionLabel"));
+  if (args->count(EncodableValue("durationLabel")))
+    dur_label_ = Utf8ToWide(GetString(*args, "durationLabel"));
+  if (args->count(EncodableValue("channelNo")))
+    channel_no_ = Utf8ToWide(GetString(*args, "channelNo"));
+  if (args->count(EncodableValue("channelName")))
+    channel_name_ = Utf8ToWide(GetString(*args, "channelName"));
+  if (args->count(EncodableValue("channelProgram")))
+    channel_prog_ = Utf8ToWide(GetString(*args, "channelProgram"));
+  if (args->count(EncodableValue("channelTicker")))
+    channel_ticker_ = Utf8ToWide(GetString(*args, "channelTicker"));
+  if (args->count(EncodableValue("channelText"))) {
+    // 旧扁平频道条文案 → 拆到 name
+    channel_name_ = Utf8ToWide(GetString(*args, "channelText"));
+  }
+
+  if (args->count(EncodableValue("episodes")))
+    episode_lines_ = GetStringList(*args, "episodes");
+  if (args->count(EncodableValue("episodeSelected")))
+    episode_selected_ = GetInt(*args, "episodeSelected", -1);
+  if (args->count(EncodableValue("groups"))) groups_ = GetStringList(*args, "groups");
+  if (args->count(EncodableValue("groupSelected")))
+    group_selected_ = GetInt(*args, "groupSelected", -1);
+  if (args->count(EncodableValue("channels"))) channels_ = GetStringList(*args, "channels");
+  if (args->count(EncodableValue("channelSelected")))
+    channel_selected_ = GetInt(*args, "channelSelected", -1);
+  // 兼容旧扁平 liveLeft
+  if (args->count(EncodableValue("liveLeft"))) {
+    const auto flat = GetStringList(*args, "liveLeft");
+    if (channels_.empty()) channels_ = flat;
+    if (args->count(EncodableValue("liveLeftSelected")))
+      channel_selected_ = GetInt(*args, "liveLeftSelected", -1);
+  }
+  if (args->count(EncodableValue("epgDays"))) epg_days_ = GetStringList(*args, "epgDays");
+  if (args->count(EncodableValue("epgDaySelected")))
+    epg_day_selected_ = GetInt(*args, "epgDaySelected", 0);
+  if (args->count(EncodableValue("epgPrograms")))
+    epg_programs_ = GetStringList(*args, "epgPrograms");
+  if (args->count(EncodableValue("epgProgramSelected")))
+    epg_program_selected_ = GetInt(*args, "epgProgramSelected", -1);
+
+  live_right_items_ = ParseLineItems(*args, "liveRightItems");
+  if (live_right_items_.empty() && args->count(EncodableValue("liveRight"))) {
+    // 字符串列表或结构化
+    live_right_items_ = ParseLineItems(*args, "liveRight");
+    if (live_right_items_.empty()) {
+      const auto legacy = GetUtf8List(*args, "liveRight");
+      for (size_t i = 0; i < legacy.size(); ++i) {
+        LineItem it;
+        it.id = std::to_string(i);
+        it.label = Utf8ToWide(legacy[i]);
+        live_right_items_.push_back(std::move(it));
+      }
+    }
+  }
+  if (args->count(EncodableValue("moreItems")))
+    more_items_ = ParseLineItems(*args, "moreItems");
+
+  top_visible_ = GetBool(*args, "top", top_visible_);
+  bottom_visible_ = GetBool(*args, "bottom", bottom_visible_);
+  episodes_visible_ = GetBool(*args, "episodesVisible", episodes_visible_);
+  live_left_visible_ = GetBool(*args, "liveLeftVisible", live_left_visible_);
+  live_right_visible_ = GetBool(*args, "liveRightVisible", live_right_visible_);
+  channel_visible_ = GetBool(*args, "channelVisible", channel_visible_);
+  center_visible_ = GetBool(*args, "centerVisible", center_visible_);
+  playing_ = GetBool(*args, "playing", playing_);
+  buffering_ = GetBool(*args, "buffering", buffering_);
+  progress_ = GetDouble(*args, "progress", progress_);
+  if (args->count(EncodableValue("positionSec")))
+    position_sec_ = GetDouble(*args, "positionSec", position_sec_);
+  else if (args->count(EncodableValue("position")))
+    position_sec_ = GetDouble(*args, "position", position_sec_);
+  rate_ = GetDouble(*args, "rate", rate_);
+  if (args->count(EncodableValue("actions"))) actions_ = GetUtf8List(*args, "actions");
+
+  if (args->find(EncodableValue("danmaku")) != args->end() &&
+      std::holds_alternative<EncodableMap>(args->at(EncodableValue("danmaku")))) {
+    const auto& dm = std::get<EncodableMap>(args->at(EncodableValue("danmaku")));
+    IngestDanmaku(&dm);
   }
 }
 
-void KotvWinChrome::HandleMethod(
-    const std::string& method, const EncodableMap* args,
-    std::function<void(EncodableValue)> success,
-    std::function<void(const std::string&, const std::string&)> error) {
+void KotvWinChrome::HandleMethod(const std::string& method, const EncodableMap* args,
+                                 std::function<void(EncodableValue)> success,
+                                 std::function<void(const std::string&, const std::string&)> error) {
   (void)error;
   if (method == "isAvailable") {
     success(EncodableValue(true));
     return;
   }
   if (method == "setEnabled") {
-    enabled_ = ArgBool(args, "enabled");
+    enabled_ = args ? GetBool(*args, "enabled") : false;
+    CloseSheet();
     if (enabled_) {
       EnsureClasses();
-      if (!top_.hwnd) top_.hwnd = CreateChildPanel(L"top");
-      if (!bottom_.hwnd) bottom_.hwnd = CreateChildPanel(L"bottom");
-      if (!episodes_.hwnd) episodes_.hwnd = CreateChildPanel(L"episodes");
-      if (!live_left_.hwnd) live_left_.hwnd = CreateChildPanel(L"liveLeft");
-      if (!live_right_.hwnd) live_right_.hwnd = CreateChildPanel(L"liveRight");
-      if (!channel_info_.hwnd)
-        channel_info_.hwnd = CreateChildPanel(L"channel");
-      if (!center_play_.hwnd) center_play_.hwnd = CreateChildPanel(L"center");
-      if (!danmaku_hwnd_) danmaku_hwnd_ = CreateDanmakuLayer();
-      if (danmaku_hwnd_ && !danmaku_timer_) {
-        danmaku_timer_ = SetTimer(danmaku_hwnd_, kDanmakuTimerId, 33, nullptr);
-      }
       Layout();
     } else {
       DestroyAll();
@@ -822,52 +1194,11 @@ void KotvWinChrome::HandleMethod(
   }
   if (method == "setDanmaku") {
     IngestDanmaku(args);
-    if (enabled_) LayoutDanmaku();
     success(EncodableValue(true));
     return;
   }
   if (method == "update") {
-    if (args) {
-      if (args->count(EncodableValue("title")))
-        title_ = Utf8ToWide(ArgString(args, "title"));
-      if (args->count(EncodableValue("subtitle")))
-        subtitle_ = Utf8ToWide(ArgString(args, "subtitle"));
-      if (args->count(EncodableValue("bottomText")))
-        bottom_text_ = Utf8ToWide(ArgString(args, "bottomText"));
-      if (args->count(EncodableValue("channelText")))
-        channel_text_ = Utf8ToWide(ArgString(args, "channelText"));
-      if (args->count(EncodableValue("episodes")))
-        episode_lines_ = ToWideList(ArgStringList(args, "episodes"));
-      if (args->count(EncodableValue("episodeSelected")))
-        episode_selected_ = ArgInt(args, "episodeSelected", -1);
-      if (args->count(EncodableValue("liveLeft")))
-        live_left_lines_ = ToWideList(ArgStringList(args, "liveLeft"));
-      if (args->count(EncodableValue("liveLeftSelected")))
-        live_left_selected_ = ArgInt(args, "liveLeftSelected", -1);
-      if (args->count(EncodableValue("liveRight")))
-        live_right_lines_ = ToWideList(ArgStringList(args, "liveRight"));
-      if (args->count(EncodableValue("progress")))
-        progress_ = ArgDouble(args, "progress");
-      if (args->count(EncodableValue("positionSec")))
-        position_sec_ = ArgDouble(args, "positionSec");
-      if (args->count(EncodableValue("rate")))
-        rate_ = ArgDouble(args, "rate", 1.0);
-      if (args->count(EncodableValue("playing")))
-        playing_ = ArgBool(args, "playing", true);
-      if (args->count(EncodableValue("buffering")))
-        buffering_ = ArgBool(args, "buffering");
-      if (args->count(EncodableValue("actions")))
-        actions_ = ArgStringList(args, "actions");
-
-      top_visible_ = ArgBool(args, "top", top_visible_);
-      bottom_visible_ = ArgBool(args, "bottom", bottom_visible_);
-      episodes_visible_ = ArgBool(args, "episodesVisible", episodes_visible_);
-      live_left_visible_ = ArgBool(args, "liveLeftVisible", live_left_visible_);
-      live_right_visible_ =
-          ArgBool(args, "liveRightVisible", live_right_visible_);
-      channel_visible_ = ArgBool(args, "channelVisible", channel_visible_);
-      center_visible_ = ArgBool(args, "centerVisible", center_visible_);
-    }
+    IngestUpdate(args);
     if (enabled_) Layout();
     success(EncodableValue(true));
     return;
@@ -877,5 +1208,62 @@ void KotvWinChrome::HandleMethod(
     success(EncodableValue(true));
     return;
   }
+  if (method == "showSheet") {
+    EnsureClasses();
+    IngestSheet(args);
+    success(EncodableValue(true));
+    return;
+  }
+  if (method == "hideSheet") {
+    CloseSheet();
+    success(EncodableValue(true));
+    return;
+  }
   success(EncodableValue(false));
+}
+
+// ---------------------------------------------------------------------------
+// Plugin registration（MethodChannel 回传 event，与 Dart setMethodCallHandler 对齐）
+// ---------------------------------------------------------------------------
+
+class KotvWinChromePlugin : public flutter::Plugin {
+ public:
+  static void RegisterWithRegistrar(flutter::PluginRegistrarWindows* registrar) {
+    auto plugin = std::make_unique<KotvWinChromePlugin>(registrar);
+    registrar->AddPlugin(std::move(plugin));
+  }
+
+  explicit KotvWinChromePlugin(flutter::PluginRegistrarWindows* registrar)
+      : chrome_(registrar) {
+    channel_ = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+        registrar->messenger(), "kotv_win_chrome",
+        &flutter::StandardMethodCodec::GetInstance());
+    channel_->SetMethodCallHandler(
+        [this](const flutter::MethodCall<flutter::EncodableValue>& call,
+               std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+          const auto* args = std::get_if<flutter::EncodableMap>(call.arguments());
+          auto shared =
+              std::shared_ptr<flutter::MethodResult<flutter::EncodableValue>>(std::move(result));
+          chrome_.HandleMethod(
+              call.method_name(), args,
+              [shared](flutter::EncodableValue v) { shared->Success(std::move(v)); },
+              [shared](const std::string& code, const std::string& msg) {
+                shared->Error(code, msg);
+              });
+        });
+    chrome_.SetEventSink([this](flutter::EncodableMap map) {
+      channel_->InvokeMethod(
+          "event", std::make_unique<flutter::EncodableValue>(flutter::EncodableValue(std::move(map))));
+    });
+  }
+
+ private:
+  KotvWinChrome chrome_;
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> channel_;
+};
+
+void KotvWinChromeRegisterWithRegistrar(FlutterDesktopPluginRegistrarRef registrar) {
+  KotvWinChromePlugin::RegisterWithRegistrar(
+      flutter::PluginRegistrarManager::GetInstance()
+          ->GetRegistrar<flutter::PluginRegistrarWindows>(registrar));
 }

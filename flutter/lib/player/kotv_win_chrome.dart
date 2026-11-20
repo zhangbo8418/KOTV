@@ -7,11 +7,10 @@ import 'danmaku_layer.dart';
 import 'kotv_platform.dart';
 import 'kotv_playback.dart';
 
-/// Win7 原生套壳通道与推送收拢。
+/// Win7 原生播控套壳：推送与事件收拢入口。
 ///
-/// 库存引擎下子 HWND 盖住 Flutter，用原生层承接点播全屏/直播菜单/弹幕/缓冲。
-/// 不是 Flutter 全屏播控的完整复刻（无「更多」sheet、轨表编辑等）；常用动作在壳上。
-/// Win8+ DComp 路径不使用本通道。
+/// 库存引擎下子 HWND 盖住 Flutter，用原生层承接点播顶底栏/更多/弹幕设置/选播放器，
+/// 以及直播左栏（分组·频道·EPG）/右栏药丸设置/频道条。Win8+ DComp 不启用。
 class KotvWinChrome {
   KotvWinChrome._();
 
@@ -22,6 +21,24 @@ class KotvWinChrome {
   static int _ownerToken = 0;
 
   static bool get isNeeded => kotvUsesWindowsNativeChrome();
+
+  /// 更多 / 弹幕设置 / 选播放器等行项。
+  static Map<String, dynamic> lineItem({
+    required String id,
+    required String label,
+    String trailing = '',
+    bool toggle = false,
+    bool on = false,
+    bool chevron = true,
+  }) =>
+      {
+        'id': id,
+        'label': label,
+        'trailing': trailing,
+        'toggle': toggle,
+        'on': on,
+        'chevron': chevron,
+      };
 
   static void _ensureHandler() {
     if (_handlerBound || kIsWeb) return;
@@ -52,6 +69,7 @@ class KotvWinChrome {
     if (token != 0 && token != _ownerToken) return;
     onEvent = null;
     _lastDanmakuSig = 0;
+    unawaited(hideSheet());
     unawaited(setEnabled(false));
   }
 
@@ -79,6 +97,33 @@ class KotvWinChrome {
     } catch (_) {}
   }
 
+  static Future<void> showSheet({
+    required String kind,
+    String title = '',
+    String subtitle = '',
+    required List<Map<String, dynamic>> items,
+    int selected = 0,
+  }) async {
+    if (!isNeeded) return;
+    _ensureHandler();
+    try {
+      await _ch.invokeMethod('showSheet', {
+        'kind': kind,
+        'title': title,
+        'subtitle': subtitle,
+        'items': items,
+        'selected': selected,
+      });
+    } catch (_) {}
+  }
+
+  static Future<void> hideSheet() async {
+    if (!isNeeded) return;
+    try {
+      await _ch.invokeMethod('hideSheet');
+    } catch (_) {}
+  }
+
   static String formatClock(Duration d) {
     if (d.inMilliseconds <= 0) return '--:--';
     final s = d.inSeconds;
@@ -91,7 +136,20 @@ class KotvWinChrome {
     return '${m.toString().padLeft(2, '0')}:${r.toString().padLeft(2, '0')}';
   }
 
-  /// 点播全屏快照（顶/底/选集/中心/弹幕）。
+  static String _wallClock() {
+    final n = DateTime.now();
+    return '${n.hour.toString().padLeft(2, '0')}:${n.minute.toString().padLeft(2, '0')}';
+  }
+
+  static String _endsAt(Duration pos, Duration dur) {
+    if (dur.inMilliseconds <= 0) return '';
+    final left = dur - pos;
+    if (left.inSeconds <= 0) return '';
+    final end = DateTime.now().add(left);
+    return 'Ends at ${end.hour.toString().padLeft(2, '0')}:${end.minute.toString().padLeft(2, '0')}';
+  }
+
+  /// 点播全屏快照（顶/底/选集/中心/更多项/弹幕）。
   static Future<void> pushVod({
     required KotvPlayback playback,
     required String title,
@@ -102,6 +160,8 @@ class KotvWinChrome {
     required bool episodesVisible,
     required bool danmakuOn,
     required List<DanmakuItem> danmakuItems,
+    String resolution = '',
+    List<Map<String, dynamic>>? moreItems,
     double danmakuFontSize = 18,
     double danmakuOpacity = 0.85,
     int danmakuDurationMs = 8000,
@@ -121,10 +181,15 @@ class KotvWinChrome {
     final rate = playback.rate;
     final rateLabel =
         'x${rate.toStringAsFixed(rate == rate.roundToDouble() ? 0 : 1)}';
-    await update({
+    final fields = <String, dynamic>{
       'mode': 'vod',
       'title': title,
       'subtitle': subtitle,
+      if (resolution.isNotEmpty) 'resolution': resolution,
+      'clock': _wallClock(),
+      'endsAt': _endsAt(pos, dur),
+      'positionLabel': formatClock(pos),
+      'durationLabel': formatClock(dur),
       'bottomText': '${formatClock(pos)} / ${formatClock(dur)} · $rateLabel',
       'episodes': episodes,
       'episodeSelected': episodeSelected,
@@ -140,8 +205,10 @@ class KotvWinChrome {
       'liveLeftVisible': false,
       'liveRightVisible': false,
       'channelVisible': false,
-      'actions': const ['prev', 'toggle', 'next', 'speed', 'replay', 'episodes'],
-    });
+      'actions': const ['prev', 'toggle', 'next', 'more'],
+      if (moreItems != null) 'moreItems': moreItems,
+    };
+    await update(fields);
     await setDanmaku(
       enabled: danmakuOn,
       items: danmakuItems,
@@ -157,7 +224,7 @@ class KotvWinChrome {
     );
   }
 
-  /// 直播快照（左频道/右设置/频道条/弹幕）。
+  /// 直播快照（分组/频道/EPG/右设置药丸/频道条/弹幕）。
   static Future<void> pushLive({
     required KotvPlayback playback,
     required String title,
@@ -169,6 +236,19 @@ class KotvWinChrome {
     required bool rightOpen,
     required bool channelVisible,
     required List<DanmakuItem> danmakuItems,
+    List<String>? groups,
+    int groupSelected = -1,
+    List<String>? channels,
+    int channelSelected = -1,
+    List<String>? epgDays,
+    int epgDaySelected = 0,
+    List<String>? epgPrograms,
+    int epgProgramSelected = -1,
+    String channelNo = '',
+    String channelName = '',
+    String channelProgram = '',
+    String channelTicker = '',
+    List<Map<String, dynamic>>? liveRightItems,
     bool danmakuEnabled = true,
   }) async {
     if (!isNeeded) return;
@@ -178,9 +258,22 @@ class KotvWinChrome {
       'mode': 'live',
       'title': title,
       'channelText': channelText,
+      if (channelNo.isNotEmpty) 'channelNo': channelNo,
+      if (channelName.isNotEmpty) 'channelName': channelName,
+      if (channelProgram.isNotEmpty) 'channelProgram': channelProgram,
+      if (channelTicker.isNotEmpty) 'channelTicker': channelTicker,
       'liveLeft': liveLeft,
       'liveLeftSelected': liveLeftSelected,
       'liveRight': liveRight,
+      if (liveRightItems != null) 'liveRightItems': liveRightItems,
+      if (groups != null) 'groups': groups,
+      'groupSelected': groupSelected,
+      if (channels != null) 'channels': channels,
+      'channelSelected': channelSelected >= 0 ? channelSelected : liveLeftSelected,
+      if (epgDays != null) 'epgDays': epgDays,
+      'epgDaySelected': epgDaySelected,
+      if (epgPrograms != null) 'epgPrograms': epgPrograms,
+      'epgProgramSelected': epgProgramSelected,
       'playing': playback.playing,
       'buffering': playback.buffering || playback.stalling,
       'positionSec': pos.inMilliseconds / 1000.0,

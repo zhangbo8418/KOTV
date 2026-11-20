@@ -9,13 +9,22 @@
 #include <vector>
 #include <windows.h>
 
-// Win7：库存引擎下子 HWND 盖住 Flutter，用原生套壳承接全屏/直播菜单/弹幕/缓冲提示。
-// Win8+ DComp 路径不启用（Dart 侧按 OS 分支）。
+// Win7：原生壳仿现网 Flutter 播控主路径（顶底栏/更多/弹幕设置/选播放器、直播左栏EPG/右设置/频道条）。
+// Win8+ DComp 不启用。
 class KotvWinChrome {
  public:
   using EncodableMap = flutter::EncodableMap;
   using EncodableValue = flutter::EncodableValue;
   using EventFn = std::function<void(EncodableMap)>;
+
+  struct LineItem {
+    std::string id;
+    std::wstring label;
+    std::wstring trailing;
+    bool toggle = false;
+    bool on = false;
+    bool chevron = false;
+  };
 
   explicit KotvWinChrome(flutter::PluginRegistrarWindows* registrar);
   ~KotvWinChrome();
@@ -33,7 +42,7 @@ class KotvWinChrome {
   struct DanmakuItem {
     double time = 0;
     std::wstring content;
-    int mode = 1;  // 1 scroll / 4 bottom / 5 top / 6 reverse
+    int mode = 1;
     int color = 0xFFFFFF;
     int size = 25;
   };
@@ -44,18 +53,32 @@ class KotvWinChrome {
   void DestroyAll();
   void Layout();
   void LayoutDanmaku();
+  void LayoutModal();
   void ShowPanel(Panel& p, bool show, int x, int y, int w, int h);
   HWND CreateChildPanel(const wchar_t* title);
-  HWND CreateDanmakuLayer();
+  HWND CreateLayeredPopup(const wchar_t* class_name);
+  void ApplyRoundRegion(HWND hwnd, int w, int h, int radius);
   static LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
   static LRESULT CALLBACK DanmakuWndProc(HWND, UINT, WPARAM, LPARAM);
+  static LRESULT CALLBACK ModalWndProc(HWND, UINT, WPARAM, LPARAM);
   LRESULT OnMessage(HWND, UINT, WPARAM, LPARAM);
   LRESULT OnDanmakuMessage(HWND, UINT, WPARAM, LPARAM);
+  LRESULT OnModalMessage(HWND, UINT, WPARAM, LPARAM);
   void Emit(EncodableMap map);
-  void PaintDark(HWND hwnd, HDC hdc, const RECT& rc, const std::wstring& title,
-                 const std::vector<std::wstring>* lines, int selected);
+  void PaintPanel(HWND hwnd, HDC hdc, const RECT& rc);
+  void PaintTop(HDC hdc, const RECT& rc);
+  void PaintBottom(HDC hdc, const RECT& rc);
+  void PaintEpisodes(HDC hdc, const RECT& rc);
+  void PaintLiveLeft(HDC hdc, const RECT& rc);
+  void PaintLiveRight(HDC hdc, const RECT& rc);
+  void PaintChannelInfo(HDC hdc, const RECT& rc);
+  void PaintCenter(HDC hdc, const RECT& rc);
+  void PaintModal(HDC hdc, const RECT& rc);
   void PaintDanmaku(HWND hwnd);
   void IngestDanmaku(const EncodableMap* args);
+  void IngestUpdate(const EncodableMap* args);
+  void IngestSheet(const EncodableMap* args);
+  void CloseSheet();
 
   flutter::PluginRegistrarWindows* registrar_;
   EventFn event_fn_;
@@ -70,17 +93,39 @@ class KotvWinChrome {
   Panel channel_info_;
   Panel center_play_;
   HWND danmaku_hwnd_ = nullptr;
+  HWND modal_hwnd_ = nullptr;
   UINT_PTR danmaku_timer_ = 0;
 
   std::wstring title_;
-  std::wstring subtitle_;
-  std::wstring bottom_text_;
-  std::wstring channel_text_;
+  std::wstring subtitle_;  // 分辨率等
+  std::wstring clock_;
+  std::wstring ends_at_;
+  std::wstring pos_label_;
+  std::wstring dur_label_;
+  std::wstring channel_no_;
+  std::wstring channel_name_;
+  std::wstring channel_prog_;
+  std::wstring channel_ticker_;
   std::vector<std::wstring> episode_lines_;
   int episode_selected_ = -1;
-  std::vector<std::wstring> live_left_lines_;
-  int live_left_selected_ = -1;
-  std::vector<std::wstring> live_right_lines_;
+
+  std::vector<std::wstring> groups_;
+  int group_selected_ = -1;
+  std::vector<std::wstring> channels_;
+  int channel_selected_ = -1;
+  std::vector<std::wstring> epg_days_;
+  int epg_day_selected_ = 0;
+  std::vector<std::wstring> epg_programs_;
+  int epg_program_selected_ = -1;
+
+  std::vector<LineItem> live_right_items_;
+  std::vector<LineItem> more_items_;
+  std::vector<LineItem> sheet_items_;
+  std::wstring sheet_title_;
+  std::wstring sheet_subtitle_;
+  std::string sheet_kind_;  // more | danmaku | player | ""
+  int sheet_selected_ = 0;
+
   bool top_visible_ = false;
   bool bottom_visible_ = false;
   bool episodes_visible_ = false;
@@ -93,7 +138,7 @@ class KotvWinChrome {
   double progress_ = 0;
   double position_sec_ = 0;
   double rate_ = 1.0;
-  std::vector<std::string> actions_;  // vod 底栏：prev/toggle/next/speed/replay/episodes
+  std::vector<std::string> actions_;
 
   bool danmaku_enabled_ = false;
   std::vector<DanmakuItem> danmaku_items_;

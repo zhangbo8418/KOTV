@@ -1056,6 +1056,17 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     widget.onEpisodesAutoClosed?.call();
   }
 
+  /// Win7 原生壳：复杂「选播放器」走 Flutter sheet 兜底。
+  Future<void> openPlayerPicker() => _showPlayerDialog();
+
+  /// Win7 原生壳：完整弹幕设置 Flutter sheet 兜底。
+  Future<void> openDanmakuSettingsFull() => showKotvDanmakuSettingsSheet(
+        context: context,
+        loadSettings: _loadSettings,
+        persist: _persist,
+        onChanged: widget.onDanmakuSettingsChanged,
+      );
+
   /// 离开选集面板 / 离开全屏窗口：与播控同一套隐藏间隔后关闭。
   void scheduleCloseEpisodes() {
     _epHideTimer?.cancel();
