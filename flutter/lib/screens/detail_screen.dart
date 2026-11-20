@@ -249,6 +249,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       GlobalKey<VodInlineControlsState>();
   /// Win7 内嵌底栏占位（量锚点）；非 Win7 仍用 [VodInlineControls]。
   final GlobalKey _inlineChromeAnchorKey = GlobalKey(debugLabel: 'kotv_inline_chrome_anchor');
+  /// Win7 画面区（含底栏 Stack）锚点，弹幕只盖此矩形。
+  final GlobalKey _inlineSurfaceKey = GlobalKey(debugLabel: 'kotv_inline_surface');
   int _winChromeToken = 0;
   int _epPage = 0;
   /// 焦点停留后切换线路 / 分集区间。
@@ -3734,8 +3736,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _winChromeToken = 0;
   }
 
-  Map<String, double>? _winInlineAnchorScreen() {
-    final box = _inlineChromeAnchorKey.currentContext?.findRenderObject() as RenderBox?;
+  Map<String, double>? _winRectOf(GlobalKey key) {
+    final box = key.currentContext?.findRenderObject() as RenderBox?;
     if (box == null || !box.hasSize || !box.attached) return null;
     try {
       final o = box.localToGlobal(Offset.zero);
@@ -3758,7 +3760,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       _unbindWinInlineChrome();
       return;
     }
-    final anchor = _winInlineAnchorScreen();
+    final anchor = _winRectOf(_inlineChromeAnchorKey);
     if (anchor == null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _syncWinInlineChrome();
@@ -3771,6 +3773,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     unawaited(KotvWinChrome.pushVodInline(
       playback: _playback,
       anchorScreen: anchor,
+      surfaceScreen: _winRectOf(_inlineSurfaceKey),
       chromeVisible: true,
       showDirect: kotvShowDirectOutput(_playback, _decodeMode),
       directOn: _playback.directOutput,
@@ -3836,21 +3839,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         unawaited(_persistPlayerSetting(
           'mpvDirect',
           kotvWin7DirectNextValue(_playback.directOutput),
-        ));
-        break;
-      case 'volume':
-        unawaited(KotvWinChrome.showSheet(
-          kind: 'volume',
-          title: '音量',
-          items: [
-            KotvWinChrome.sliderItem(
-              id: 'volume',
-              label: '音量',
-              value: _playback.volume.clamp(1, 100).toDouble(),
-              min: 1,
-              max: 100,
-            ),
-          ],
         ));
         break;
       case 'sheet':
@@ -4506,6 +4494,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       Widget stageWithChrome({required Widget stage}) {
         if (_playUrl.isEmpty) return stage;
         return Stack(
+          key: _inlineSurfaceKey,
           fit: StackFit.expand,
           children: [
             stage,

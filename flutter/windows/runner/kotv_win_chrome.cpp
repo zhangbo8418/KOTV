@@ -330,45 +330,82 @@ void KotvWinChrome::Layout() {
   LayoutModal();
 }
 
+double KotvWinChrome::ViewDpiScale() const {
+  HWND parent = FlutterHwnd();
+  if (!parent) return 1.0;
+  HDC dc = GetDC(parent);
+  double s = 1.0;
+  if (dc) {
+    s = GetDeviceCaps(dc, LOGPIXELSX) / 96.0;
+    ReleaseDC(parent, dc);
+  }
+  return s > 0 ? s : 1.0;
+}
+
 bool KotvWinChrome::ResolveAnchor(int* x, int* y, int* w, int* h) const {
   if (!anchor_valid_ || anchor_screen_w_ < 8 || anchor_screen_h_ < 8) return false;
-  HWND parent = FlutterHwnd();
-  if (!parent) return false;
-  POINT tl{static_cast<LONG>(std::lround(anchor_screen_l_)),
-           static_cast<LONG>(std::lround(anchor_screen_t_))};
-  if (!ScreenToClient(parent, &tl)) return false;
-  *x = tl.x;
-  *y = tl.y;
-  *w = static_cast<int>(std::lround(anchor_screen_w_));
-  *h = static_cast<int>(std::lround(anchor_screen_h_));
+  // Dart localToGlobal = Flutter 视图逻辑坐标；转物理像素后直接作子窗客户区坐标。
+  const double s = ViewDpiScale();
+  *x = static_cast<int>(std::lround(anchor_screen_l_ * s));
+  *y = static_cast<int>(std::lround(anchor_screen_t_ * s));
+  *w = static_cast<int>(std::lround(anchor_screen_w_ * s));
+  *h = static_cast<int>(std::lround(anchor_screen_h_ * s));
   return *w >= 8 && *h >= 8;
+}
+
+bool KotvWinChrome::ResolveSurface(int* x, int* y, int* w, int* h) const {
+  if (!surface_valid_ || surface_screen_w_ < 8 || surface_screen_h_ < 8) return false;
+  const double s = ViewDpiScale();
+  *x = static_cast<int>(std::lround(surface_screen_l_ * s));
+  *y = static_cast<int>(std::lround(surface_screen_t_ * s));
+  *w = static_cast<int>(std::lround(surface_screen_w_ * s));
+  *h = static_cast<int>(std::lround(surface_screen_h_ * s));
+  return *w >= 8 && *h >= 8;
+}
+
+void KotvWinChrome::RaiseChromeZ() {
+  auto raise = [](HWND h) {
+    if (h) SetWindowPos(h, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+  };
+  if (top_.hwnd && top_visible_) raise(top_.hwnd);
+  if (bottom_.hwnd && bottom_visible_) raise(bottom_.hwnd);
+  if (live_left_.hwnd && live_left_visible_) raise(live_left_.hwnd);
+  if (live_right_.hwnd && live_right_visible_) raise(live_right_.hwnd);
+  if (episodes_.hwnd && episodes_visible_) raise(episodes_.hwnd);
+  if (channel_info_.hwnd && channel_visible_) raise(channel_info_.hwnd);
+  if (center_play_.hwnd && center_visible_) raise(center_play_.hwnd);
 }
 
 void KotvWinChrome::LayoutDanmaku() {
   HWND parent = FlutterHwnd();
   if (!parent || !danmaku_hwnd_) return;
-  RECT rc{};
-  GetClientRect(parent, &rc);
-  const int W = rc.right - rc.left;
-  const int H = rc.bottom - rc.top;
-  if (!danmaku_enabled_ || W <= 0 || H <= 0) {
+  if (!danmaku_enabled_) {
     ShowWindow(danmaku_hwnd_, SW_HIDE);
     return;
   }
-  SetWindowPos(danmaku_hwnd_, HWND_TOP, 0, 0, W, H, SWP_SHOWWINDOW | SWP_NOACTIVATE);
-  if (top_.hwnd && top_visible_) SetWindowPos(top_.hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-  if (bottom_.hwnd && bottom_visible_)
-    SetWindowPos(bottom_.hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-  if (live_left_.hwnd && live_left_visible_)
-    SetWindowPos(live_left_.hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-  if (live_right_.hwnd && live_right_visible_)
-    SetWindowPos(live_right_.hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-  if (episodes_.hwnd && episodes_visible_)
-    SetWindowPos(episodes_.hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-  if (channel_info_.hwnd && channel_visible_)
-    SetWindowPos(channel_info_.hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-  if (center_play_.hwnd && center_visible_)
-    SetWindowPos(center_play_.hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+  int x = 0, y = 0, w = 0, h = 0;
+  if (mode_ == "vod_inline") {
+    // 内嵌：弹幕只盖画面区，勿铺满整窗（否则会糊在详情元数据上）。
+    if (!ResolveSurface(&x, &y, &w, &h)) {
+      ShowWindow(danmaku_hwnd_, SW_HIDE);
+      return;
+    }
+    int ax = 0, ay = 0, aw = 0, ah = 0;
+    if (ResolveAnchor(&ax, &ay, &aw, &ah) && ah > 0 && ay + ah <= y + h) {
+      h = std::max(0, ay - y);
+    }
+  } else {
+    RECT rc{};
+    GetClientRect(parent, &rc);
+    w = rc.right - rc.left;
+    h = rc.bottom - rc.top;
+  }
+  if (w <= 0 || h <= 0) {
+    ShowWindow(danmaku_hwnd_, SW_HIDE);
+    return;
+  }
+  SetWindowPos(danmaku_hwnd_, HWND_TOP, x, y, w, h, SWP_SHOWWINDOW | SWP_NOACTIVATE);
+  RaiseChromeZ();
 }
 
 void KotvWinChrome::LayoutModal() {
@@ -467,11 +504,29 @@ void KotvWinChrome::PaintBottomInline(HDC hdc, const RECT& rc) {
   RECT time_rc{ax + 4, ay, rc.right - 90, ay + icon};
   DrawTextLine(hdc, time_rc, time, RGB(200, 200, 210), 11);
 
-  RECT vol_rc{rc.right - 84, ay + 4, rc.right - 8, ay + icon - 4};
-  FillRoundRect(hdc, vol_rc, 8, RGB(40, 36, 48));
-  const std::wstring vol_l = L"♪ " + Utf8ToWide(std::to_string(static_cast<int>(std::lround(volume_))));
-  DrawTextLine(hdc, vol_rc, vol_l, RGB(230, 230, 235), 11, false,
-               DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+  // 音量：默认喇叭；点开后在栏内展开滑条（对齐 Flutter KotvVolumeControl，不用居中大弹层）
+  if (volume_expanded_) {
+    RECT vol_rc{rc.right - 160, ay + 4, rc.right - 8, ay + icon - 4};
+    FillRoundRect(hdc, vol_rc, 8, RGB(40, 36, 48));
+    RECT track{vol_rc.left + 28, vol_rc.top + 10, vol_rc.right - 8, vol_rc.bottom - 10};
+    FillRoundRect(hdc, track, 2, RGB(70, 64, 80));
+    const double t = std::clamp(volume_ / 100.0, 0.0, 1.0);
+    const int filled = static_cast<int>((track.right - track.left) * t);
+    if (filled > 0) {
+      RECT prog{track.left, track.top, track.left + filled, track.bottom};
+      FillRoundRect(hdc, prog, 2, kPink);
+    }
+    RECT icon_rc{vol_rc.left + 2, vol_rc.top, vol_rc.left + 26, vol_rc.bottom};
+    DrawTextLine(hdc, icon_rc, L"♪", RGB(230, 230, 235), 12, true,
+                 DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+  } else {
+    RECT vol_rc{rc.right - 84, ay + 4, rc.right - 8, ay + icon - 4};
+    FillRoundRect(hdc, vol_rc, 8, RGB(40, 36, 48));
+    const std::wstring vol_l =
+        L"♪ " + Utf8ToWide(std::to_string(static_cast<int>(std::lround(volume_))));
+    DrawTextLine(hdc, vol_rc, vol_l, RGB(230, 230, 235), 11, false,
+                 DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+  }
 
   const int track_y = rc.bottom - 18;
   RECT track{rc.left + 10, track_y, rc.right - 10, track_y + 4};
@@ -1032,7 +1087,7 @@ LRESULT KotvWinChrome::OnMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
       }
       if (hwnd == bottom_.hwnd) {
         if (mode_ == "vod_inline") {
-          // 下沿进度；上沿动作：play/stop/[direct]/cast/mini/expand | volume
+          // 下沿进度；上沿动作：play/stop/[direct]/cast/mini/expand/danmaku/more | 音量
           if (y > rc.bottom - 22) {
             const double p = std::clamp(
                 (x - 10.0) / std::max(1.0, static_cast<double>(rc.right - 20)), 0.0, 1.0);
@@ -1040,10 +1095,28 @@ LRESULT KotvWinChrome::OnMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
                   {EncodableValue("value"), EncodableValue(p)}});
             return 0;
           }
-          if (x > rc.right - 84) {
-            Emit({{EncodableValue("type"), EncodableValue("volume")}});
+          const int vol_l = volume_expanded_ ? (rc.right - 160) : (rc.right - 84);
+          if (x > vol_l) {
+            if (volume_expanded_ && x > vol_l + 28) {
+              const double t = std::clamp(
+                  (x - (vol_l + 28.0)) / std::max(1.0, static_cast<double>(rc.right - 8 - (vol_l + 28))),
+                  0.0, 1.0);
+              volume_ = std::clamp(t * 100.0, 1.0, 100.0);
+              Emit({{EncodableValue("type"), EncodableValue("slider")},
+                    {EncodableValue("id"), EncodableValue(std::string("volume"))},
+                    {EncodableValue("value"), EncodableValue(volume_)},
+                    {EncodableValue("commit"), EncodableValue(msg == WM_LBUTTONUP)}});
+              InvalidateRect(hwnd, nullptr, TRUE);
+              return 0;
+            }
+            if (msg == WM_LBUTTONUP) {
+              volume_expanded_ = !volume_expanded_;
+              InvalidateRect(hwnd, nullptr, TRUE);
+            }
             return 0;
           }
+          if (msg != WM_LBUTTONUP) return 0;
+          volume_expanded_ = false;
           const int slot = (x - 6) / 38;
           int i = 0;
           auto hit = [&](const char* type) {
@@ -1246,7 +1319,11 @@ void KotvWinChrome::IngestSheet(const EncodableMap* args) {
 
 void KotvWinChrome::IngestUpdate(const EncodableMap* args) {
   if (!args) return;
-  if (args->count(EncodableValue("mode"))) mode_ = GetString(*args, "mode");
+  if (args->count(EncodableValue("mode"))) {
+    const auto next = GetString(*args, "mode");
+    if (next != mode_) volume_expanded_ = false;
+    mode_ = next;
+  }
   if (args->count(EncodableValue("anchorScreen"))) {
     const auto it = args->find(EncodableValue("anchorScreen"));
     if (it != args->end() && std::holds_alternative<EncodableMap>(it->second)) {
@@ -1258,6 +1335,19 @@ void KotvWinChrome::IngestUpdate(const EncodableMap* args) {
       anchor_valid_ = anchor_screen_w_ >= 8 && anchor_screen_h_ >= 8;
     } else {
       anchor_valid_ = false;
+    }
+  }
+  if (args->count(EncodableValue("surfaceScreen"))) {
+    const auto it = args->find(EncodableValue("surfaceScreen"));
+    if (it != args->end() && std::holds_alternative<EncodableMap>(it->second)) {
+      const auto& a = std::get<EncodableMap>(it->second);
+      surface_screen_l_ = GetDouble(a, "left");
+      surface_screen_t_ = GetDouble(a, "top");
+      surface_screen_w_ = GetDouble(a, "width");
+      surface_screen_h_ = GetDouble(a, "height");
+      surface_valid_ = surface_screen_w_ >= 8 && surface_screen_h_ >= 8;
+    } else {
+      surface_valid_ = false;
     }
   }
   if (args->count(EncodableValue("volume"))) volume_ = GetDouble(*args, "volume", volume_);

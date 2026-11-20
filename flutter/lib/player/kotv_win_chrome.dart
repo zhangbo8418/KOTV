@@ -452,10 +452,11 @@ class KotvWinChrome {
   }
 
   /// 详情非全屏内嵌底栏（契约同 [VodInlineControls]）。
-  /// [anchorScreen] 为控件区全局屏幕坐标（left/top/width/height）。
+  /// [anchorScreen] / [surfaceScreen]：Flutter 视图逻辑坐标（localToGlobal）。
   static Future<void> pushVodInline({
     required KotvPlayback playback,
     required Map<String, double> anchorScreen,
+    Map<String, double>? surfaceScreen,
     required bool chromeVisible,
     bool showDirect = false,
     bool directOn = false,
@@ -472,6 +473,7 @@ class KotvWinChrome {
     await update({
       'mode': 'vod_inline',
       'anchorScreen': anchorScreen,
+      if (surfaceScreen != null) 'surfaceScreen': surfaceScreen,
       'positionLabel': formatClock(pos),
       'durationLabel': formatClock(dur),
       'progress': progress,

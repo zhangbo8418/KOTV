@@ -431,20 +431,24 @@ class KotvMpvPlugin : public flutter::Plugin {
         const double w = ArgDouble(args, "w", ArgDouble(args, "width"));
         const double h = ArgDouble(args, "h", ArgDouble(args, "height"));
         if (w > 1 && h > 1) {
-          // Dart localToGlobal 为屏幕坐标；子 HWND 须相对 Flutter 客户区。
-          // 与 kotv_win_chrome ResolveAnchor 同一套 ScreenToClient，勿再乘 DPI。
+          // Dart localToGlobal：相对 Flutter 视图的逻辑像素（不是 Win32 屏幕坐标）。
+          // 子 HWND 用物理像素；勿 ScreenToClient（会把视图坐标误当屏幕坐标缩到一角）。
           HWND parent = FlutterHwnd();
-          POINT tl{static_cast<LONG>(std::lround(x)), static_cast<LONG>(std::lround(y))};
-          POINT br{static_cast<LONG>(std::lround(x + w)),
-                   static_cast<LONG>(std::lround(y + h))};
+          double dpr = 1.0;
           if (parent) {
-            ScreenToClient(parent, &tl);
-            ScreenToClient(parent, &br);
+            HDC dc = GetDC(parent);
+            if (dc) {
+              dpr = GetDeviceCaps(dc, LOGPIXELSX) / 96.0;
+              ReleaseDC(parent, dc);
+            }
           }
-          const int cw = std::max(1, static_cast<int>(br.x - tl.x));
-          const int ch = std::max(1, static_cast<int>(br.y - tl.y));
-          MoveWindow(hwnd_, tl.x, tl.y, cw, ch, TRUE);
-          // MoveWindow/Show 后视频层可能压住播控；把原生壳抬到视频之上。
+          if (dpr <= 0) dpr = 1.0;
+          const int cx = static_cast<int>(std::lround(x * dpr));
+          const int cy = static_cast<int>(std::lround(y * dpr));
+          const int cw = std::max(1, static_cast<int>(std::lround(w * dpr)));
+          const int ch = std::max(1, static_cast<int>(std::lround(h * dpr)));
+          MoveWindow(hwnd_, cx, cy, cw, ch, TRUE);
+          // 抬升原生播控/弹幕，避免被视频 HWND 压住。
           if (parent) {
             auto raise_class = [parent](const wchar_t* cls) {
               HWND child = nullptr;

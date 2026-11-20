@@ -75,6 +75,9 @@ class KotvWinChrome {
   void PaintBottomInline(HDC hdc, const RECT& rc);
   void PaintBottomFullscreen(HDC hdc, const RECT& rc);
   bool ResolveAnchor(int* x, int* y, int* w, int* h) const;
+  bool ResolveSurface(int* x, int* y, int* w, int* h) const;
+  double ViewDpiScale() const;
+  void RaiseChromeZ();
   void PaintEpisodes(HDC hdc, const RECT& rc);
   void PaintLiveLeft(HDC hdc, const RECT& rc);
   void PaintLiveRight(HDC hdc, const RECT& rc);
@@ -117,13 +120,19 @@ class KotvWinChrome {
   std::vector<std::wstring> episode_lines_;
   int episode_selected_ = -1;
 
-  // 屏幕坐标锚点（详情内嵌底栏）；宽高>0 时 Layout 用 ScreenToClient 定位
+  // Flutter 视图逻辑坐标（localToGlobal）；Layout 乘 DPI 后作子窗客户区坐标
   double anchor_screen_l_ = 0;
   double anchor_screen_t_ = 0;
   double anchor_screen_w_ = 0;
   double anchor_screen_h_ = 0;
   bool anchor_valid_ = false;
+  double surface_screen_l_ = 0;
+  double surface_screen_t_ = 0;
+  double surface_screen_w_ = 0;
+  double surface_screen_h_ = 0;
+  bool surface_valid_ = false;
   double volume_ = 100;
+  bool volume_expanded_ = false;
   bool show_direct_ = false;
   bool direct_on_ = false;
   bool mini_active_ = false;
