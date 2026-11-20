@@ -42,11 +42,12 @@ class KotvMpvUnderlayClip extends InheritedWidget {
   }
 }
 
-/// Win7 全屏：给原生顶/底栏留空；选集打开时再给右侧面板留宽。
+/// Win7 全屏：给原生顶/底栏留空（与 kotv_win_chrome kTopH=56 / kBottomH=108 一致）；
+/// 选集打开时再给右侧面板留宽（kEpW=280）。
 Rect kotvWindowsOverlayFullscreenInset(Rect full, {bool episodesOpen = false}) {
   if (full.width <= 120 || full.height <= 160) return full;
   final rightPad = episodesOpen ? 280.0 : 12.0;
-  return Rect.fromLTRB(full.left, full.top + 52, full.right - rightPad, full.bottom - 92);
+  return Rect.fromLTRB(full.left, full.top + 56, full.right - rightPad, full.bottom - 108);
 }
 
 /// 播放洞：下发几何 `updateFrame`；未就绪黑遮。

@@ -311,7 +311,11 @@ void KotvWinChrome::Layout() {
   } else {
     ShowPanel(top_, top_visible_, 0, 0, W, kTopH);
     ShowPanel(bottom_, bottom_visible_, 0, H - kBottomH, W, kBottomH);
-    ShowPanel(episodes_, episodes_visible_, W - kEpW, kTopH, kEpW, H - kTopH - kBottomH);
+    // 仅开选集时顶底栏隐藏：面板应顶满客户区，避免头尾悬空断开。
+    const int ep_top = top_visible_ ? kTopH : 0;
+    const int ep_bot = bottom_visible_ ? kBottomH : 0;
+    ShowPanel(episodes_, episodes_visible_, W - kEpW, ep_top, kEpW,
+              std::max(0, H - ep_top - ep_bot));
     const int live_top = kTopH + 8;
     const int live_h =
         H - live_top - (channel_visible_ ? kChannelH + 12 : 12) - (bottom_visible_ ? kBottomH : 0);
@@ -1077,7 +1081,7 @@ LRESULT KotvWinChrome::OnMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
           } else if (slot == 3) {
             if (!more_items_.empty()) {
               sheet_kind_ = "more";
-              sheet_title_ = L"更多";
+              sheet_title_ = Utf8ToWide("更多");
               sheet_subtitle_.clear();
               sheet_items_ = more_items_;
               sheet_selected_ = 0;

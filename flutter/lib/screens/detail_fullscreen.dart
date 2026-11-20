@@ -751,13 +751,15 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
 
   void _syncWinChrome() {
     if (!KotvWinChrome.isNeeded || !mounted) return;
+    // 选集打开时不亮顶底栏（与 Flutter VodFullscreenChrome 一致）。
+    final chromeOn = _showChrome && !_epOpen;
     unawaited(KotvWinChrome.pushVod(
       playback: widget.playback,
       title: '${widget.vodName}${widget.title.isNotEmpty ? ' · ${widget.title}' : ''}',
       subtitle: widget.title,
       episodes: List<String>.from(widget.episodes),
       episodeSelected: _epIdx,
-      chromeVisible: _showChrome,
+      chromeVisible: chromeOn,
       episodesVisible: _epOpen,
       danmakuOn: _danmakuOn,
       danmakuItems: widget.danmakuItems,
