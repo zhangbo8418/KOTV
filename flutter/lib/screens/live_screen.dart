@@ -22,6 +22,7 @@ import '../player/fullscreen_mode.dart';
 import '../player/fullscreen_gesture.dart';
 import '../player/external_player.dart';
 import '../player/kotv_platform.dart';
+import '../player/kotv_win_chrome.dart';
 import '../player/background_playback.dart';
 import '../player/kotv_playback.dart';
 import '../player/mini_playback.dart';
@@ -595,7 +596,69 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       });
     };
     _bootstrap();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _attachRemoteHandlers());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _attachRemoteHandlers();
+      if (KotvWinChrome.isNeeded) {
+        KotvWinChrome.onEvent = _onWinChromeEvent;
+        unawaited(KotvWinChrome.setEnabled(true));
+        _syncWinChrome();
+      }
+    });
+  }
+
+  void _onWinChromeEvent(Map<String, dynamic> e) {
+    if (!mounted) return;
+    switch (e['type'] as String? ?? '') {
+      case 'liveLeft':
+        final idx = (e['index'] as num?)?.toInt() ?? -1;
+        if (idx >= 0 && idx < _channels.length) {
+          _selectChannelFromList(idx);
+        }
+        break;
+      case 'liveRight':
+        setState(() => _rightOpen = false);
+        _syncWinChrome();
+        break;
+      case 'togglePlay':
+        if (_playback.playing) {
+          unawaited(_playback.pause());
+        } else {
+          unawaited(_playback.play());
+        }
+        break;
+      case 'back':
+        _handleLiveBack();
+        break;
+    }
+  }
+
+  void _syncWinChrome() {
+    if (!KotvWinChrome.isNeeded || !mounted) return;
+    final chs = _channels;
+    final left = [
+      for (final c in chs) '${c['name'] ?? c['n'] ?? ''}',
+    ];
+    final right = <String>[
+      '解码：$_decodeMode',
+      '渲染：$_renderMode',
+      '线路：$_lineName',
+      '关闭面板',
+    ];
+    unawaited(KotvWinChrome.update({
+      'title': _title,
+      'channelText': _playChName.isEmpty ? _title : _playChName,
+      'liveLeft': left,
+      'liveLeftSelected': _chIdx,
+      'liveRight': right,
+      'playing': _playback.playing,
+      'top': false,
+      'bottom': false,
+      'episodesVisible': false,
+      'centerVisible': false,
+      'liveLeftVisible': _leftOpen,
+      'liveRightVisible': _rightOpen,
+      'channelVisible': _channelInfoVisible,
+    }));
   }
 
   @override
@@ -630,6 +693,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     if (_active == this) _active = null;
     kotvUnregisterQuitHook(_prepareQuit);
     liveScreenHandleBack = null;
+    if (KotvWinChrome.isNeeded) {
+      KotvWinChrome.onEvent = null;
+      unawaited(KotvWinChrome.setEnabled(false));
+    }
     MiniPlayerWindow.onAndroidPipChanged = null;
     unawaited(MiniPlayerWindow.setAndroidAutoEnter(this, false));
     if (_miniDesktop) {
@@ -2885,6 +2952,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
           _chromeVisible = true;
         }
       });
+      _syncWinChrome();
     }
     _scheduleHideOverlays();
   }
@@ -2897,6 +2965,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       _chromeVisible = false;
       _channelInfoVisible = false;
     });
+    _syncWinChrome();
     _scheduleHideOverlays();
     if (_programs.isEmpty && _chIdx >= 0) unawaited(_loadEpg());
     _scheduleScrollToCurrent(epg: false);
@@ -2931,6 +3000,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       _chromeVisible = false;
       _channelInfoVisible = false;
     });
+    _syncWinChrome();
     _scheduleHideOverlays();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && _rightOpen) _rightFocus.requestFocus();
@@ -2943,6 +3013,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         _leftOpen = false;
         _epgOpen = false;
       });
+      _syncWinChrome();
       return;
     }
     _openLeft();
@@ -2951,6 +3022,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   void _toggleRight() {
     if (_rightOpen) {
       setState(() => _rightOpen = false);
+      _syncWinChrome();
       return;
     }
     _openRight();

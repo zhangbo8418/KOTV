@@ -10,6 +10,7 @@ add_executable(${BINARY_NAME} WIN32
   "flutter_window.cpp"
   "kotv_external_player.cpp"
   "kotv_iface_rx.cpp"
+  "kotv_win_chrome.cpp"
   "main.cpp"
   "utils.cpp"
   "win32_window.cpp"

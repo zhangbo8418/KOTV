@@ -2951,9 +2951,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           ? stackSize
           : MediaQuery.sizeOf(context);
       var r = Offset.zero & s;
-      // Windows 子 HWND 画在 Flutter 之上：全屏勿铺满，否则顶底栏/选集/手势 HUD 被挡住。
-      if (kotvIsWindows() && r.width > 120 && r.height > 160) {
-        r = Rect.fromLTRB(r.left, r.top + 52, r.right - 12, r.bottom - 92);
+      // Win7：HWND 在 Flutter 上，全屏给顶/底栏留空隙（Win8+ DComp 不需要）。
+      if (kotvUsesWindowsNativeChrome()) {
+        r = kotvWindowsOverlayFullscreenInset(r);
       }
       // 氛围模式：画面略内缩，四周透出壳层壁纸（默认适应仍是黑边）。
       if (_ambientOn && r.width > 80 && r.height > 96) {
@@ -2964,8 +2964,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     return _videoLayerRect ?? Rect.zero;
   }
 
-  /// 顶栏下内容区 → 窗口全局坐标，供 [KotvMpvUnderlayClip] 裁 Windows HWND。
+  /// Win7：顶栏下内容区 → 全局坐标，裁 HWND。Win8+ DComp 不裁。
   Rect? _underlayGlobalClip() {
+    if (!kotvUsesWindowsNativeChrome()) return null;
     if (_immersiveFullscreen || _holdImmersiveVideoGeom) return null;
     final clip = _bodyClipRect;
     final stackBox = _detailStackKey.currentContext?.findRenderObject() as RenderBox?;
@@ -3039,7 +3040,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             ],
           ),
         );
-        // Windows：把「顶栏下可见区」传给洞组件，HWND 与之求交，避免盖住返回/搜索/弹窗。
         if (underlayClip != null) {
           layer = KotvMpvUnderlayClip(globalClip: underlayClip, child: layer);
         }

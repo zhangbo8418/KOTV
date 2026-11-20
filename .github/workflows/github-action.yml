@@ -8,9 +8,11 @@ on:
 
 env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  # 非 Win7：3.47.6；Win7 钉官方末版 3.19.6
-  FLUTTER_VERSION: "3.47.6"
+  # 非 Win7：与 DComp 引擎制品对齐 3.47.1；其它平台可用同版。Win7 钉 3.19.6
+  FLUTTER_VERSION: "3.47.1"
   FLUTTER_WIN7_VERSION: "3.19.6"
+  KOTV_DCOMP_ENGINE_TAG: "windows-v3.47.1+2"
+  KOTV_DCOMP_ENGINE_VER: "3.47.1"
 
 jobs:
   set-tag:
@@ -64,6 +66,16 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Install DComp Windows engine
+        shell: bash
+        env:
+          KOTV_DCOMP_ENGINE_TAG: ${{ env.KOTV_DCOMP_ENGINE_TAG }}
+          KOTV_DCOMP_ENGINE_VER: ${{ env.KOTV_DCOMP_ENGINE_VER }}
+        run: |
+          chmod +x scripts/install-flutter-windows-dcomp-engine.sh
+          ./scripts/install-flutter-windows-dcomp-engine.sh
+          test -f "$(dirname "$(dirname "$(command -v flutter)")")/bin/cache/artifacts/engine/kotv-dcomp-engine.marker"
+
       - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@v1
         with:
@@ -112,6 +124,8 @@ jobs:
           CGO_CXXFLAGS: "-O2"
           CGO_LDFLAGS: "-static-libgcc -static-libstdc++ -Wl,-Bstatic -l:libwinpthread.a -Wl,-Bdynamic"
           KOTV_JAVA_TOOLCHAIN: "21"
+          KOTV_DCOMP_ENGINE_TAG: ${{ env.KOTV_DCOMP_ENGINE_TAG }}
+          KOTV_DCOMP_ENGINE_VER: ${{ env.KOTV_DCOMP_ENGINE_VER }}
           # windows-2022 / 新 Flutter：强制 VS2022，避免落到缺失的 VS2019
           CMAKE_GENERATOR: "Visual Studio 17 2022"
         run: |

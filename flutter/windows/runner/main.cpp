@@ -35,10 +35,26 @@ void BringExistingWindowToFront() {
   }
 }
 
+// Win8+ 才有 DirectComposition；Win7 即使装了平台更新也没有。
+bool IsWindows8OrGreaterLocal() {
+  using RtlGetVersionFn = LONG(WINAPI*)(PRTL_OSVERSIONINFOW);
+  HMODULE ntdll = ::GetModuleHandleW(L"ntdll.dll");
+  if (!ntdll) return false;
+  auto rtl = reinterpret_cast<RtlGetVersionFn>(
+      ::GetProcAddress(ntdll, "RtlGetVersion"));
+  if (!rtl) return false;
+  RTL_OSVERSIONINFOW vi{};
+  vi.dwOSVersionInfoSize = sizeof(vi);
+  if (rtl(&vi) != 0) return false;
+  // Win8 = 6.2
+  return vi.dwMajorVersion > 6 ||
+         (vi.dwMajorVersion == 6 && vi.dwMinorVersion >= 2);
+}
+
 }  // namespace
 
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
-                      _In_ wchar_t *command_line, _In_ int show_command) {
+                      wchar_t *command_line, int show_command) {
   HANDLE instance_mutex = ::CreateMutexW(nullptr, TRUE, kSingleInstanceMutex);
   if (instance_mutex != nullptr && ::GetLastError() == ERROR_ALREADY_EXISTS) {
     BringExistingWindowToFront();
@@ -46,17 +62,25 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
     return EXIT_SUCCESS;
   }
 
-  // Attach to console when present (e.g., 'flutter run') or create a
-  // new console when running with a debugger.
   if (!::AttachConsole(ATTACH_PARENT_PROCESS) && ::IsDebuggerPresent()) {
     CreateAndAttachConsole();
   }
 
-  // Initialize COM, so that it is available for use in the library and/or
-  // plugins.
   ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 
+  // DComp 补丁引擎：Win8+ 在创建引擎前打开；库存引擎上该变量为 no-op。
+  // 须配合 scripts/install-flutter-windows-dcomp-engine.sh 灌入的制品。
+  if (IsWindows8OrGreaterLocal()) {
+    ::SetEnvironmentVariableW(L"FLUTTER_WINDOWS_DCOMP", L"1");
+  }
+
   flutter::DartProject project(L"data");
+
+  // DComp 洞依赖逐像素 alpha；Impeller GLES 在部分驱动上 alpha 不准会黑洞。
+#if defined(FLUTTER_VERSION_MAJOR) && (FLUTTER_VERSION_MAJOR > 3 || \
+    (FLUTTER_VERSION_MAJOR == 3 && FLUTTER_VERSION_MINOR >= 47))
+  project.set_impeller_switch(flutter::ImpellerSwitch::Disabled);
+#endif
 
   std::vector<std::string> command_line_arguments =
       GetCommandLineArguments();

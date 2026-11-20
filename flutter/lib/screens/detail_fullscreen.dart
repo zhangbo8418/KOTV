@@ -11,6 +11,7 @@ import '../player/fullscreen_mode.dart';
 import '../player/fullscreen_gesture.dart';
 import '../player/kotv_playback.dart';
 import '../player/kotv_platform.dart';
+import '../player/kotv_win_chrome.dart';
 import '../player/native_mpv_playback.dart';
 import '../player/tv_remote_keys.dart';
 import '../theme/kotv_theme.dart';
@@ -314,7 +315,84 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       } else {
         _setChrome(show: true, hideCursor: false);
       }
+      _bindWinChrome();
     });
+  }
+
+  void _bindWinChrome() {
+    if (!KotvWinChrome.isNeeded) return;
+    KotvWinChrome.onEvent = _onWinChromeEvent;
+    unawaited(KotvWinChrome.setEnabled(true));
+    _syncWinChrome();
+  }
+
+  void _onWinChromeEvent(Map<String, dynamic> e) {
+    if (!mounted) return;
+    switch (e['type'] as String? ?? '') {
+      case 'togglePlay':
+        if (widget.playback.playing) {
+          unawaited(widget.playback.pause());
+        } else {
+          unawaited(widget.playback.play());
+        }
+        break;
+      case 'seekFraction':
+        final frac = (e['value'] as num?)?.toDouble() ?? 0;
+        final dur = widget.playback.duration;
+        if (dur.inMilliseconds > 0) {
+          unawaited(widget.playback.seek(Duration(
+              milliseconds: (dur.inMilliseconds * frac.clamp(0.0, 1.0)).round())));
+        }
+        break;
+      case 'episode':
+        final idx = (e['index'] as num?)?.toInt() ?? -1;
+        if (idx >= 0 && idx < widget.episodes.length) {
+          widget.onSelectEp?.call(idx);
+        }
+        break;
+      case 'back':
+        detailFullscreenDismissLayer?.call();
+        break;
+    }
+  }
+
+  void _syncWinChrome() {
+    if (!KotvWinChrome.isNeeded || !mounted) return;
+    final pb = widget.playback;
+    final dur = pb.duration;
+    final pos = pb.position;
+    final progress = dur.inMilliseconds > 0
+        ? pos.inMilliseconds / dur.inMilliseconds
+        : 0.0;
+    unawaited(KotvWinChrome.update({
+      'title': widget.vodName,
+      'subtitle': widget.title,
+      'bottomText':
+          '${_fmtDur(pos)} / ${_fmtDur(dur)} · ${pb.playing ? "播放中" : "已暂停"}',
+      'episodes': List<String>.from(widget.episodes),
+      'episodeSelected': _epIdx,
+      'progress': progress.clamp(0.0, 1.0),
+      'playing': pb.playing,
+      'top': _showChrome,
+      'bottom': _showChrome,
+      'episodesVisible': _epOpen,
+      'centerVisible': _showChrome && !_epOpen,
+      'liveLeftVisible': false,
+      'liveRightVisible': false,
+      'channelVisible': false,
+    }));
+  }
+
+  String _fmtDur(Duration d) {
+    if (d.inMilliseconds <= 0) return '--:--';
+    final s = d.inSeconds;
+    final m = s ~/ 60;
+    final r = s % 60;
+    final h = m ~/ 60;
+    if (h > 0) {
+      return '$h:${(m % 60).toString().padLeft(2, '0')}:${r.toString().padLeft(2, '0')}';
+    }
+    return '${m.toString().padLeft(2, '0')}:${r.toString().padLeft(2, '0')}';
   }
 
   void _bindPlaybackStreams(KotvPlayback pb) {
@@ -349,6 +427,10 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     _wheelHudTimer?.cancel();
     _swipeAnim.dispose();
     widget.playback.removeListener(_onPlaybackChanged);
+    if (KotvWinChrome.isNeeded) {
+      KotvWinChrome.onEvent = null;
+      unawaited(KotvWinChrome.setEnabled(false));
+    }
     // 嵌入模式由父页恢复系统栏；此处再调会与 _exitImmersiveFullscreen 叠成方向竞态。
     if (!widget.embedded) {
       unawaited(_restoreChrome());
@@ -358,6 +440,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
 
   void _onPlaybackChanged() {
     _refreshForceLandscapeBtn();
+    if (KotvWinChrome.isNeeded) _syncWinChrome();
     final playing = widget.playback.playing;
     // 位置/缓冲会频繁 notify；只有播/停变化才动控件，否则隐藏计时会被不停重置。
     if (playing == _playingForChrome) return;
@@ -390,6 +473,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       _showChrome = show;
       _mouseCursor = cursor;
     });
+    _syncWinChrome();
   }
 
   void _schedulePlayingHide() {
@@ -1485,6 +1569,11 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
 
   @override
   Widget build(BuildContext context) {
+    if (KotvWinChrome.isNeeded) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _syncWinChrome();
+      });
+    }
     return Focus(
       autofocus: true,
       onKeyEvent: _onKey,

@@ -3,17 +3,19 @@ import 'package:flutter/services.dart';
 
 import 'kotv_platform.dart';
 
-/// macOS：画面在 Flutter 之下（contentView.layer 底 ASBDL）。
-bool kotvMpvUsesUnderlayHole() => kotvUsesNativeMpv() && kotvIsMacOS();
+/// macOS ASBDL / Win8+ DComp：画面在 Flutter 之下，洞须 clear。
+bool kotvMpvUsesUnderlayHole() =>
+    kotvUsesNativeMpv() &&
+    (kotvIsMacOS() || kotvUsesWindowsDcompUnderlay());
 
-/// 视频栈 letterbox：macOS underlay 必须透明，否则挡住 ASBDL；其它平台黑底。
+/// 视频栈 letterbox：underlay 洞必须透明，否则挡住下层视频；其它平台黑底。
 Widget kotvMpvLetterboxFill({Key? key}) => ColoredBox(
       key: key,
       color: kotvMpvUsesUnderlayHole() ? Colors.transparent : Colors.black,
     );
 
-/// 可选：原生洞的全局裁剪矩形（窗口逻辑坐标）。
-/// Windows 子 HWND 画在 Flutter 之上，须与顶栏下内容区求交，否则会盖住顶栏/弹窗。
+/// Win7 库存引擎：可选全局裁剪（与顶栏下内容区求交后 MoveWindow）。
+/// Win8+ DComp 不需要（Flutter 已盖住视频）。
 class KotvMpvUnderlayClip extends InheritedWidget {
   const KotvMpvUnderlayClip({
     super.key,
@@ -21,7 +23,6 @@ class KotvMpvUnderlayClip extends InheritedWidget {
     required super.child,
   });
 
-  /// 允许露出视频的全局矩形；null 表示不额外裁剪。
   final Rect? globalClip;
 
   static Rect? maybeOf(BuildContext context) {
@@ -41,9 +42,15 @@ class KotvMpvUnderlayClip extends InheritedWidget {
   }
 }
 
+/// Win7 全屏时给顶/底栏留空隙（原生套壳与 Flutter 栏位对齐）。
+Rect kotvWindowsOverlayFullscreenInset(Rect full) {
+  if (full.width <= 120 || full.height <= 160) return full;
+  return Rect.fromLTRB(full.left, full.top + 52, full.right - 12, full.bottom - 92);
+}
+
 /// 播放洞：下发几何 `updateFrame`；未就绪黑遮。
-/// macOS 显隐只由原生 open/stop 驱动；Win 仍经通道 `setVisible`。
-/// 就绪后须 [BlendMode.clear] 清掉同帧已画像素，单靠 transparent 透不出 ASBDL。
+/// underlay（macOS / Win8+ DComp）：显隐由原生 open/stop；就绪后 [BlendMode.clear]。
+/// Win7：仍经 `setVisible`；弹窗时藏层。
 class KotvMpvUnderlayHole extends StatefulWidget {
   const KotvMpvUnderlayHole({
     super.key,
@@ -65,6 +72,8 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
   Rect? _lastSent;
   bool? _lastVisible;
 
+  bool get _win7Overlay => kotvUsesWindowsNativeChrome();
+
   @override
   void initState() {
     super.initState();
@@ -73,7 +82,7 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
 
   @override
   void dispose() {
-    if (!kotvIsMacOS()) {
+    if (_win7Overlay) {
       _setVisible(false);
     }
     super.dispose();
@@ -82,7 +91,6 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
   @override
   void didUpdateWidget(covariant KotvMpvUnderlayHole oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // 父级 Positioned 位移也会走到这里；不能只盯 ready/cover。
     WidgetsBinding.instance.addPostFrameCallback((_) => _sync());
   }
 
@@ -95,7 +103,7 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
   Future<void> _setVisible(bool visible) async {
     if (_lastVisible == visible) return;
     _lastVisible = visible;
-    if (!kotvIsWindows()) return;
+    if (!_win7Overlay) return;
     try {
       await _ch.invokeMethod('setVisible', {'visible': visible});
     } catch (_) {}
@@ -117,9 +125,9 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
     final box = context.findRenderObject() as RenderBox?;
     if (box == null || !box.hasSize) return;
 
-    // 弹窗等路由盖在详情上时：Win HWND 在 Flutter 之上，必须藏层，否则挡住对话框。
+    // Win7：路由被盖住时藏 HWND，避免挡住对话框。
     final route = ModalRoute.of(context);
-    if (kotvIsWindows() && route != null && !route.isCurrent) {
+    if (_win7Overlay && route != null && !route.isCurrent) {
       _setVisible(false);
       return;
     }
@@ -128,9 +136,11 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
     final size = box.size;
     var hole = origin & size;
 
-    final clip = KotvMpvUnderlayClip.maybeOf(context);
-    if (clip != null) {
-      hole = hole.intersect(clip);
+    if (_win7Overlay) {
+      final clip = KotvMpvUnderlayClip.maybeOf(context);
+      if (clip != null) {
+        hole = hole.intersect(clip);
+      }
     }
 
     final moved = _lastOrigin != origin || _lastSize != size;
@@ -138,7 +148,7 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
     _lastSize = size;
 
     if (hole.width < 1 || hole.height < 1) {
-      if (kotvIsWindows()) _setVisible(false);
+      if (_win7Overlay) _setVisible(false);
       return;
     }
 
@@ -147,13 +157,12 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
         (_lastSent!.top - hole.top).abs() < 0.5 &&
         (_lastSent!.width - hole.width).abs() < 0.5 &&
         (_lastSent!.height - hole.height).abs() < 0.5;
-    // 位移或裁剪变化都要下发；尺寸未变但 origin 变时 SizeChangedLayoutNotifier 不会响。
     if (!sameSent || moved) {
       _lastSent = hole;
       _updateFrame(hole);
     }
 
-    if (kotvIsWindows()) {
+    if (_win7Overlay) {
       if (widget.ready && !widget.coverUntilReady) {
         _setVisible(true);
       }
@@ -163,7 +172,6 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
   @override
   Widget build(BuildContext context) {
     final cover = !widget.ready || widget.coverUntilReady;
-    // 每帧后核对全局原点：仅靠 SizeChangedLayoutNotifier 感知不到平移。
     WidgetsBinding.instance.addPostFrameCallback((_) => _sync());
     return NotificationListener<SizeChangedLayoutNotification>(
       onNotification: (_) {
@@ -173,16 +181,19 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
       child: SizeChangedLayoutNotifier(
         child: cover
             ? const ColoredBox(color: Colors.black)
-            : const CustomPaint(
-                painter: _KotvUnderlayClearPainter(),
-                child: SizedBox.expand(),
-              ),
+            : (kotvMpvUsesUnderlayHole()
+                ? const CustomPaint(
+                    painter: _KotvUnderlayClearPainter(),
+                    child: SizedBox.expand(),
+                  )
+                // Win7：无 underlay，洞区透给下层无意义；黑/透明均可，HWND 盖在上面。
+                : const ColoredBox(color: Colors.transparent)),
       ),
     );
   }
 }
 
-/// 把本矩形清成透明，露出 contentView.layer 下的视频层。
+/// 清成本矩形透明，露出下层视频（ASBDL / DComp child）。
 class _KotvUnderlayClearPainter extends CustomPainter {
   const _KotvUnderlayClearPainter();
 

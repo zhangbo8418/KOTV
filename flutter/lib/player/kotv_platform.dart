@@ -38,10 +38,17 @@ bool kotvIsLinux() => !kIsWeb && Platform.isLinux;
 
 /// 原生 libmpv 通道（`kotv_mpv`）。
 ///
-/// Android Surface；macOS ASBDL underlay；Windows 子 HWND；Linux X11 wid（非 X11 暂无画面）。
-/// iOS 走 media_kit。
+/// Android Surface；macOS ASBDL underlay；Windows 子 HWND（Win8+ DComp 下 Flutter 在上）；
+/// Linux X11 wid（非 X11 暂无画面）。iOS 走 media_kit。
 bool kotvUsesNativeMpv() =>
     kotvIsAndroid() || kotvIsMacOS() || kotvIsWindows() || kotvIsLinux();
+
+/// Win8+：DComp 补丁引擎把 Flutter 合成在 child HWND 视频之上（洞 clear）。
+/// Win7：无 DComp，走 [kotvUsesWindowsNativeChrome]。
+bool kotvUsesWindowsDcompUnderlay() => kotvIsWindows() && !kotvIsWindows7();
+
+/// Win7：原生播控/选集/直播菜单套壳（库存引擎，HWND 在 Flutter 之上）。
+bool kotvUsesWindowsNativeChrome() => kotvIsWindows7();
 
 /// 设为 true 时 macOS 发行包不链 FVP/mdk（仅原生 MPV）；默认 false，MPV+FVP 全功能。
 const bool kotvMacosNoFvp = bool.fromEnvironment('KOTV_MACOS_NO_FVP', defaultValue: false);
