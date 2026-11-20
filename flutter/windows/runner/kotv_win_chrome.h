@@ -93,6 +93,7 @@ class KotvWinChrome {
   double progress_ = 0;
   double position_sec_ = 0;
   double rate_ = 1.0;
+  std::vector<std::string> actions_;  // vod 底栏：prev/toggle/next/speed/replay/episodes
 
   bool danmaku_enabled_ = false;
   std::vector<DanmakuItem> danmaku_items_;

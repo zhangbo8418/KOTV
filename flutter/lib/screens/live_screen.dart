@@ -599,13 +599,49 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _attachRemoteHandlers();
       if (KotvWinChrome.isNeeded) {
-        KotvWinChrome.onEvent = _onWinChromeEvent;
-        unawaited(KotvWinChrome.setEnabled(true));
+        _winChromeToken = KotvWinChrome.bind(_onWinChromeEvent);
         _danmakuItems.addListener(_syncWinChrome);
         _playback.addListener(_syncWinChrome);
         _syncWinChrome();
       }
     });
+  }
+
+  int _winChromeToken = 0;
+
+  /// 与 Flutter 右栏主操作同序；原生列表点选按 index 映射。
+  List<({String id, String label})> _winLiveRightActions() {
+    final out = <({String id, String label})>[
+      (id: 'prevCh', label: '上一频道'),
+      (id: 'nextCh', label: '下一频道'),
+      (id: 'line', label: '换线路 (${_line + 1}/$_lines)'),
+      (id: 'epg', label: '刷新 EPG'),
+      (id: 'cast', label: '投屏'),
+      (id: 'scale', label: '画面比例 · ${_liveScaleLabel(_liveScale)}'),
+      (id: 'across', label: '跨组换台 · ${_liveAcross ? '开' : '关'}'),
+      (id: 'invert', label: '反转换台 · ${_liveInvert ? '开' : '关'}'),
+      (id: 'failSwitch', label: '失败换线 · ${_liveAutoChange ? '开' : '关'}'),
+      (id: 'mini', label: '迷你桌面播放'),
+      (id: 'fullscreen', label: _immersive ? '退出全屏' : '全屏观看'),
+    ];
+    if (kotvCanSwitchPlayer(live: true)) {
+      out.add((id: 'player', label: '播放器 · ${flutterPlayerLabel(_playerVal)}'));
+    }
+    out.add((id: 'decode', label: '解码 · $_decodeLabel'));
+    if (_showDirectOutput) {
+      out.add((
+        id: 'direct',
+        label: '硬解直出 · ${_playback.directOutput ? '开' : '关'}',
+      ));
+    }
+    if (kotvPlayerRenderApplies(_playerVal)) {
+      out.add((
+        id: 'render',
+        label: '渲染 · ${kotvPlayerRenderLabel(_renderMode)}',
+      ));
+    }
+    out.add((id: 'close', label: '关闭面板'));
+    return out;
   }
 
   void _onWinChromeEvent(Map<String, dynamic> e) {
@@ -618,16 +654,68 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         }
         break;
       case 'liveRight':
-        setState(() => _rightOpen = false);
-        _syncWinChrome();
-        break;
-      case 'togglePlay':
-        if (_playback.playing) {
-          unawaited(_playback.pause());
-        } else {
-          unawaited(_playback.play());
+        final idx = (e['index'] as num?)?.toInt() ?? -1;
+        final acts = _winLiveRightActions();
+        if (idx < 0 || idx >= acts.length) return;
+        switch (acts[idx].id) {
+          case 'prevCh':
+            unawaited(_stepChannel(delta: _liveInvert ? 1 : -1));
+            break;
+          case 'nextCh':
+            unawaited(_stepChannel(delta: _liveInvert ? -1 : 1));
+            break;
+          case 'line':
+            if (_chIdx >= 0 && _lines > 1) {
+              unawaited(_playChannel(_chIdx, line: (_line + 1) % _lines));
+            }
+            break;
+          case 'epg':
+            unawaited(_loadEpg());
+            break;
+          case 'cast':
+            unawaited(_cast());
+            break;
+          case 'scale':
+            unawaited(_cycleLiveScale());
+            break;
+          case 'across':
+            _onLiveAcross();
+            break;
+          case 'invert':
+            _onLiveInvert();
+            break;
+          case 'failSwitch':
+            _onLiveFailSwitch();
+            break;
+          case 'mini':
+            unawaited(_enterMini());
+            break;
+          case 'fullscreen':
+            unawaited(_toggleLiveFullscreen());
+            break;
+          case 'player':
+            unawaited(_pickPlayer());
+            break;
+          case 'decode':
+            unawaited(_pickDecode());
+            break;
+          case 'direct':
+            unawaited(_toggleDirectOutput());
+            break;
+          case 'render':
+            unawaited(_pickRender());
+            break;
+          case 'close':
+            setState(() => _rightOpen = false);
+            _syncWinChrome();
+            break;
         }
         break;
+      case 'toggle':
+      case 'togglePlay':
+        unawaited(_playback.playOrPause());
+        break;
+      case 'exit':
       case 'back':
         _handleLiveBack();
         break;
@@ -638,40 +726,28 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     if (!KotvWinChrome.isNeeded || !mounted) return;
     final chs = _channels;
     final left = [
-      for (final c in chs) '${c['name'] ?? c['n'] ?? ''}',
+      for (var i = 0; i < chs.length; i++)
+        '${chs[i]['number'] ?? chs[i]['n'] ?? (i + 1)}  ${chs[i]['name'] ?? ''}',
     ];
-    final right = <String>[
-      '解码：$_decodeMode',
-      '渲染：$_renderMode',
-      '线路：$_lineName',
-      '关闭面板',
-    ];
-    final pos = _playback.position;
-    final dur = _playback.duration;
-    unawaited(KotvWinChrome.update({
-      'title': _title,
-      'channelText': _playChName.isEmpty ? _title : _playChName,
-      'liveLeft': left,
-      'liveLeftSelected': _chIdx,
-      'liveRight': right,
-      'playing': _playback.playing,
-      'buffering': _playback.buffering || _playback.stalling,
-      'positionSec': pos.inMilliseconds / 1000.0,
-      'progress': dur.inMilliseconds > 0
-          ? (pos.inMilliseconds / dur.inMilliseconds).clamp(0.0, 1.0)
-          : 0.0,
-      'rate': _playback.rate,
-      'top': false,
-      'bottom': false,
-      'episodesVisible': false,
-      'centerVisible': false,
-      'liveLeftVisible': _leftOpen,
-      'liveRightVisible': _rightOpen,
-      'channelVisible': _channelInfoVisible,
-    }));
-    unawaited(KotvWinChrome.setDanmaku(
-      enabled: true,
-      items: _danmakuItems.value,
+    final right = [for (final a in _winLiveRightActions()) a.label];
+    final chName = _playChName.isEmpty ? _title : _playChName;
+    final channelText = [
+      if (_chIdx >= 0) '#${_chIdx + 1}',
+      chName,
+      if (_lineName.isNotEmpty) _lineName,
+      if (_status.isNotEmpty) _status,
+    ].join(' · ');
+    unawaited(KotvWinChrome.pushLive(
+      playback: _playback,
+      title: _title,
+      channelText: channelText,
+      liveLeft: left,
+      liveLeftSelected: _chIdx,
+      liveRight: right,
+      leftOpen: _leftOpen,
+      rightOpen: _rightOpen,
+      channelVisible: _channelInfoVisible,
+      danmakuItems: _danmakuItems.value,
     ));
   }
 
@@ -708,10 +784,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     kotvUnregisterQuitHook(_prepareQuit);
     liveScreenHandleBack = null;
     if (KotvWinChrome.isNeeded) {
-      KotvWinChrome.onEvent = null;
       _danmakuItems.removeListener(_syncWinChrome);
       _playback.removeListener(_syncWinChrome);
-      unawaited(KotvWinChrome.setEnabled(false));
+      KotvWinChrome.unbind(_winChromeToken);
+      _winChromeToken = 0;
     }
     MiniPlayerWindow.onAndroidPipChanged = null;
     unawaited(MiniPlayerWindow.setAndroidAutoEnter(this, false));

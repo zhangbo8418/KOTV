@@ -1,10 +1,17 @@
+import 'dart:async' show unawaited;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import 'danmaku_layer.dart';
 import 'kotv_platform.dart';
+import 'kotv_playback.dart';
 
-/// Win7 原生播控/弹幕/缓冲套壳通道。Win8+ DComp 路径不使用。
+/// Win7 原生套壳通道与推送收拢。
+///
+/// 库存引擎下子 HWND 盖住 Flutter，用原生层承接点播全屏/直播菜单/弹幕/缓冲。
+/// 不是 Flutter 全屏播控的完整复刻（无「更多」sheet、轨表编辑等）；常用动作在壳上。
+/// Win8+ DComp 路径不使用本通道。
 class KotvWinChrome {
   KotvWinChrome._();
 
@@ -12,6 +19,7 @@ class KotvWinChrome {
   static void Function(Map<String, dynamic> event)? onEvent;
   static bool _handlerBound = false;
   static int _lastDanmakuSig = 0;
+  static int _ownerToken = 0;
 
   static bool get isNeeded => kotvUsesWindowsNativeChrome();
 
@@ -27,6 +35,24 @@ class KotvWinChrome {
       }
       return null;
     });
+  }
+
+  /// 绑定事件与启用原生层；返回 token，解绑时校验避免串页。
+  static int bind(void Function(Map<String, dynamic>) handler) {
+    if (!isNeeded) return 0;
+    _ensureHandler();
+    final token = ++_ownerToken;
+    onEvent = handler;
+    unawaited(setEnabled(true));
+    return token;
+  }
+
+  static void unbind(int token) {
+    if (!isNeeded) return;
+    if (token != 0 && token != _ownerToken) return;
+    onEvent = null;
+    _lastDanmakuSig = 0;
+    unawaited(setEnabled(false));
   }
 
   static Future<void> setEnabled(bool enabled) async {
@@ -53,7 +79,127 @@ class KotvWinChrome {
     } catch (_) {}
   }
 
-  /// 下发弹幕列表与样式；[items] 签名未变则只更新开关/样式。
+  static String formatClock(Duration d) {
+    if (d.inMilliseconds <= 0) return '--:--';
+    final s = d.inSeconds;
+    final m = s ~/ 60;
+    final r = s % 60;
+    final h = m ~/ 60;
+    if (h > 0) {
+      return '$h:${(m % 60).toString().padLeft(2, '0')}:${r.toString().padLeft(2, '0')}';
+    }
+    return '${m.toString().padLeft(2, '0')}:${r.toString().padLeft(2, '0')}';
+  }
+
+  /// 点播全屏快照（顶/底/选集/中心/弹幕）。
+  static Future<void> pushVod({
+    required KotvPlayback playback,
+    required String title,
+    required String subtitle,
+    required List<String> episodes,
+    required int episodeSelected,
+    required bool chromeVisible,
+    required bool episodesVisible,
+    required bool danmakuOn,
+    required List<DanmakuItem> danmakuItems,
+    double danmakuFontSize = 18,
+    double danmakuOpacity = 0.85,
+    int danmakuDurationMs = 8000,
+    int danmakuFixedDurationMs = 5000,
+    int danmakuRows = 6,
+    bool danmakuShowScroll = true,
+    bool danmakuShowTop = true,
+    bool danmakuShowBottom = true,
+    bool danmakuShowReverse = true,
+  }) async {
+    if (!isNeeded) return;
+    final pos = playback.position;
+    final dur = playback.duration;
+    final progress = dur.inMilliseconds > 0
+        ? (pos.inMilliseconds / dur.inMilliseconds).clamp(0.0, 1.0)
+        : 0.0;
+    final rate = playback.rate;
+    final rateLabel =
+        'x${rate.toStringAsFixed(rate == rate.roundToDouble() ? 0 : 1)}';
+    await update({
+      'mode': 'vod',
+      'title': title,
+      'subtitle': subtitle,
+      'bottomText': '${formatClock(pos)} / ${formatClock(dur)} · $rateLabel',
+      'episodes': episodes,
+      'episodeSelected': episodeSelected,
+      'progress': progress,
+      'positionSec': pos.inMilliseconds / 1000.0,
+      'rate': rate,
+      'playing': playback.playing,
+      'buffering': playback.buffering || playback.stalling,
+      'top': chromeVisible,
+      'bottom': chromeVisible,
+      'episodesVisible': episodesVisible,
+      'centerVisible': chromeVisible && !episodesVisible,
+      'liveLeftVisible': false,
+      'liveRightVisible': false,
+      'channelVisible': false,
+      'actions': const ['prev', 'toggle', 'next', 'speed', 'replay', 'episodes'],
+    });
+    await setDanmaku(
+      enabled: danmakuOn,
+      items: danmakuItems,
+      fontSize: danmakuFontSize,
+      opacity: danmakuOpacity,
+      durationMs: danmakuDurationMs,
+      fixedDurationMs: danmakuFixedDurationMs,
+      rows: danmakuRows,
+      showScroll: danmakuShowScroll,
+      showTop: danmakuShowTop,
+      showBottom: danmakuShowBottom,
+      showReverse: danmakuShowReverse,
+    );
+  }
+
+  /// 直播快照（左频道/右设置/频道条/弹幕）。
+  static Future<void> pushLive({
+    required KotvPlayback playback,
+    required String title,
+    required String channelText,
+    required List<String> liveLeft,
+    required int liveLeftSelected,
+    required List<String> liveRight,
+    required bool leftOpen,
+    required bool rightOpen,
+    required bool channelVisible,
+    required List<DanmakuItem> danmakuItems,
+    bool danmakuEnabled = true,
+  }) async {
+    if (!isNeeded) return;
+    final pos = playback.position;
+    final dur = playback.duration;
+    await update({
+      'mode': 'live',
+      'title': title,
+      'channelText': channelText,
+      'liveLeft': liveLeft,
+      'liveLeftSelected': liveLeftSelected,
+      'liveRight': liveRight,
+      'playing': playback.playing,
+      'buffering': playback.buffering || playback.stalling,
+      'positionSec': pos.inMilliseconds / 1000.0,
+      'progress': dur.inMilliseconds > 0
+          ? (pos.inMilliseconds / dur.inMilliseconds).clamp(0.0, 1.0)
+          : 0.0,
+      'rate': playback.rate,
+      'top': false,
+      'bottom': false,
+      'episodesVisible': false,
+      'centerVisible': false,
+      'liveLeftVisible': leftOpen,
+      'liveRightVisible': rightOpen,
+      'channelVisible': channelVisible,
+      'actions': const <String>[],
+    });
+    await setDanmaku(enabled: danmakuEnabled, items: danmakuItems);
+  }
+
   static Future<void> setDanmaku({
     required bool enabled,
     required List<DanmakuItem> items,
@@ -94,7 +240,6 @@ class KotvWinChrome {
         'showReverse': showReverse,
       };
       if (itemsChanged) {
-        // 限制条数，避免一次塞爆通道。
         const maxItems = 4000;
         final src = items.length > maxItems
             ? items.sublist(items.length - maxItems)

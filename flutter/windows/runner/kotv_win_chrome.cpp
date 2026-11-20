@@ -295,29 +295,92 @@ void KotvWinChrome::PaintDark(HWND hwnd, HDC hdc, const RECT& rc,
                               const std::wstring& title,
                               const std::vector<std::wstring>* lines,
                               int selected) {
-  HBRUSH bg = CreateSolidBrush(RGB(18, 18, 22));
+  // 接近 Flutter 全屏栏：0xF0120A1C / 半透明黑感
+  HBRUSH bg = CreateSolidBrush(RGB(18, 10, 28));
   FillRect(hdc, &rc, bg);
   DeleteObject(bg);
 
   SetBkMode(hdc, TRANSPARENT);
-  SetTextColor(hdc, RGB(235, 235, 240));
-  HFONT font = CreateFontW(18, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
+  SetTextColor(hdc, RGB(255, 255, 255));
+  HFONT font = CreateFontW(18, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
                            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
                            CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
                            DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
   HFONT old = (HFONT)SelectObject(hdc, font);
 
-  if (!title.empty()) {
+  if (hwnd == top_.hwnd) {
+    // 左侧红条（Flutter 0xFFE52D27）
+    RECT accent = {rc.left + 10, rc.top + 12, rc.left + 14, rc.bottom - 12};
+    HBRUSH red = CreateSolidBrush(RGB(229, 45, 39));
+    FillRect(hdc, &accent, red);
+    DeleteObject(red);
+    RECT tr = rc;
+    tr.left += 24;
+    tr.top += 10;
+    tr.right -= 72;
+    if (!title.empty()) {
+      DrawTextW(hdc, title.c_str(), -1, &tr,
+                DT_LEFT | DT_TOP | DT_END_ELLIPSIS | DT_SINGLELINE);
+    }
+    RECT exit_rc = {rc.right - 64, rc.top + 12, rc.right - 12, rc.bottom - 12};
+    SetTextColor(hdc, RGB(230, 230, 235));
+    DrawTextW(hdc, L"退出", -1, &exit_rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+  } else if (!title.empty() && hwnd != bottom_.hwnd) {
     RECT tr = rc;
     tr.left += 16;
     tr.top += 12;
-    tr.right -= 16;
+    tr.right -= (hwnd == episodes_.hwnd ? 48 : 16);
     DrawTextW(hdc, title.c_str(), -1, &tr,
               DT_LEFT | DT_TOP | DT_END_ELLIPSIS | DT_SINGLELINE);
+    if (hwnd == episodes_.hwnd) {
+      RECT close_rc = {rc.right - 40, rc.top + 8, rc.right - 8, rc.top + 36};
+      DrawTextW(hdc, L"×", -1, &close_rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    }
   }
 
   if (hwnd == bottom_.hwnd) {
-    RECT bar = {rc.left + 16, rc.bottom - 28, rc.right - 16, rc.bottom - 20};
+    if (!bottom_text_.empty()) {
+      RECT tr = {rc.left + 16, rc.top + 6, rc.right - 16, rc.top + 28};
+      SetTextColor(hdc, RGB(220, 220, 225));
+      DrawTextW(hdc, bottom_text_.c_str(), -1, &tr,
+                DT_LEFT | DT_TOP | DT_END_ELLIPSIS | DT_SINGLELINE);
+    }
+    // 动作行
+    if (!actions_.empty()) {
+      HFONT act = CreateFontW(15, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
+                              DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+                              CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                              DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+      SelectObject(hdc, act);
+      const int n = static_cast<int>(actions_.size());
+      const int slot = (std::max)(48, (rc.right - rc.left - 24) / (std::max)(1, n));
+      for (int i = 0; i < n; ++i) {
+        RECT ar = {rc.left + 12 + i * slot, rc.top + 30,
+                   rc.left + 12 + (i + 1) * slot - 4, rc.top + 54};
+        std::wstring label;
+        const auto& a = actions_[i];
+        if (a == "prev")
+          label = L"上一集";
+        else if (a == "toggle")
+          label = playing_ ? L"暂停" : L"播放";
+        else if (a == "next")
+          label = L"下一集";
+        else if (a == "speed")
+          label = L"倍速";
+        else if (a == "replay")
+          label = L"重播";
+        else if (a == "episodes")
+          label = L"选集";
+        else
+          label = Utf8ToWide(a);
+        SetTextColor(hdc, RGB(255, 255, 255));
+        DrawTextW(hdc, label.c_str(), -1, &ar,
+                  DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+      }
+      DeleteObject(act);
+      SelectObject(hdc, font);
+    }
+    RECT bar = {rc.left + 16, rc.bottom - 22, rc.right - 16, rc.bottom - 14};
     HBRUSH track = CreateSolidBrush(RGB(60, 60, 70));
     FillRect(hdc, &bar, track);
     DeleteObject(track);
@@ -327,16 +390,18 @@ void KotvWinChrome::PaintDark(HWND hwnd, HDC hdc, const RECT& rc,
     HBRUSH fill_br = CreateSolidBrush(RGB(80, 160, 255));
     FillRect(hdc, &fill_rc, fill_br);
     DeleteObject(fill_br);
-    if (!bottom_text_.empty()) {
-      RECT tr = rc;
-      tr.left += 16;
-      tr.top += 14;
-      DrawTextW(hdc, bottom_text_.c_str(), -1, &tr,
-                DT_LEFT | DT_TOP | DT_END_ELLIPSIS | DT_SINGLELINE);
-    }
   }
 
   if (hwnd == center_play_.hwnd) {
+    HBRUSH disc = CreateSolidBrush(RGB(20, 20, 24));
+    HGDIOBJ old_br = SelectObject(hdc, disc);
+    HPEN pen = CreatePen(PS_SOLID, 1, RGB(80, 80, 90));
+    HGDIOBJ old_pen = SelectObject(hdc, pen);
+    Ellipse(hdc, rc.left + 4, rc.top + 4, rc.right - 4, rc.bottom - 4);
+    SelectObject(hdc, old_br);
+    SelectObject(hdc, old_pen);
+    DeleteObject(disc);
+    DeleteObject(pen);
     const wchar_t* glyph = playing_ ? L"❚❚" : L"▶";
     DrawTextW(hdc, glyph, -1, const_cast<RECT*>(&rc),
               DT_CENTER | DT_VCENTER | DT_SINGLELINE);
@@ -605,22 +670,36 @@ LRESULT KotvWinChrome::OnMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
       return 0;
     }
     case WM_LBUTTONUP: {
-      int y = GET_Y_LPARAM(lp);
+      const int x = GET_X_LPARAM(lp);
+      const int y = GET_Y_LPARAM(lp);
       if (hwnd == center_play_.hwnd) {
         Emit({{EncodableValue("type"), EncodableValue("togglePlay")}});
+        return 0;
+      }
+      if (hwnd == top_.hwnd) {
+        RECT rc;
+        GetClientRect(hwnd, &rc);
+        if (x >= rc.right - 64) {
+          Emit({{EncodableValue("type"), EncodableValue("exit")}});
+        }
         return 0;
       }
       if (hwnd == bottom_.hwnd) {
         RECT rc;
         GetClientRect(hwnd, &rc);
-        if (y > rc.bottom - 36) {
-          double x = GET_X_LPARAM(lp);
+        if (y > rc.bottom - 28) {
           double p = (x - 16) / (std::max)(1.0, static_cast<double>(rc.right - 32));
           p = (std::max)(0.0, (std::min)(1.0, p));
           Emit({{EncodableValue("type"), EncodableValue("seekFraction")},
                 {EncodableValue("value"), EncodableValue(p)}});
-        } else {
-          Emit({{EncodableValue("type"), EncodableValue("togglePlay")}});
+        } else if (y >= 28 && y <= 56 && !actions_.empty()) {
+          const int n = static_cast<int>(actions_.size());
+          const int slot =
+              (std::max)(48, (rc.right - rc.left - 24) / (std::max)(1, n));
+          const int idx = (x - 12) / slot;
+          if (idx >= 0 && idx < n) {
+            Emit({{EncodableValue("type"), EncodableValue(actions_[idx])}});
+          }
         }
         return 0;
       }
@@ -634,6 +713,12 @@ LRESULT KotvWinChrome::OnMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
       };
       if (hwnd == episodes_.hwnd) {
+        RECT rc;
+        GetClientRect(hwnd, &rc);
+        if (y < 40 && x >= rc.right - 40) {
+          Emit({{EncodableValue("type"), EncodableValue("closeEpisodes")}});
+          return 0;
+        }
         pick(episode_lines_, 40, "episode");
         return 0;
       }
@@ -643,10 +728,6 @@ LRESULT KotvWinChrome::OnMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
       }
       if (hwnd == live_right_.hwnd) {
         pick(live_right_lines_, 40, "liveRight");
-        return 0;
-      }
-      if (hwnd == top_.hwnd) {
-        Emit({{EncodableValue("type"), EncodableValue("back")}});
         return 0;
       }
       return 0;
@@ -775,6 +856,8 @@ void KotvWinChrome::HandleMethod(
         playing_ = ArgBool(args, "playing", true);
       if (args->count(EncodableValue("buffering")))
         buffering_ = ArgBool(args, "buffering");
+      if (args->count(EncodableValue("actions")))
+        actions_ = ArgStringList(args, "actions");
 
       top_visible_ = ArgBool(args, "top", top_visible_);
       bottom_visible_ = ArgBool(args, "bottom", bottom_visible_);

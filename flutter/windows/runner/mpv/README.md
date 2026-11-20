@@ -4,5 +4,5 @@
 - **hwdec**：Dart `KotvMpvOpts.hwdecValue()` 经 create/setDecode/setOpts 下发；Win7 硬解直出为 `dxva2`
 - **合成**：
   - Win8+：打包脚本灌入 DComp 补丁引擎；`main.cpp` 设 `FLUTTER_WINDOWS_DCOMP=1` 并关 Impeller；Flutter 洞 clear，UI 盖在视频上
-  - Win7：库存引擎；[`kotv_win_chrome`](../kotv_win_chrome.cpp) 原生套壳承接全屏/直播菜单/弹幕/缓冲；字幕仍由 mpv 画在 HWND
+  - Win7：库存引擎；[`kotv_win_chrome`](../kotv_win_chrome.cpp) 原生可用壳（播控常用动作/选集/直播设置映射/弹幕/缓冲），非 Flutter 播控全量复刻；字幕由 mpv 画在 HWND
 - **头文件**：`include/mpv/`

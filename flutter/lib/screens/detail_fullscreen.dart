@@ -319,22 +319,21 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     });
   }
 
+  static const _winSpeeds = <double>[0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 5.0];
+  int _winChromeToken = 0;
+
   void _bindWinChrome() {
     if (!KotvWinChrome.isNeeded) return;
-    KotvWinChrome.onEvent = _onWinChromeEvent;
-    unawaited(KotvWinChrome.setEnabled(true));
+    _winChromeToken = KotvWinChrome.bind(_onWinChromeEvent);
     _syncWinChrome();
   }
 
   void _onWinChromeEvent(Map<String, dynamic> e) {
     if (!mounted) return;
     switch (e['type'] as String? ?? '') {
+      case 'toggle':
       case 'togglePlay':
-        if (widget.playback.playing) {
-          unawaited(widget.playback.pause());
-        } else {
-          unawaited(widget.playback.play());
-        }
+        unawaited(widget.playback.playOrPause());
         break;
       case 'seekFraction':
         final frac = (e['value'] as num?)?.toDouble() ?? 0;
@@ -344,71 +343,67 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
               milliseconds: (dur.inMilliseconds * frac.clamp(0.0, 1.0)).round())));
         }
         break;
+      case 'prev':
+        widget.onPrev?.call();
+        break;
+      case 'next':
+        widget.onNext?.call();
+        break;
+      case 'replay':
+        unawaited(() async {
+          await widget.playback.seek(Duration.zero);
+          await widget.playback.play();
+        }());
+        break;
+      case 'speed':
+        final cur = widget.playback.rate;
+        var i = _winSpeeds.indexWhere((s) => (s - cur).abs() < 0.01);
+        if (i < 0) i = 2;
+        final next = _winSpeeds[(i + 1) % _winSpeeds.length];
+        unawaited(widget.playback.setRate(next));
+        break;
+      case 'episodes':
+        _toggleEpisodes();
+        break;
+      case 'closeEpisodes':
+        _chromeKey.currentState?.closeEpisodes();
+        _syncWinChrome();
+        break;
       case 'episode':
         final idx = (e['index'] as num?)?.toInt() ?? -1;
         if (idx >= 0 && idx < widget.episodes.length) {
           widget.onSelectEp?.call(idx);
         }
         break;
+      case 'exit':
       case 'back':
-        detailFullscreenDismissLayer?.call();
+        unawaited(_exitFullscreen());
         break;
     }
   }
 
   void _syncWinChrome() {
     if (!KotvWinChrome.isNeeded || !mounted) return;
-    final pb = widget.playback;
-    final dur = pb.duration;
-    final pos = pb.position;
-    final progress = dur.inMilliseconds > 0
-        ? pos.inMilliseconds / dur.inMilliseconds
-        : 0.0;
-    unawaited(KotvWinChrome.update({
-      'title': widget.vodName,
-      'subtitle': widget.title,
-      'bottomText':
-          '${_fmtDur(pos)} / ${_fmtDur(dur)} · ${pb.playing ? "播放中" : "已暂停"}',
-      'episodes': List<String>.from(widget.episodes),
-      'episodeSelected': _epIdx,
-      'progress': progress.clamp(0.0, 1.0),
-      'positionSec': pos.inMilliseconds / 1000.0,
-      'rate': pb.rate,
-      'playing': pb.playing,
-      'buffering': pb.buffering || pb.stalling,
-      'top': _showChrome,
-      'bottom': _showChrome,
-      'episodesVisible': _epOpen,
-      'centerVisible': _showChrome && !_epOpen,
-      'liveLeftVisible': false,
-      'liveRightVisible': false,
-      'channelVisible': false,
-    }));
-    unawaited(KotvWinChrome.setDanmaku(
-      enabled: _danmakuOn,
-      items: widget.danmakuItems,
-      fontSize: widget.danmakuSize,
-      opacity: widget.danmakuOpacity,
-      durationMs: widget.danmakuDurationMs,
-      fixedDurationMs: widget.danmakuFixedDurationMs,
-      rows: widget.danmakuRows,
-      showScroll: widget.danmakuShowScroll,
-      showTop: widget.danmakuShowTop,
-      showBottom: widget.danmakuShowBottom,
-      showReverse: widget.danmakuShowReverse,
+    unawaited(KotvWinChrome.pushVod(
+      playback: widget.playback,
+      title: widget.vodName,
+      subtitle: widget.title,
+      episodes: List<String>.from(widget.episodes),
+      episodeSelected: _epIdx,
+      chromeVisible: _showChrome,
+      episodesVisible: _epOpen,
+      danmakuOn: _danmakuOn,
+      danmakuItems: widget.danmakuItems,
+      danmakuFontSize: widget.danmakuSize,
+      danmakuOpacity: widget.danmakuOpacity,
+      danmakuDurationMs: widget.danmakuDurationMs,
+      danmakuFixedDurationMs: widget.danmakuFixedDurationMs,
+      danmakuRows: widget.danmakuRows,
+      danmakuShowScroll: widget.danmakuShowScroll,
+      danmakuShowTop: widget.danmakuShowTop,
+      danmakuShowBottom: widget.danmakuShowBottom,
+      danmakuShowReverse: widget.danmakuShowReverse,
     ));
-  }
-
-  String _fmtDur(Duration d) {
-    if (d.inMilliseconds <= 0) return '--:--';
-    final s = d.inSeconds;
-    final m = s ~/ 60;
-    final r = s % 60;
-    final h = m ~/ 60;
-    if (h > 0) {
-      return '$h:${(m % 60).toString().padLeft(2, '0')}:${r.toString().padLeft(2, '0')}';
-    }
-    return '${m.toString().padLeft(2, '0')}:${r.toString().padLeft(2, '0')}';
   }
 
   void _bindPlaybackStreams(KotvPlayback pb) {
@@ -444,8 +439,8 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     _swipeAnim.dispose();
     widget.playback.removeListener(_onPlaybackChanged);
     if (KotvWinChrome.isNeeded) {
-      KotvWinChrome.onEvent = null;
-      unawaited(KotvWinChrome.setEnabled(false));
+      KotvWinChrome.unbind(_winChromeToken);
+      _winChromeToken = 0;
     }
     // 嵌入模式由父页恢复系统栏；此处再调会与 _exitImmersiveFullscreen 叠成方向竞态。
     if (!widget.embedded) {
@@ -1585,11 +1580,6 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
 
   @override
   Widget build(BuildContext context) {
-    if (KotvWinChrome.isNeeded) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _syncWinChrome();
-      });
-    }
     return Focus(
       autofocus: true,
       onKeyEvent: _onKey,
