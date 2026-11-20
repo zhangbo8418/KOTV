@@ -566,7 +566,6 @@ bool KotvWinChrome::CallRemote(const std::string& method, const EncodableMap* ar
 void KotvWinChrome::HandleMethod(const std::string& method, const EncodableMap* args,
                                  std::function<void(EncodableValue)> success,
                                  std::function<void(const std::string&, const std::string&)> error) {
-  // isAvailable：不启进程也答 true（Dart 侧已用 OS 闸；此处仅确认桥已编译进 Win7 包）
   EncodableMap forwarded;
   if (args) forwarded = *args;
 
@@ -598,7 +597,7 @@ void KotvWinChrome::HandleMethod(const std::string& method, const EncodableMap* 
   std::string err;
   if (!CallRemote(method, &forwarded, &out, &err)) {
     // 进程缺失时降级：避免整页卡死
-    if (method == "setEnabled" || method == "update" || method == "layout" || method == "setDanmaku" ||
+    if (method == "setEnabled" || method == "update" || method == "setDanmaku" ||
         method == "showSheet" || method == "hideSheet") {
       success(EncodableValue(false));
       return;
