@@ -102,6 +102,7 @@ class DetailFullscreenPage extends StatefulWidget {
     this.desktopFullscreen = KotvDesktopFullscreenKind.window,
     this.externalVideo = false,
     this.swipeOffset,
+    this.onWinLayoutChanged,
   });
 
   final KotvPlayback playback;
@@ -187,6 +188,8 @@ class DetailFullscreenPage extends StatefulWidget {
   final void Function(int openingSec, int endingSec)? onOffsetsChanged;
   /// PC：铺满当前窗口 / 占满整块屏幕；移动端忽略。
   final KotvDesktopFullscreenKind desktopFullscreen;
+  /// Win7：选集开合时通知外层重裁画面 HWND。
+  final VoidCallback? onWinLayoutChanged;
 
   @override
   State<DetailFullscreenPage> createState() => DetailFullscreenPageState();
@@ -464,7 +467,11 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
         _toggleEpisodes();
         break;
       case 'closeEpisodes':
-        _chromeKey.currentState?.closeEpisodes();
+        if (KotvWinChrome.isNeeded) {
+          setState(() => _winEpOpen = false);
+        } else {
+          _chromeKey.currentState?.closeEpisodes();
+        }
         _syncWinChrome();
         break;
       case 'episode':
@@ -1027,7 +1034,12 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     if (mounted) Navigator.of(context).maybePop();
   }
 
-  bool get _epOpen => _chromeKey.currentState?.epOpen ?? false;
+  /// Win7 无 Flutter 栏时由 [_winEpOpen] 驱动原生选集；其它平台读 Flutter chrome 状态。
+  bool _winEpOpen = false;
+  /// 供详情页裁 HWND：选集打开时右侧给原生面板留空。
+  bool get winEpisodesOpen => _epOpen;
+  bool get _epOpen =>
+      KotvWinChrome.isNeeded ? _winEpOpen : (_chromeKey.currentState?.epOpen ?? false);
 
   /// 返回关掉一层。锁屏→选集→底栏。
   bool _dismissOneLayer() {
@@ -1036,9 +1048,15 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       return true;
     }
     if (_epOpen) {
-      _chromeKey.currentState?.closeEpisodes();
-      setState(() {});
-      if (_showChrome) _chromeKey.currentState?.focusPlayControl();
+      if (KotvWinChrome.isNeeded) {
+        setState(() => _winEpOpen = false);
+        _syncWinChrome();
+        widget.onWinLayoutChanged?.call();
+      } else {
+        _chromeKey.currentState?.closeEpisodes();
+        setState(() {});
+        if (_showChrome) _chromeKey.currentState?.focusPlayControl();
+      }
       return true;
     }
     if (_showChrome) {
@@ -1052,18 +1070,30 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     setState(() {
       _gestureLocked = locked;
       if (locked) {
-        _chromeKey.currentState?.closeEpisodes();
+        if (KotvWinChrome.isNeeded) {
+          _winEpOpen = false;
+        } else {
+          _chromeKey.currentState?.closeEpisodes();
+        }
         _hideChromeImmersive();
         _stopHoldSpeed();
         _cancelSeekPreview();
         _sideGesture = null;
       }
     });
+    if (KotvWinChrome.isNeeded) _syncWinChrome();
   }
 
   void _toggleEpisodes() {
     if (widget.episodes.isEmpty) {
       _showChromeAndFocusPlay();
+      return;
+    }
+    if (KotvWinChrome.isNeeded) {
+      setState(() => _winEpOpen = !_winEpOpen);
+      if (!_winEpOpen) _hideChromeImmersive();
+      _syncWinChrome();
+      widget.onWinLayoutChanged?.call();
       return;
     }
     if (_epOpen) {
@@ -1870,6 +1900,9 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   }
 
   Widget _fullscreenChrome() {
+    // Win7：库存 HWND 盖住 Flutter，顶底栏/选集/更多由原生壳承接；再画 Flutter 栏会
+    // 与画面错位（选集头尾分离）且按键点不到。
+    if (KotvWinChrome.isNeeded) return const SizedBox.shrink();
     return VodFullscreenChrome(
       key: _chromeKey,
       player: widget.playback,

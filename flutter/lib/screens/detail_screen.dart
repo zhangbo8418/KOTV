@@ -2970,7 +2970,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       var r = Offset.zero & s;
       // Win7：HWND 在 Flutter 上，全屏给顶/底栏留空隙（Win8+ DComp 不需要）。
       if (kotvUsesWindowsNativeChrome()) {
-        r = kotvWindowsOverlayFullscreenInset(r);
+        final epOpen = _fsPageKey.currentState?.winEpisodesOpen ?? false;
+        r = kotvWindowsOverlayFullscreenInset(r, episodesOpen: epOpen);
       }
       // 氛围模式：画面略内缩，四周透出壳层壁纸（默认适应仍是黑边）。
       if (_ambientOn && r.width > 80 && r.height > 96) {
@@ -3338,6 +3339,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         openingSec: _openingSec,
         endingSec: _endingSec,
         desktopFullscreen: _desktopFs,
+        onWinLayoutChanged: () {
+          if (mounted) setState(() {});
+        },
         onExitEmbedded: () => unawaited(_exitImmersiveFullscreen()),
         onDoubleTapEmbedded: () => unawaited(_cycleImmersiveByDoubleTap()),
         onOffsetsChanged: (open, end) {
@@ -3807,7 +3811,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         unawaited(_miniDesktop ? _exitMini() : _enterMini());
         break;
       case 'expand':
-        // 对齐 KotvFullscreenExpandButton：原生选「铺满窗口 / 占满屏幕」
+        // 原生选「铺满窗口 / 占满屏幕」
         unawaited(() async {
           final kind = await KotvWinChrome.pickFullscreenKind();
           if (kind != null && mounted && !_immersiveFullscreen) {
@@ -4498,6 +4502,23 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     );
 
     Widget videoPane({required bool expand}) {
+      // 播控叠在画面底部（与迷你窗/全屏一致），避免落在卡片外或与 HWND 错位。
+      Widget stageWithChrome({required Widget stage}) {
+        if (_playUrl.isEmpty) return stage;
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            stage,
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: _inlineChrome(),
+            ),
+          ],
+        );
+      }
+
       return Container(
         decoration: BoxDecoration(
           color: const Color(0xEE0A0A12),
@@ -4508,18 +4529,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           borderRadius: BorderRadius.circular(10),
           // 画面 ExcludeFocus + 原生 PlatformView 关焦点；控件靠 TvFocus 参与全局遍历。
           child: expand
-              ? Column(
-                  children: [
-                    Expanded(child: _videoStage(interactive: true)),
-                    if (_playUrl.isNotEmpty) _inlineChrome(),
-                  ],
-                )
-              : Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    AspectRatio(aspectRatio: 16 / 9, child: _videoStage(interactive: true)),
-                    if (_playUrl.isNotEmpty) _inlineChrome(),
-                  ],
+              ? stageWithChrome(stage: _videoStage(interactive: true))
+              : AspectRatio(
+                  aspectRatio: 16 / 9,
+                  child: stageWithChrome(stage: _videoStage(interactive: true)),
                 ),
         ),
       );

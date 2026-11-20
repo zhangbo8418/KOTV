@@ -1,4 +1,5 @@
 #include "kotv_win_chrome.h"
+#include "utils.h"
 
 #include <flutter/method_channel.h>
 #include <flutter/plugin_registrar_windows.h>
@@ -34,14 +35,7 @@ constexpr COLORREF kDanmakuKey = RGB(1, 0, 1);
 constexpr COLORREF kSheetLight = RGB(248, 246, 250);
 constexpr COLORREF kGreenOn = RGB(52, 199, 89);
 
-std::wstring Utf8ToWide(const std::string& utf8) {
-  if (utf8.empty()) return L"";
-  const int n = MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), -1, nullptr, 0);
-  if (n <= 0) return L"";
-  std::wstring out(static_cast<size_t>(n - 1), L'\0');
-  MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), -1, out.data(), n);
-  return out;
-}
+std::wstring Utf8ToWide(const std::string& utf8) { return Utf16FromUtf8(utf8); }
 
 std::string GetString(const flutter::EncodableMap& m, const char* key) {
   const auto it = m.find(flutter::EncodableValue(key));
@@ -137,9 +131,20 @@ void FillRoundRect(HDC hdc, const RECT& rc, int radius, COLORREF fill, COLORREF 
 
 void DrawTextLine(HDC hdc, const RECT& rc, const std::wstring& text, COLORREF color, int px,
                   bool bold = false, UINT align = DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS) {
+  // Win7：优先微软雅黑以稳定中文；缺字再回落 Segoe UI。
   HFONT font = CreateFontW(-px, 0, 0, 0, bold ? FW_SEMIBOLD : FW_NORMAL, FALSE, FALSE, FALSE,
                            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-                           DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+                           DEFAULT_PITCH | FF_SWISS, L"Microsoft YaHei UI");
+  if (!font) {
+    font = CreateFontW(-px, 0, 0, 0, bold ? FW_SEMIBOLD : FW_NORMAL, FALSE, FALSE, FALSE,
+                       DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                       DEFAULT_PITCH | FF_SWISS, L"Microsoft YaHei");
+  }
+  if (!font) {
+    font = CreateFontW(-px, 0, 0, 0, bold ? FW_SEMIBOLD : FW_NORMAL, FALSE, FALSE, FALSE,
+                       DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                       DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+  }
   HGDIOBJ old = SelectObject(hdc, font);
   SetBkMode(hdc, TRANSPARENT);
   SetTextColor(hdc, color);
@@ -431,7 +436,7 @@ void KotvWinChrome::PaintBottom(HDC hdc, const RECT& rc) {
 }
 
 void KotvWinChrome::PaintBottomInline(HDC hdc, const RECT& rc) {
-  // 对齐 VodInlineControls：半透明底 + 动作行 + 进度
+  // 内嵌底栏：半透明底 + 动作行 + 进度
   FillRectColor(hdc, rc, RGB(10, 10, 18));
   const int W = rc.right - rc.left;
   const int icon = 34;

@@ -8,6 +8,7 @@
 #include <flutter/standard_method_codec.h>
 #include <mpv/client.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -430,16 +431,31 @@ class KotvMpvPlugin : public flutter::Plugin {
         const double w = ArgDouble(args, "w", ArgDouble(args, "width"));
         const double h = ArgDouble(args, "h", ArgDouble(args, "height"));
         if (w > 1 && h > 1) {
-          double dpr = 1.0;
-          if (hwnd_) {
-            HDC dc = GetDC(hwnd_);
-            if (dc) {
-              dpr = GetDeviceCaps(dc, LOGPIXELSX) / 96.0;
-              ReleaseDC(hwnd_, dc);
-            }
+          // Dart localToGlobal 为屏幕坐标；子 HWND 须相对 Flutter 客户区。
+          // 与 kotv_win_chrome ResolveAnchor 同一套 ScreenToClient，勿再乘 DPI。
+          HWND parent = FlutterHwnd();
+          POINT tl{static_cast<LONG>(std::lround(x)), static_cast<LONG>(std::lround(y))};
+          POINT br{static_cast<LONG>(std::lround(x + w)),
+                   static_cast<LONG>(std::lround(y + h))};
+          if (parent) {
+            ScreenToClient(parent, &tl);
+            ScreenToClient(parent, &br);
           }
-          MoveWindow(hwnd_, static_cast<int>(x * dpr), static_cast<int>(y * dpr),
-                     static_cast<int>(w * dpr), static_cast<int>(h * dpr), TRUE);
+          const int cw = std::max(1, static_cast<int>(br.x - tl.x));
+          const int ch = std::max(1, static_cast<int>(br.y - tl.y));
+          MoveWindow(hwnd_, tl.x, tl.y, cw, ch, TRUE);
+          // MoveWindow/Show 后视频层可能压住播控；把原生壳抬到视频之上。
+          if (parent) {
+            auto raise_class = [parent](const wchar_t* cls) {
+              HWND child = nullptr;
+              while ((child = FindWindowExW(parent, child, cls, nullptr)) != nullptr) {
+                SetWindowPos(child, HWND_TOP, 0, 0, 0, 0,
+                             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+              }
+            };
+            raise_class(L"KotvWinChromeDanmaku");
+            raise_class(L"KotvWinChromePanel");
+          }
         }
       }
       result->Success();

@@ -63,7 +63,7 @@ class KotvWinChrome {
     ('texture', 'Texture'),
   ];
 
-  /// 对齐 [KotvFullscreenExpandButton] 桌面两项。
+  /// 桌面全屏两项：铺满窗口 / 占满屏幕。
   static const fullscreenKindOptions = <(String id, String label)>[
     ('window', '铺满当前窗口'),
     ('display', '占满整块屏幕'),
@@ -183,7 +183,7 @@ class KotvWinChrome {
           ),
       ];
 
-  /// 对齐 Flutter `_showMore` 主路径（含可原生弹层承接的子项入口）。
+  /// 点播「更多」主路径行（含可原生弹层承接的子项入口）。
   static List<Map<String, dynamic>> vodMoreItems({
     required double rate,
     required bool danmakuOn,
@@ -451,7 +451,7 @@ class KotvWinChrome {
     return vodSpeeds[(i + 1) % vodSpeeds.length];
   }
 
-  /// 详情非全屏内嵌底栏（对齐 [VodInlineControls]）。
+  /// 详情非全屏内嵌底栏（契约同 [VodInlineControls]）。
   /// [anchorScreen] 为控件区全局屏幕坐标（left/top/width/height）。
   static Future<void> pushVodInline({
     required KotvPlayback playback,

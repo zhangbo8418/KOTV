@@ -9,7 +9,7 @@
 #include <vector>
 #include <windows.h>
 
-// Win7：原生壳仿现网 Flutter 播控主路径（顶底栏/更多/弹幕设置/选播放器、直播左栏EPG/右设置/频道条）。
+// Win7：原生播控壳（顶底栏/更多/弹幕设置/选播放器、直播左栏 EPG/右设置/频道条）。
 // Win8+ DComp 不启用。
 class KotvWinChrome {
  public:
