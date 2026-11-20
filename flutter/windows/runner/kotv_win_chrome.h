@@ -72,6 +72,9 @@ class KotvWinChrome {
   void PaintPanel(HWND hwnd, HDC hdc, const RECT& rc);
   void PaintTop(HDC hdc, const RECT& rc);
   void PaintBottom(HDC hdc, const RECT& rc);
+  void PaintBottomInline(HDC hdc, const RECT& rc);
+  void PaintBottomFullscreen(HDC hdc, const RECT& rc);
+  bool ResolveAnchor(int* x, int* y, int* w, int* h) const;
   void PaintEpisodes(HDC hdc, const RECT& rc);
   void PaintLiveLeft(HDC hdc, const RECT& rc);
   void PaintLiveRight(HDC hdc, const RECT& rc);
@@ -100,6 +103,7 @@ class KotvWinChrome {
   HWND modal_hwnd_ = nullptr;
   UINT_PTR danmaku_timer_ = 0;
 
+  std::string mode_;  // vod | vod_inline | live
   std::wstring title_;
   std::wstring subtitle_;  // 分辨率等
   std::wstring clock_;
@@ -112,6 +116,17 @@ class KotvWinChrome {
   std::wstring channel_ticker_;
   std::vector<std::wstring> episode_lines_;
   int episode_selected_ = -1;
+
+  // 屏幕坐标锚点（详情内嵌底栏）；宽高>0 时 Layout 用 ScreenToClient 定位
+  double anchor_screen_l_ = 0;
+  double anchor_screen_t_ = 0;
+  double anchor_screen_w_ = 0;
+  double anchor_screen_h_ = 0;
+  bool anchor_valid_ = false;
+  double volume_ = 100;
+  bool show_direct_ = false;
+  bool direct_on_ = false;
+  bool mini_active_ = false;
 
   std::vector<std::wstring> groups_;
   int group_selected_ = -1;

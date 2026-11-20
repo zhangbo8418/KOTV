@@ -29,6 +29,8 @@ import '../player/background_playback.dart';
 import '../player/kotv_playback.dart';
 import '../player/mini_playback.dart';
 import '../player/kotv_player_factory.dart';
+import '../player/kotv_win7_direct.dart';
+import '../player/kotv_win_chrome.dart';
 import '../player/media_kit_playback.dart';
 import '../player/mpv_opts.dart';
 import '../player/playback_settings.dart';
@@ -245,6 +247,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   bool _chromeRemoteFocus = false;
   final GlobalKey<VodInlineControlsState> _inlineChromeKey =
       GlobalKey<VodInlineControlsState>();
+  /// Win7 内嵌底栏占位（量锚点）；非 Win7 仍用 [VodInlineControls]。
+  final GlobalKey _inlineChromeAnchorKey = GlobalKey(debugLabel: 'kotv_inline_chrome_anchor');
+  int _winChromeToken = 0;
   int _epPage = 0;
   /// 焦点停留后切换线路 / 分集区间。
   final KotvFocusArm _detailFocusArm = KotvFocusArm();
@@ -1069,6 +1074,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _zw = null;
     _mkPlayer = null;
     _playUrl = '';
+    _unbindWinInlineChrome();
     _lastVideoPaintRect = null;
     _videoLayerRect = null;
     _bodyClipRect = null;
@@ -1209,8 +1215,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       // 易丢 libmpv render context → 有声黑屏。
       if (sizeChanged && p is NativeMpvPlayback) {
         setState(() {});
+        _syncWinInlineChrome();
         return;
       }
+      _syncWinInlineChrome();
     };
     _wiredNotifyTarget = p;
     p.addListener(_playbackNotify!);
@@ -1403,6 +1411,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   @override
   void dispose() {
     // 勿在此处 ref.read：会抛 Bad state，打断后面的 FVP/播放器 stop。
+    _unbindWinInlineChrome();
     WidgetsBinding.instance.removeObserver(this);
     _detachRemoteHandlers();
     kotvUnregisterQuitHook(_prepareQuit);
@@ -2422,6 +2431,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           _status = tip;
           _immersiveEpCover = false;
         });
+        _unbindWinInlineChrome();
         _stopBtProgressPoll();
         _playbackLive = false;
         _sessionStartedAt = null;
@@ -2606,6 +2616,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         await WidgetsBinding.instance.endOfFrame;
         if (serial != _playAtSerial || !mounted) return;
         _wirePlaybackNotify(pb);
+        if (!_immersiveFullscreen) _bindWinInlineChrome();
         try {
           // 每次 open 复位 force-iso，避免会话复用粘滞。
           pb.setExtraOpenProps(KotvDiscPlay.openPropsFor(disc?.props));
@@ -2908,10 +2919,16 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             (prevClip.top - nextClip.top).abs() < 0.5 &&
             (prevClip.width - nextClip.width).abs() < 0.5 &&
             (prevClip.height - nextClip.height).abs() < 0.5);
-    if (slotSame && clipSame) return;
+    if (slotSame && clipSame) {
+      _syncWinInlineChrome();
+      return;
+    }
     setState(() {
       if (nextSlot != null) _videoLayerRect = nextSlot;
       if (nextClip != null) _bodyClipRect = nextClip;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _syncWinInlineChrome();
     });
   }
 
@@ -3451,6 +3468,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       }
       // 先铺开画面，再进系统全屏（时序收在 kotvEnterSystemFullscreenAfterLayout）。
       // 全窗口 kind 不会改系统窗口。
+      _unbindWinInlineChrome();
       ref.read(detailImmersiveFullscreenProvider.notifier).state = true;
       setState(() {
         _desktopFs = desktopFs;
@@ -3518,6 +3536,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       if (_holdImmersiveVideoGeom) {
         setState(() => _holdImmersiveVideoGeom = false);
       }
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !_immersiveFullscreen) _bindWinInlineChrome();
+      });
     });
   }
 
@@ -3664,6 +3685,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   }
 
   Widget _inlineChrome() {
+    // Win7：HWND 盖住 Flutter 内嵌栏 → 占位量锚，原生 kotv_win_chrome 承接。
+    if (KotvWinChrome.isNeeded) {
+      return SizedBox(key: _inlineChromeAnchorKey, height: 78, width: double.infinity);
+    }
     return VodInlineControls(
       key: _inlineChromeKey,
       player: _playback,
@@ -3684,6 +3709,136 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         }
       },
     );
+  }
+
+  void _bindWinInlineChrome() {
+    if (!KotvWinChrome.isNeeded) return;
+    if (_immersiveFullscreen || _playUrl.isEmpty) {
+      _unbindWinInlineChrome();
+      return;
+    }
+    if (_winChromeToken == 0) {
+      _winChromeToken = KotvWinChrome.bind(_onWinInlineChromeEvent);
+    }
+    _syncWinInlineChrome();
+  }
+
+  void _unbindWinInlineChrome() {
+    if (!KotvWinChrome.isNeeded) return;
+    if (_winChromeToken == 0) return;
+    KotvWinChrome.unbind(_winChromeToken);
+    _winChromeToken = 0;
+  }
+
+  Map<String, double>? _winInlineAnchorScreen() {
+    final box = _inlineChromeAnchorKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize || !box.attached) return null;
+    try {
+      final o = box.localToGlobal(Offset.zero);
+      final s = box.size;
+      if (s.width < 8 || s.height < 8) return null;
+      return {
+        'left': o.dx,
+        'top': o.dy,
+        'width': s.width,
+        'height': s.height,
+      };
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void _syncWinInlineChrome() {
+    if (!KotvWinChrome.isNeeded || !mounted) return;
+    if (_immersiveFullscreen || _playUrl.isEmpty) {
+      _unbindWinInlineChrome();
+      return;
+    }
+    final anchor = _winInlineAnchorScreen();
+    if (anchor == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _syncWinInlineChrome();
+      });
+      return;
+    }
+    if (_winChromeToken == 0) {
+      _winChromeToken = KotvWinChrome.bind(_onWinInlineChromeEvent);
+    }
+    unawaited(KotvWinChrome.pushVodInline(
+      playback: _playback,
+      anchorScreen: anchor,
+      chromeVisible: true,
+      showDirect: kotvShowDirectOutput(_playback, _decodeMode),
+      directOn: _playback.directOutput,
+      miniActive: _miniDesktop,
+      danmakuOn: _danmakuOn,
+      danmakuItems: _danmakuItems.value,
+    ));
+  }
+
+  void _onWinInlineChromeEvent(Map<String, dynamic> e) {
+    if (!mounted || _immersiveFullscreen) return;
+    switch (e['type'] as String? ?? '') {
+      case 'toggle':
+      case 'togglePlay':
+        unawaited(_playback.playOrPause());
+        break;
+      case 'stop':
+        unawaited(() async {
+          await _stopHardAwait();
+          if (_miniDesktop) await _exitMini();
+          if (mounted) setState(() => _status = '已停止');
+          _unbindWinInlineChrome();
+        }());
+        break;
+      case 'seekFraction':
+        final frac = (e['value'] as num?)?.toDouble() ?? 0;
+        final dur = _playback.duration;
+        if (dur.inMilliseconds > 0) {
+          unawaited(_playback.seek(Duration(
+            milliseconds: (dur.inMilliseconds * frac.clamp(0.0, 1.0)).round(),
+          )));
+        }
+        break;
+      case 'cast':
+        unawaited(_cast());
+        break;
+      case 'mini':
+        unawaited(_miniDesktop ? _exitMini() : _enterMini());
+        break;
+      case 'expand':
+        unawaited(_enterFullscreen());
+        break;
+      case 'direct':
+        unawaited(_persistPlayerSetting(
+          'mpvDirect',
+          kotvWin7DirectNextValue(_playback.directOutput),
+        ));
+        break;
+      case 'volume':
+        unawaited(KotvWinChrome.showSheet(
+          kind: 'volume',
+          title: '音量',
+          items: [
+            KotvWinChrome.sliderItem(
+              id: 'volume',
+              label: '音量',
+              value: _playback.volume.clamp(1, 100).toDouble(),
+              min: 1,
+              max: 100,
+            ),
+          ],
+        ));
+        break;
+      case 'slider':
+        if (e['id'] == 'volume' && e['commit'] == true) {
+          final v = ((e['value'] as num?)?.toDouble() ?? 50).round().clamp(1, 100);
+          unawaited(_playback.setVolume(v.toDouble()));
+          unawaited(_persistPlayerSetting('playerVolume', '$v'));
+          _syncWinInlineChrome();
+        }
+        break;
+    }
   }
 
   /// 播控（内嵌、迷你、全屏）设置落盘后按键名同步本页状态与当前播放器。

@@ -17,6 +17,7 @@ constexpr wchar_t kDanmakuClass[] = L"KotvWinChromeDanmaku";
 constexpr wchar_t kModalClass[] = L"KotvWinChromeModal";
 constexpr int kTopH = 56;
 constexpr int kBottomH = 108;
+constexpr int kInlineBottomH = 78;
 constexpr int kEpW = 280;
 constexpr int kLiveLeftW = 520;
 constexpr int kLiveRightW = 220;
@@ -290,18 +291,48 @@ void KotvWinChrome::Layout() {
     }
   }
 
-  ShowPanel(top_, top_visible_, 0, 0, W, kTopH);
-  ShowPanel(bottom_, bottom_visible_, 0, H - kBottomH, W, kBottomH);
-  ShowPanel(episodes_, episodes_visible_, W - kEpW, kTopH, kEpW, H - kTopH - kBottomH);
-  const int live_top = kTopH + 8;
-  const int live_h = H - live_top - (channel_visible_ ? kChannelH + 12 : 12) - (bottom_visible_ ? kBottomH : 0);
-  ShowPanel(live_left_, live_left_visible_, 12, live_top, kLiveLeftW, std::max(120, live_h));
-  ShowPanel(live_right_, live_right_visible_, W - kLiveRightW - 12, live_top, kLiveRightW,
-            std::max(120, live_h));
-  ShowPanel(channel_info_, channel_visible_, 24, H - kBottomH - kChannelH - 10, W - 48, kChannelH);
-  ShowPanel(center_play_, center_visible_, (W - kCenterSz) / 2, (H - kCenterSz) / 2, kCenterSz, kCenterSz);
+  const bool inline_mode = mode_ == "vod_inline";
+  if (inline_mode) {
+    // 详情非全屏：底栏锚在视频卡片控件区（屏幕坐标 → Flutter 客户区）
+    int ax = 0, ay = 0, aw = 0, ah = 0;
+    const bool ok = bottom_visible_ && ResolveAnchor(&ax, &ay, &aw, &ah);
+    ShowPanel(top_, false, 0, 0, 0, 0);
+    ShowPanel(episodes_, false, 0, 0, 0, 0);
+    ShowPanel(live_left_, false, 0, 0, 0, 0);
+    ShowPanel(live_right_, false, 0, 0, 0, 0);
+    ShowPanel(channel_info_, false, 0, 0, 0, 0);
+    ShowPanel(center_play_, false, 0, 0, 0, 0);
+    ShowPanel(bottom_, ok, ax, ay, aw, ah > 0 ? ah : kInlineBottomH);
+  } else {
+    ShowPanel(top_, top_visible_, 0, 0, W, kTopH);
+    ShowPanel(bottom_, bottom_visible_, 0, H - kBottomH, W, kBottomH);
+    ShowPanel(episodes_, episodes_visible_, W - kEpW, kTopH, kEpW, H - kTopH - kBottomH);
+    const int live_top = kTopH + 8;
+    const int live_h =
+        H - live_top - (channel_visible_ ? kChannelH + 12 : 12) - (bottom_visible_ ? kBottomH : 0);
+    ShowPanel(live_left_, live_left_visible_, 12, live_top, kLiveLeftW, std::max(120, live_h));
+    ShowPanel(live_right_, live_right_visible_, W - kLiveRightW - 12, live_top, kLiveRightW,
+              std::max(120, live_h));
+    ShowPanel(channel_info_, channel_visible_, 24, H - kBottomH - kChannelH - 10, W - 48, kChannelH);
+    ShowPanel(center_play_, center_visible_, (W - kCenterSz) / 2, (H - kCenterSz) / 2, kCenterSz,
+              kCenterSz);
+  }
   LayoutDanmaku();
   LayoutModal();
+}
+
+bool KotvWinChrome::ResolveAnchor(int* x, int* y, int* w, int* h) const {
+  if (!anchor_valid_ || anchor_screen_w_ < 8 || anchor_screen_h_ < 8) return false;
+  HWND parent = FlutterHwnd();
+  if (!parent) return false;
+  POINT tl{static_cast<LONG>(std::lround(anchor_screen_l_)),
+           static_cast<LONG>(std::lround(anchor_screen_t_))};
+  if (!ScreenToClient(parent, &tl)) return false;
+  *x = tl.x;
+  *y = tl.y;
+  *w = static_cast<int>(std::lround(anchor_screen_w_));
+  *h = static_cast<int>(std::lround(anchor_screen_h_));
+  return *w >= 8 && *h >= 8;
 }
 
 void KotvWinChrome::LayoutDanmaku() {
@@ -392,6 +423,61 @@ void KotvWinChrome::PaintTop(HDC hdc, const RECT& rc) {
 }
 
 void KotvWinChrome::PaintBottom(HDC hdc, const RECT& rc) {
+  if (mode_ == "vod_inline") {
+    PaintBottomInline(hdc, rc);
+  } else {
+    PaintBottomFullscreen(hdc, rc);
+  }
+}
+
+void KotvWinChrome::PaintBottomInline(HDC hdc, const RECT& rc) {
+  // 对齐 VodInlineControls：半透明底 + 动作行 + 进度
+  FillRectColor(hdc, rc, RGB(10, 10, 18));
+  const int W = rc.right - rc.left;
+  const int icon = 34;
+  const int ay = rc.top + 4;
+  int ax = rc.left + 6;
+  auto paint_icon = [&](const std::wstring& glyph, bool accent = false) {
+    RECT ir{ax, ay, ax + icon, ay + icon};
+    if (accent) FillRoundRect(hdc, ir, 8, RGB(50, 28, 36));
+    DrawTextLine(hdc, ir, glyph, accent ? kPink : RGB(235, 235, 240), 15, true,
+                 DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    ax += icon + 4;
+  };
+  paint_icon(playing_ ? L"❚❚" : L"▶", true);
+  paint_icon(L"■");
+  if (show_direct_) paint_icon(direct_on_ ? L"D●" : L"D○");
+  paint_icon(L"📺");  // 投屏
+  paint_icon(mini_active_ ? L"▣" : L"⧉");
+  paint_icon(L"⛶");  // 全屏
+
+  std::wstring time = (pos_label_.empty() ? L"0:00" : pos_label_) + L" / " +
+                      (dur_label_.empty() ? L"0:00" : dur_label_);
+  RECT time_rc{ax + 4, ay, rc.right - 90, ay + icon};
+  DrawTextLine(hdc, time_rc, time, RGB(200, 200, 210), 11);
+
+  RECT vol_rc{rc.right - 84, ay + 4, rc.right - 8, ay + icon - 4};
+  FillRoundRect(hdc, vol_rc, 8, RGB(40, 36, 48));
+  const std::wstring vol_l = L"♪ " + Utf8ToWide(std::to_string(static_cast<int>(std::lround(volume_))));
+  DrawTextLine(hdc, vol_rc, vol_l, RGB(230, 230, 235), 11, false,
+               DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+
+  const int track_y = rc.bottom - 18;
+  RECT track{rc.left + 10, track_y, rc.right - 10, track_y + 4};
+  FillRoundRect(hdc, track, 2, RGB(55, 48, 62));
+  const int filled = static_cast<int>((W - 20) * std::clamp(progress_, 0.0, 1.0));
+  if (filled > 0) {
+    RECT prog{track.left, track.top, track.left + filled, track.bottom};
+    FillRoundRect(hdc, prog, 2, kPink);
+  }
+  if (buffering_) {
+    RECT b{rc.left + W / 2 - 36, rc.top + 2, rc.left + W / 2 + 36, rc.top + 16};
+    DrawTextLine(hdc, b, L"加载中…", RGB(220, 180, 190), 10, false,
+                 DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+  }
+}
+
+void KotvWinChrome::PaintBottomFullscreen(HDC hdc, const RECT& rc) {
   FillRectColor(hdc, rc, kBarDark);
   const int W = rc.right - rc.left;
   const int track_y = rc.top + 14;
@@ -412,7 +498,6 @@ void KotvWinChrome::PaintBottom(HDC hdc, const RECT& rc) {
   DrawTextLine(hdc, tR, dur_label_.empty() ? L"0:00" : dur_label_, RGB(200, 200, 210), 11,
                false, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
 
-  // 动作行
   const int ay = rc.top + 44;
   const int icon = 36;
   int ax = rc.left + 20;
@@ -426,9 +511,8 @@ void KotvWinChrome::PaintBottom(HDC hdc, const RECT& rc) {
   paint_icon(L"⏮");
   paint_icon(playing_ ? L"❚❚" : L"▶", true);
   paint_icon(L"⏭");
-  paint_icon(L"≡");  // 更多
+  paint_icon(L"≡");
 
-  // 右侧时钟
   RECT clock_rc{rc.right - 150, ay - 4, rc.right - 16, ay + 22};
   DrawTextLine(hdc, clock_rc, clock_.empty() ? L"--:--" : clock_, RGB(255, 255, 255), 22, true,
                DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
@@ -936,6 +1020,34 @@ LRESULT KotvWinChrome::OnMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         return 0;
       }
       if (hwnd == bottom_.hwnd) {
+        if (mode_ == "vod_inline") {
+          // 下沿进度；上沿动作：play/stop/[direct]/cast/mini/expand | volume
+          if (y > rc.bottom - 22) {
+            const double p = std::clamp((x - 10.0) / std::max(1, rc.right - 20), 0.0, 1.0);
+            Emit({{EncodableValue("type"), EncodableValue("seekFraction")},
+                  {EncodableValue("value"), EncodableValue(p)}});
+            return 0;
+          }
+          if (x > rc.right - 84) {
+            Emit({{EncodableValue("type"), EncodableValue("volume")}});
+            return 0;
+          }
+          const int slot = (x - 6) / 38;
+          int i = 0;
+          auto hit = [&](const char* type) {
+            if (slot == i) {
+              Emit({{EncodableValue("type"), EncodableValue(std::string(type))}});
+            }
+            ++i;
+          };
+          hit("toggle");
+          hit("stop");
+          if (show_direct_) hit("direct");
+          hit("cast");
+          hit("mini");
+          hit("expand");
+          return 0;
+        }
         if (y < 36) {
           const double p = std::clamp((x - 16.0) / std::max(1, rc.right - 32), 0.0, 1.0);
           Emit({{EncodableValue("type"), EncodableValue("seekFraction")},
@@ -952,7 +1064,6 @@ LRESULT KotvWinChrome::OnMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
           } else if (slot == 2) {
             Emit({{EncodableValue("type"), EncodableValue(std::string("next"))}});
           } else if (slot == 3) {
-            // 更多：有快照则原生弹层，否则回 Dart
             if (!more_items_.empty()) {
               sheet_kind_ = "more";
               sheet_title_ = L"更多";
@@ -1120,6 +1231,24 @@ void KotvWinChrome::IngestSheet(const EncodableMap* args) {
 
 void KotvWinChrome::IngestUpdate(const EncodableMap* args) {
   if (!args) return;
+  if (args->count(EncodableValue("mode"))) mode_ = GetString(*args, "mode");
+  if (args->count(EncodableValue("anchorScreen"))) {
+    const auto it = args->find(EncodableValue("anchorScreen"));
+    if (it != args->end() && std::holds_alternative<EncodableMap>(it->second)) {
+      const auto& a = std::get<EncodableMap>(it->second);
+      anchor_screen_l_ = GetDouble(a, "left");
+      anchor_screen_t_ = GetDouble(a, "top");
+      anchor_screen_w_ = GetDouble(a, "width");
+      anchor_screen_h_ = GetDouble(a, "height");
+      anchor_valid_ = anchor_screen_w_ >= 8 && anchor_screen_h_ >= 8;
+    } else {
+      anchor_valid_ = false;
+    }
+  }
+  if (args->count(EncodableValue("volume"))) volume_ = GetDouble(*args, "volume", volume_);
+  if (args->count(EncodableValue("showDirect"))) show_direct_ = GetBool(*args, "showDirect");
+  if (args->count(EncodableValue("directOn"))) direct_on_ = GetBool(*args, "directOn");
+  if (args->count(EncodableValue("miniActive"))) mini_active_ = GetBool(*args, "miniActive");
   if (args->count(EncodableValue("title"))) title_ = Utf8ToWide(GetString(*args, "title"));
   if (args->count(EncodableValue("subtitle")))
     subtitle_ = Utf8ToWide(GetString(*args, "subtitle"));

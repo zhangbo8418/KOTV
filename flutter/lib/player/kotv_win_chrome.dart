@@ -389,6 +389,50 @@ class KotvWinChrome {
     return vodSpeeds[(i + 1) % vodSpeeds.length];
   }
 
+  /// 详情非全屏内嵌底栏（对齐 [VodInlineControls]）。
+  /// [anchorScreen] 为控件区全局屏幕坐标（left/top/width/height）。
+  static Future<void> pushVodInline({
+    required KotvPlayback playback,
+    required Map<String, double> anchorScreen,
+    required bool chromeVisible,
+    bool showDirect = false,
+    bool directOn = false,
+    bool miniActive = false,
+    bool danmakuOn = false,
+    List<DanmakuItem> danmakuItems = const [],
+  }) async {
+    if (!isNeeded) return;
+    final pos = playback.position;
+    final dur = playback.duration;
+    final progress = dur.inMilliseconds > 0
+        ? (pos.inMilliseconds / dur.inMilliseconds).clamp(0.0, 1.0)
+        : 0.0;
+    await update({
+      'mode': 'vod_inline',
+      'anchorScreen': anchorScreen,
+      'positionLabel': formatClock(pos),
+      'durationLabel': formatClock(dur),
+      'progress': progress,
+      'positionSec': pos.inMilliseconds / 1000.0,
+      'rate': playback.rate,
+      'playing': playback.playing,
+      'buffering': playback.buffering || playback.stalling,
+      'volume': playback.volume.clamp(0, 100),
+      'showDirect': showDirect,
+      'directOn': directOn,
+      'miniActive': miniActive,
+      'top': false,
+      'bottom': chromeVisible,
+      'episodesVisible': false,
+      'centerVisible': false,
+      'liveLeftVisible': false,
+      'liveRightVisible': false,
+      'channelVisible': false,
+      'actions': const ['toggle', 'stop', 'cast', 'mini', 'expand'],
+    });
+    await setDanmaku(enabled: danmakuOn, items: danmakuItems);
+  }
+
   /// 点播全屏快照。
   static Future<void> pushVod({
     required KotvPlayback playback,
