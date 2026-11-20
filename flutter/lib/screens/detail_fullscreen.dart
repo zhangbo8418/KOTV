@@ -372,7 +372,10 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       'episodes': List<String>.from(widget.episodes),
       'episodeSelected': _epIdx,
       'progress': progress.clamp(0.0, 1.0),
+      'positionSec': pos.inMilliseconds / 1000.0,
+      'rate': pb.rate,
       'playing': pb.playing,
+      'buffering': pb.buffering || pb.stalling,
       'top': _showChrome,
       'bottom': _showChrome,
       'episodesVisible': _epOpen,
@@ -381,6 +384,19 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       'liveRightVisible': false,
       'channelVisible': false,
     }));
+    unawaited(KotvWinChrome.setDanmaku(
+      enabled: _danmakuOn,
+      items: widget.danmakuItems,
+      fontSize: widget.danmakuSize,
+      opacity: widget.danmakuOpacity,
+      durationMs: widget.danmakuDurationMs,
+      fixedDurationMs: widget.danmakuFixedDurationMs,
+      rows: widget.danmakuRows,
+      showScroll: widget.danmakuShowScroll,
+      showTop: widget.danmakuShowTop,
+      showBottom: widget.danmakuShowBottom,
+      showReverse: widget.danmakuShowReverse,
+    ));
   }
 
   String _fmtDur(Duration d) {

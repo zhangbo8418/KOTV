@@ -601,6 +601,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       if (KotvWinChrome.isNeeded) {
         KotvWinChrome.onEvent = _onWinChromeEvent;
         unawaited(KotvWinChrome.setEnabled(true));
+        _danmakuItems.addListener(_syncWinChrome);
+        _playback.addListener(_syncWinChrome);
         _syncWinChrome();
       }
     });
@@ -644,6 +646,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       '线路：$_lineName',
       '关闭面板',
     ];
+    final pos = _playback.position;
+    final dur = _playback.duration;
     unawaited(KotvWinChrome.update({
       'title': _title,
       'channelText': _playChName.isEmpty ? _title : _playChName,
@@ -651,6 +655,12 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       'liveLeftSelected': _chIdx,
       'liveRight': right,
       'playing': _playback.playing,
+      'buffering': _playback.buffering || _playback.stalling,
+      'positionSec': pos.inMilliseconds / 1000.0,
+      'progress': dur.inMilliseconds > 0
+          ? (pos.inMilliseconds / dur.inMilliseconds).clamp(0.0, 1.0)
+          : 0.0,
+      'rate': _playback.rate,
       'top': false,
       'bottom': false,
       'episodesVisible': false,
@@ -659,6 +669,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       'liveRightVisible': _rightOpen,
       'channelVisible': _channelInfoVisible,
     }));
+    unawaited(KotvWinChrome.setDanmaku(
+      enabled: true,
+      items: _danmakuItems.value,
+    ));
   }
 
   @override
@@ -695,6 +709,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     liveScreenHandleBack = null;
     if (KotvWinChrome.isNeeded) {
       KotvWinChrome.onEvent = null;
+      _danmakuItems.removeListener(_syncWinChrome);
+      _playback.removeListener(_syncWinChrome);
       unawaited(KotvWinChrome.setEnabled(false));
     }
     MiniPlayerWindow.onAndroidPipChanged = null;
@@ -785,6 +801,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   void _onRemoteLiveDanmaku(DanmakuItem item) {
     if (!mounted) return;
     _danmakuItems.value = kotvAppendLiveDanmaku(_danmakuItems.value, item, _playback.position);
+    if (KotvWinChrome.isNeeded) _syncWinChrome();
   }
 
   Widget _buildLiveDanmakuOverlay() {
