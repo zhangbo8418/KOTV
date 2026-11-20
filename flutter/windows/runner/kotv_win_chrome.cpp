@@ -1025,7 +1025,8 @@ LRESULT KotvWinChrome::OnMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         if (mode_ == "vod_inline") {
           // 下沿进度；上沿动作：play/stop/[direct]/cast/mini/expand | volume
           if (y > rc.bottom - 22) {
-            const double p = std::clamp((x - 10.0) / std::max(1, rc.right - 20), 0.0, 1.0);
+            const double p = std::clamp(
+                (x - 10.0) / std::max(1.0, static_cast<double>(rc.right - 20)), 0.0, 1.0);
             Emit({{EncodableValue("type"), EncodableValue("seekFraction")},
                   {EncodableValue("value"), EncodableValue(p)}});
             return 0;
@@ -1053,7 +1054,8 @@ LRESULT KotvWinChrome::OnMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
           return 0;
         }
         if (y < 36) {
-          const double p = std::clamp((x - 16.0) / std::max(1, rc.right - 32), 0.0, 1.0);
+          const double p = std::clamp(
+              (x - 16.0) / std::max(1.0, static_cast<double>(rc.right - 32)), 0.0, 1.0);
           Emit({{EncodableValue("type"), EncodableValue("seekFraction")},
                 {EncodableValue("value"), EncodableValue(p)}});
           return 0;
