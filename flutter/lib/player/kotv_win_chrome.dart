@@ -10,8 +10,10 @@ import 'kotv_playback.dart';
 
 /// Win7 原生播控套壳：推送 / 弹层 / 事件的唯一收拢入口。
 ///
-/// 库存引擎下子 HWND 盖住 Flutter，原生层承接播控栏、EPG、弹层（更多 / 弹幕设置 /
-/// 选播放器 / 调色预设等）。Win8+ DComp 不启用本通道。
+/// 库存引擎下 mpv 子 HWND 盖住 Flutter；本通道经 C++ 桥拉起独立进程
+/// `kotv_win7_chrome.exe`（WPF 透明遮罩）承接播控栏、EPG、弹层与弹幕。
+/// 样式与事件契约对齐本应用 Flutter 播控（[VodInlineControls] /
+/// [VodFullscreenChrome] / 直播栏）。**Win8+ DComp 不启用本通道**（与 macOS 同为 Flutter chrome）。
 class KotvWinChrome {
   KotvWinChrome._();
 
@@ -20,6 +22,12 @@ class KotvWinChrome {
   static bool _handlerBound = false;
   static int _lastDanmakuSig = 0;
   static int _ownerToken = 0;
+
+  /// 与 WPF OverlayController / 全屏 HWND inset 同源（逻辑像素）。
+  static const double topH = 56;
+  static const double bottomH = 108;
+  static const double inlineBottomH = 78;
+  static const double episodeW = 280;
 
   static const vodSpeeds = <double>[0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 5.0];
 
@@ -236,7 +244,24 @@ class KotvWinChrome {
     ];
   }
 
-  /// 弹幕设置：开关 + 主滑条（与 `danmaku_settings_sheet` 主路径字段对应）。
+  /// 详情内嵌「更多」子集（弹幕 + 全屏两项）。
+  static List<Map<String, dynamic>> vodInlineMoreItems({
+    required bool danmakuOn,
+    required int danmakuSourceCount,
+    required String danmakuSourceName,
+    bool hasDanmakuSearch = true,
+  }) =>
+      [
+        lineItem(id: 'danmaku', label: '弹幕', toggle: true, on: danmakuOn),
+        lineItem(id: 'danmakuSettings', label: '弹幕设置'),
+        if (danmakuSourceCount > 1)
+          lineItem(id: 'danmakuSource', label: '弹幕源', trailing: danmakuSourceName),
+        if (hasDanmakuSearch) lineItem(id: 'danmakuSearch', label: '搜索弹幕'),
+        lineItem(id: 'expandWindow', label: '铺满当前窗口', chevron: false),
+        lineItem(id: 'expandDisplay', label: '占满整块屏幕', chevron: false),
+      ];
+
+  /// 弹幕设置：开关 + 主滑条（与 Flutter `danmaku_settings_sheet` 主路径字段对应）。
   static List<Map<String, dynamic>> danmakuSheetItems({
     required bool danmakuOn,
     required bool showScroll,
@@ -366,13 +391,6 @@ class KotvWinChrome {
     _ensureHandler();
     try {
       await _ch.invokeMethod('update', fields);
-    } catch (_) {}
-  }
-
-  static Future<void> layout() async {
-    if (!isNeeded) return;
-    try {
-      await _ch.invokeMethod('layout');
     } catch (_) {}
   }
 
@@ -704,5 +722,152 @@ class KotvWinChrome {
       }
       await _ch.invokeMethod('setDanmaku', map);
     } catch (_) {}
+  }
+
+  // ---------------------------------------------------------------------------
+  // 弹层收拢（屏幕层只调这些，勿再手搓 showSheet 参数表）
+  // ---------------------------------------------------------------------------
+
+  static Future<void> showDanmakuSettingsSheet({
+    required bool danmakuOn,
+    required bool showScroll,
+    required bool showTop,
+    required bool showBottom,
+    required bool showReverse,
+    required bool showPositioned,
+    required bool showSpecial,
+    required bool bold,
+    required double fontSize,
+    required double opacity,
+    required int rows,
+    required int maxOnScreen,
+    required double scrollArea,
+    required int durationMs,
+    required int fixedDurationMs,
+  }) =>
+      showSheet(
+        kind: 'danmaku',
+        title: '弹幕设置',
+        items: danmakuSheetItems(
+          danmakuOn: danmakuOn,
+          showScroll: showScroll,
+          showTop: showTop,
+          showBottom: showBottom,
+          showReverse: showReverse,
+          showPositioned: showPositioned,
+          showSpecial: showSpecial,
+          bold: bold,
+          fontSize: fontSize,
+          opacity: opacity,
+          rows: rows,
+          maxOnScreen: maxOnScreen,
+          scrollArea: scrollArea,
+          durationMs: durationMs,
+          fixedDurationMs: fixedDurationMs,
+        ),
+      );
+
+  static Future<void> showPlayerPickerSheet({
+    required String currentId,
+    required List<(String label, String id)> options,
+    String title = '请选择播放器',
+    String? subtitle,
+  }) {
+    final cur = currentId;
+    final idx = options.indexWhere((o) => o.$2 == cur);
+    return showSheet(
+      kind: 'player',
+      title: title,
+      subtitle: subtitle ?? (cur.isEmpty ? '' : '当前：$cur'),
+      items: [
+        for (final o in options)
+          lineItem(
+            id: o.$2,
+            label: o.$1,
+            chevron: false,
+            trailing: o.$2 == cur ? '✓' : '',
+          ),
+      ],
+      selected: idx < 0 ? 0 : idx,
+    );
+  }
+
+  static Future<void> showVolumeSheet(double volume) => showSheet(
+        kind: 'volume',
+        title: '音量',
+        items: [
+          sliderItem(
+            id: 'volume',
+            label: '音量',
+            value: volume.clamp(1, 100),
+            min: 1,
+            max: 100,
+          ),
+        ],
+      );
+
+  static Future<void> showRenderSheet(String selectedId) => showChoiceSheet(
+        kind: 'render',
+        title: '渲染方式',
+        options: renderOptions,
+        selectedId: selectedId,
+      );
+
+  static Future<void> showDecodeSheet(String selectedId) => showChoiceSheet(
+        kind: 'decode',
+        title: '解码方式',
+        options: decodeOptions,
+        selectedId: selectedId,
+      );
+
+  /// 弹幕设置项 persist：返回是否已处理。屏幕层在 true 时再 notify / sync。
+  static Future<bool> persistDanmakuToggle({
+    required String id,
+    required bool on,
+    required Future<void> Function(String key, String value) persist,
+  }) async {
+    switch (id) {
+      case 'danmaku':
+      case 'danmakuShowScroll':
+      case 'danmakuShowTop':
+      case 'danmakuShowBottom':
+      case 'danmakuShowReverse':
+      case 'danmakuShowPositioned':
+      case 'danmakuShowSpecial':
+      case 'danmakuBold':
+        await persist(id == 'danmaku' ? 'danmaku' : id, on ? 'true' : 'false');
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  /// 弹幕滑条 commit persist：返回是否已处理。
+  static Future<bool> persistDanmakuSlider({
+    required String id,
+    required double value,
+    required Future<void> Function(String key, String value) persist,
+  }) async {
+    switch (id) {
+      case 'danmakuSize':
+        await persist(id, '${value.round()}');
+        return true;
+      case 'danmakuOpacity':
+        await persist(id, (value / 100).toStringAsFixed(2));
+        return true;
+      case 'danmakuRows':
+      case 'danmakuMaxOnScreen':
+        await persist(id, '${value.round()}');
+        return true;
+      case 'danmakuScrollArea':
+        await persist(id, (value / 100).toStringAsFixed(2));
+        return true;
+      case 'danmakuDurationMs':
+      case 'danmakuFixedDurationMs':
+        await persist(id, '${(value * 1000).round()}');
+        return true;
+      default:
+        return false;
+    }
   }
 }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'kotv_platform.dart';
+import 'kotv_win_chrome.dart';
 
 /// macOS ASBDL / Win8+ DComp：画面在 Flutter 之下，洞须 clear。
 bool kotvMpvUsesUnderlayHole() =>
@@ -42,12 +43,16 @@ class KotvMpvUnderlayClip extends InheritedWidget {
   }
 }
 
-/// Win7 全屏：给原生顶/底栏留空（与 kotv_win_chrome kTopH=56 / kBottomH=108 一致）；
-/// 选集打开时再给右侧面板留宽（kEpW=280）。
+/// Win7 全屏：给原生顶/底栏留空；选集打开时再给右侧面板留宽。Win8+/macOS 不走此 inset。
 Rect kotvWindowsOverlayFullscreenInset(Rect full, {bool episodesOpen = false}) {
   if (full.width <= 120 || full.height <= 160) return full;
-  final rightPad = episodesOpen ? 280.0 : 12.0;
-  return Rect.fromLTRB(full.left, full.top + 56, full.right - rightPad, full.bottom - 108);
+  final rightPad = episodesOpen ? KotvWinChrome.episodeW : 12.0;
+  return Rect.fromLTRB(
+    full.left,
+    full.top + KotvWinChrome.topH,
+    full.right - rightPad,
+    full.bottom - KotvWinChrome.bottomH,
+  );
 }
 
 /// 播放洞：下发几何 `updateFrame`；未就绪黑遮。

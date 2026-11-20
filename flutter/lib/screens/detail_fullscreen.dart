@@ -371,26 +371,22 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   }
 
   Future<void> _winOpenDanmakuSettings() async {
-    await KotvWinChrome.showSheet(
-      kind: 'danmaku',
-      title: '弹幕设置',
-      items: KotvWinChrome.danmakuSheetItems(
-        danmakuOn: _danmakuOn,
-        showScroll: widget.danmakuShowScroll,
-        showTop: widget.danmakuShowTop,
-        showBottom: widget.danmakuShowBottom,
-        showReverse: widget.danmakuShowReverse,
-        showPositioned: widget.danmakuShowPositioned,
-        showSpecial: widget.danmakuShowSpecial,
-        bold: widget.danmakuBold,
-        fontSize: widget.danmakuSize,
-        opacity: widget.danmakuOpacity,
-        rows: widget.danmakuRows,
-        maxOnScreen: widget.danmakuMaxOnScreen,
-        scrollArea: widget.danmakuScrollArea,
-        durationMs: widget.danmakuDurationMs,
-        fixedDurationMs: widget.danmakuFixedDurationMs,
-      ),
+    await KotvWinChrome.showDanmakuSettingsSheet(
+      danmakuOn: _danmakuOn,
+      showScroll: widget.danmakuShowScroll,
+      showTop: widget.danmakuShowTop,
+      showBottom: widget.danmakuShowBottom,
+      showReverse: widget.danmakuShowReverse,
+      showPositioned: widget.danmakuShowPositioned,
+      showSpecial: widget.danmakuShowSpecial,
+      bold: widget.danmakuBold,
+      fontSize: widget.danmakuSize,
+      opacity: widget.danmakuOpacity,
+      rows: widget.danmakuRows,
+      maxOnScreen: widget.danmakuMaxOnScreen,
+      scrollArea: widget.danmakuScrollArea,
+      durationMs: widget.danmakuDurationMs,
+      fixedDurationMs: widget.danmakuFixedDurationMs,
     );
   }
 
@@ -403,20 +399,10 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     final cur = kotvClampPlayerVal('${status['current'] ?? ''}'.trim(), live: false);
     final opts = await kotvInstalledPlayerOptions(live: false, engineStatus: status);
     if (!mounted) return;
-    await KotvWinChrome.showSheet(
-      kind: 'player',
-      title: '请选择播放器',
+    await KotvWinChrome.showPlayerPickerSheet(
+      currentId: cur,
+      options: opts,
       subtitle: '当前：${flutterPlayerLabel(cur)}',
-      items: [
-        for (final o in opts)
-          KotvWinChrome.lineItem(
-            id: o.$2,
-            label: o.$1,
-            chevron: false,
-            trailing: o.$2 == cur ? '✓' : '',
-          ),
-      ],
-      selected: opts.indexWhere((o) => o.$2 == cur).clamp(0, opts.isEmpty ? 0 : opts.length - 1),
     );
   }
 
@@ -510,7 +496,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     switch (id) {
       case 'danmaku':
         setState(() => _danmakuOn = on);
-        await _winPersist('danmaku', on ? 'true' : 'false');
+        await KotvWinChrome.persistDanmakuToggle(id: id, on: on, persist: _winPersist);
         widget.onDanmakuSettingsChanged?.call();
         break;
       case 'ambient':
@@ -529,15 +515,10 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
         setState(() => _winLoopSkip = on);
         await _winPersist('playerSkipOpeningEnding', on ? 'true' : 'false');
         break;
-      case 'danmakuShowScroll':
-      case 'danmakuShowTop':
-      case 'danmakuShowBottom':
-      case 'danmakuShowReverse':
-      case 'danmakuShowPositioned':
-      case 'danmakuShowSpecial':
-      case 'danmakuBold':
-        await _winPersist(id, on ? 'true' : 'false');
-        widget.onDanmakuSettingsChanged?.call();
+      default:
+        if (await KotvWinChrome.persistDanmakuToggle(id: id, on: on, persist: _winPersist)) {
+          widget.onDanmakuSettingsChanged?.call();
+        }
         break;
     }
     _syncWinChrome();
@@ -545,31 +526,10 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
 
   Future<void> _onWinSlider(String id, double value, {required bool commit}) async {
     if (!commit) return;
-    switch (id) {
-      case 'danmakuSize':
-        await _winPersist(id, '${value.round()}');
-        break;
-      case 'danmakuOpacity':
-        await _winPersist(id, (value / 100).toStringAsFixed(2));
-        break;
-      case 'danmakuRows':
-      case 'danmakuMaxOnScreen':
-        await _winPersist(id, '${value.round()}');
-        break;
-      case 'danmakuScrollArea':
-        await _winPersist(id, (value / 100).toStringAsFixed(2));
-        break;
-      case 'danmakuDurationMs':
-        await _winPersist(id, '${(value * 1000).round()}');
-        break;
-      case 'danmakuFixedDurationMs':
-        await _winPersist(id, '${(value * 1000).round()}');
-        break;
-      default:
-        return;
+    if (await KotvWinChrome.persistDanmakuSlider(id: id, value: value, persist: _winPersist)) {
+      widget.onDanmakuSettingsChanged?.call();
+      _syncWinChrome();
     }
-    widget.onDanmakuSettingsChanged?.call();
-    _syncWinChrome();
   }
 
   void _onWinSheet(String id, String kind) {
@@ -664,12 +624,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
         unawaited(_winOpenPlayerPicker());
         break;
       case 'render':
-        unawaited(KotvWinChrome.showChoiceSheet(
-          kind: 'render',
-          title: '渲染方式',
-          options: KotvWinChrome.renderOptions,
-          selectedId: _renderMode,
-        ));
+        unawaited(KotvWinChrome.showRenderSheet(_renderMode));
         break;
       case 'playInfo':
         unawaited(_winShowPlayInfo());
@@ -1902,8 +1857,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   }
 
   Widget _fullscreenChrome() {
-    // Win7：库存 HWND 盖住 Flutter，顶底栏/选集/更多由原生壳承接；再画 Flutter 栏会
-    // 与画面错位（选集头尾分离）且按键点不到。
+    // Win7：mpv HWND 盖住 Flutter；顶底栏/选集/弹幕由 WPF 壳承接（与 macOS/Win8+ Flutter chrome 隔离）。
     if (KotvWinChrome.isNeeded) return const SizedBox.shrink();
     return VodFullscreenChrome(
       key: _chromeKey,
@@ -2036,6 +1990,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
                       clipBehavior: Clip.hardEdge,
                       children: [
                         _buildVideo(),
+                        if (!KotvWinChrome.isNeeded)
                         DanmakuOverlay(
                           enabled: _danmakuOn,
                           player: widget.playback,

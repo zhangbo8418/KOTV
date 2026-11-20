@@ -8,7 +8,9 @@
 #include "flutter/generated_plugin_registrant.h"
 #include "kotv_external_player.h"
 #include "kotv_iface_rx.h"
+#if defined(KOTV_WIN7_CHROME)
 #include "kotv_win_chrome.h"
+#endif
 #include "mpv/kotv_mpv_plugin.h"
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
@@ -34,8 +36,11 @@ bool FlutterWindow::OnCreate() {
   RegisterPlugins(flutter_controller_->engine());
   KotvMpvPluginRegisterWithRegistrar(
       flutter_controller_->engine()->GetRegistrarForPlugin("KotvMpvPlugin"));
+#if defined(KOTV_WIN7_CHROME)
+  // 仅 Win7 包：MethodChannel → kotv_win7_chrome.exe（WPF）。Win8+ 与 macOS 同为 Flutter chrome。
   KotvWinChromeRegisterWithRegistrar(
       flutter_controller_->engine()->GetRegistrarForPlugin("KotvWinChrome"));
+#endif
   RegisterHostChannel();
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 

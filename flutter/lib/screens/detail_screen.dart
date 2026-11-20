@@ -3140,7 +3140,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
                     children: [
                       ValueListenableBuilder<List<DanmakuItem>>(
                         valueListenable: _danmakuItems,
-                        builder: (context, items, _) => DanmakuOverlay(
+                        builder: (context, items, _) {
+                          // Win7：弹幕由 WPF 壳绘制；此处再画会被 mpv HWND 挡住。
+                          if (KotvWinChrome.isNeeded) return const SizedBox.shrink();
+                          return DanmakuOverlay(
                           enabled: _danmakuOn,
                           player: pb,
                           items: items,
@@ -3170,7 +3173,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
                           projectionOffsetX: _danmakuProjectionOffsetX,
                           projectionOffsetY: _danmakuProjectionOffsetY,
                           projectionOpacity: _danmakuProjectionOpacity,
-                        ),
+                        );
+                        },
                       ),
                       KotvBufferingOverlay(
                         player: pb,
@@ -3858,51 +3862,37 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   }
 
   Future<void> _winOpenInlineMore() async {
+    final srcName = _danmakuSources.isEmpty
+        ? ''
+        : _danmakuSources[_danmakuSourceIdx.clamp(0, _danmakuSources.length - 1)].name;
     await KotvWinChrome.showSheet(
       kind: 'more',
       title: '更多',
-      items: [
-        KotvWinChrome.lineItem(
-          id: 'danmaku',
-          label: '弹幕',
-          toggle: true,
-          on: _danmakuOn,
-        ),
-        KotvWinChrome.lineItem(id: 'danmakuSettings', label: '弹幕设置'),
-        if (_danmakuSources.length > 1)
-          KotvWinChrome.lineItem(
-            id: 'danmakuSource',
-            label: '弹幕源',
-            trailing: _danmakuSources[_danmakuSourceIdx.clamp(0, _danmakuSources.length - 1)].name,
-          ),
-        KotvWinChrome.lineItem(id: 'danmakuSearch', label: '搜索弹幕'),
-        KotvWinChrome.lineItem(id: 'expandWindow', label: '铺满当前窗口', chevron: false),
-        KotvWinChrome.lineItem(id: 'expandDisplay', label: '占满整块屏幕', chevron: false),
-      ],
+      items: KotvWinChrome.vodInlineMoreItems(
+        danmakuOn: _danmakuOn,
+        danmakuSourceCount: _danmakuSources.length,
+        danmakuSourceName: srcName,
+      ),
     );
   }
 
   Future<void> _winOpenInlineDanmakuSettings() async {
-    await KotvWinChrome.showSheet(
-      kind: 'danmaku',
-      title: '弹幕设置',
-      items: KotvWinChrome.danmakuSheetItems(
-        danmakuOn: _danmakuOn,
-        showScroll: _danmakuShowScroll,
-        showTop: _danmakuShowTop,
-        showBottom: _danmakuShowBottom,
-        showReverse: _danmakuShowReverse,
-        showPositioned: _danmakuShowPositioned,
-        showSpecial: _danmakuShowSpecial,
-        bold: _danmakuBold,
-        fontSize: _danmakuSize,
-        opacity: _danmakuOpacity,
-        rows: _danmakuRows,
-        maxOnScreen: _danmakuMaxOnScreen,
-        scrollArea: _danmakuScrollArea,
-        durationMs: _danmakuDurationMs,
-        fixedDurationMs: _danmakuFixedDurationMs,
-      ),
+    await KotvWinChrome.showDanmakuSettingsSheet(
+      danmakuOn: _danmakuOn,
+      showScroll: _danmakuShowScroll,
+      showTop: _danmakuShowTop,
+      showBottom: _danmakuShowBottom,
+      showReverse: _danmakuShowReverse,
+      showPositioned: _danmakuShowPositioned,
+      showSpecial: _danmakuShowSpecial,
+      bold: _danmakuBold,
+      fontSize: _danmakuSize,
+      opacity: _danmakuOpacity,
+      rows: _danmakuRows,
+      maxOnScreen: _danmakuMaxOnScreen,
+      scrollArea: _danmakuScrollArea,
+      durationMs: _danmakuDurationMs,
+      fixedDurationMs: _danmakuFixedDurationMs,
     );
   }
 
@@ -3938,7 +3928,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         );
         break;
       case 'danmakuSearch':
-        // 搜索需输入框：用引擎侧已有流程；Win7 下对话框盖不住 HWND 时改走原生提示
+        // 搜索需输入框；HWND 会挡住 Flutter 对话框，先经原生提示再短暂藏壳。
         await KotvWinChrome.showSheet(
           kind: 'more',
           title: '搜索弹幕',

@@ -448,18 +448,7 @@ class KotvMpvPlugin : public flutter::Plugin {
           const int cw = std::max(1, static_cast<int>(std::lround(w * dpr)));
           const int ch = std::max(1, static_cast<int>(std::lround(h * dpr)));
           MoveWindow(hwnd_, cx, cy, cw, ch, TRUE);
-          // 抬升原生播控/弹幕，避免被视频 HWND 压住。
-          if (parent) {
-            auto raise_class = [parent](const wchar_t* cls) {
-              HWND child = nullptr;
-              while ((child = FindWindowExW(parent, child, cls, nullptr)) != nullptr) {
-                SetWindowPos(child, HWND_TOP, 0, 0, 0, 0,
-                             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-              }
-            };
-            raise_class(L"KotvWinChromeDanmaku");
-            raise_class(L"KotvWinChromePanel");
-          }
+          // Win7 播控是独立 WPF 置顶进程，不再抬升已废弃的 GDI 子窗类。
         }
       }
       result->Success();

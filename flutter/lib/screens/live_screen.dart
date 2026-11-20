@@ -801,20 +801,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   }
 
   Future<void> _winShowVolumeSheet() async {
-    final vol = _playback.volume.clamp(1, 100).toDouble();
-    await KotvWinChrome.showSheet(
-      kind: 'volume',
-      title: '音量',
-      items: [
-        KotvWinChrome.sliderItem(
-          id: 'volume',
-          label: '音量',
-          value: vol,
-          min: 1,
-          max: 100,
-        ),
-      ],
-    );
+    await KotvWinChrome.showVolumeSheet(_playback.volume.clamp(1, 100).toDouble());
   }
 
   Future<void> _onWinLiveSheet(String id, String kind) async {
@@ -1111,6 +1098,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   }
 
   Widget _buildLiveDanmakuOverlay() {
+    // Win7：弹幕由 WPF 壳绘制；与 macOS/Win8+ Flutter DanmakuOverlay 隔离。
+    if (KotvWinChrome.isNeeded) return const SizedBox.shrink();
     return ValueListenableBuilder<List<DanmakuItem>>(
       valueListenable: _danmakuItems,
       builder: (context, items, _) {
@@ -3099,12 +3088,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
 
   Future<void> _pickDecode() async {
     if (KotvWinChrome.isNeeded) {
-      await KotvWinChrome.showChoiceSheet(
-        kind: 'decode',
-        title: '解码方式',
-        options: KotvWinChrome.decodeOptions,
-        selectedId: _decodeMode,
-      );
+      await KotvWinChrome.showDecodeSheet(_decodeMode);
       return;
     }
     final v = await pickChoice(context, title: '解码方式', current: _decodeMode, options: const [
@@ -3152,12 +3136,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
 
   Future<void> _pickRender() async {
     if (KotvWinChrome.isNeeded) {
-      await KotvWinChrome.showChoiceSheet(
-        kind: 'render',
-        title: '渲染方式',
-        options: KotvWinChrome.renderOptions,
-        selectedId: _renderMode,
-      );
+      await KotvWinChrome.showRenderSheet(_renderMode);
       return;
     }
     final v = await pickChoice(context, title: '渲染方式', current: _renderMode, options: const [
@@ -3187,20 +3166,11 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       );
       if (!navCtx.mounted || !mounted) return;
       if (KotvWinChrome.isNeeded) {
-        await KotvWinChrome.showSheet(
-          kind: 'player',
+        await KotvWinChrome.showPlayerPickerSheet(
           title: '直播播放器',
+          currentId: _prefPlayerVal,
+          options: options,
           subtitle: '当前：${flutterPlayerLabel(_prefPlayerVal)}',
-          items: [
-            for (final o in options)
-              KotvWinChrome.lineItem(
-                id: o.$2,
-                label: o.$1,
-                chevron: false,
-                trailing: o.$2 == _prefPlayerVal ? '✓' : '',
-              ),
-          ],
-          selected: options.indexWhere((o) => o.$2 == _prefPlayerVal).clamp(0, options.isEmpty ? 0 : options.length - 1),
         );
         return;
       }
@@ -4656,7 +4626,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                               onTap: () => unawaited(_exitImmersive()),
                             ),
                           ),
-                        if (_leftOpen)
+                        // Win7：左栏由 WPF 承接，勿再建 Flutter 面板（会被 HWND 挡住）。
+                        if (_leftOpen && !KotvWinChrome.isNeeded)
                           Positioned(
                             left: 0,
                             top: 0,
@@ -4945,7 +4916,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                               ),
                             ),
                           ),
-                        if (_rightOpen)
+                        if (_rightOpen && !KotvWinChrome.isNeeded)
                           Positioned(
                             right: 0,
                             top: 0,
@@ -5148,8 +5119,12 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                               ),
                             ),
                           ),
-                        // 底栏信息条（频道名）；无回看播控时贴底，不挡上下换台。
-                        if (_channelInfoVisible && !_leftOpen && !_rightOpen && (!_catchup || !_catchupChrome))
+                        // 底栏信息条（频道名）；Win7 由 WPF channel 条承接。
+                        if (!KotvWinChrome.isNeeded &&
+                            _channelInfoVisible &&
+                            !_leftOpen &&
+                            !_rightOpen &&
+                            (!_catchup || !_catchupChrome))
                           Positioned(
                             left: 16,
                             right: 16,

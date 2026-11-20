@@ -3,8 +3,8 @@
 ## v0.3.5
 
 - 桌面原生 MPV（`kotv_mpv`）：macOS underlay（vo=avfoundation）、Windows 子 HWND（vo=gpu-next）、Linux X11 wid；hwdec 由 Dart `KotvMpvOpts.hwdecValue()` 单点下发。桌面为薄宿主（轨表/排队/碟片等尚未齐；碟片导航仅 Android）。
-- Windows Win8+：CI/打包灌入 DComp 补丁引擎制品（Flutter 钉 3.47.1 + `FLUTTER_WINDOWS_DCOMP` + 关 Impeller）；Flutter UI 合成在视频 HWND 之上，洞 `BlendMode.clear`。
-- Windows Win7：库存引擎 + 原生播控套壳（`kotv_win_chrome`）；无 DComp。复刻点播全屏与**详情内嵌底栏**（`pushVodInline` 锚点定位）、更多/弹幕设置/选播放器等原生弹层，以及直播左栏 EPG/右栏药丸。不回落 Flutter sheet / Texture。字幕仍由 mpv/libass 画在视频 HWND。API 收拢到 `kotv_win_chrome.dart`。
+- Windows Win8+：CI/打包灌入 DComp 补丁引擎制品（Flutter 钉 3.47.1 + `FLUTTER_WINDOWS_DCOMP` + 关 Impeller）；与 macOS 相同为 Flutter 播控盖在视频上（洞 `BlendMode.clear`）；**不**编入 Win7 WPF 壳。
+- Windows Win7：库存引擎 + 独立进程 `kotv_win7_chrome.exe`（WPF 透明遮罩）；C++ `kotv_win_chrome` 仅管道桥。点播全屏/内嵌底栏、直播侧栏/弹幕/弹层走 WPF，样式契约对齐本应用 Flutter 播控；Win8+ 包与共享 UI 不再混用 GDI 子窗。API 收拢到 `kotv_win_chrome.dart`（含 sheet helper）。字幕仍由 mpv/libass 画在视频 HWND。
 - macOS：mpv API 离主线程；ASBDL 垫 contentView.layer；开播不因遮罩藏层（仅 Flutter 黑遮）；默认 videotoolbox；失败 ASBDL flush+补帧；进度 300ms 节流；软解 EDR。
 - Win7 硬解直出经 `setProperty(hwdec=dxva2)`；关直出为 `auto`。
 - CI：FFmpeg `dovi_convert` helpers；Linux EventChannel 签名；Windows 生成 `mpv.lib`（禁 MSVC 直链 .dll）；Win7 SDK 改用 `withOpacity`。

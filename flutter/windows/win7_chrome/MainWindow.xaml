@@ -1,0 +1,23 @@
+<Window x:Class="KotvWin7Chrome.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="kotv_win7_chrome"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ShowInTaskbar="False"
+        Topmost="True"
+        ResizeMode="NoResize"
+        WindowStartupLocation="Manual"
+        Left="0" Top="0" Width="1" Height="1"
+        Focusable="False">
+  <Grid x:Name="Root">
+    <!-- 弹幕层：不抢鼠标 -->
+    <Canvas x:Name="DanmakuLayer" IsHitTestVisible="False"/>
+
+    <!-- 视频区相对容器：底栏 / 全屏栏 / 弹层 -->
+    <Canvas x:Name="SurfaceHost" IsHitTestVisible="True"/>
+
+    <!-- 全窗点击穿透默认；交互控件单独设 HitTest -->
+  </Grid>
+</Window>

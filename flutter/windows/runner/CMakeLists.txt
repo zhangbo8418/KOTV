@@ -1,16 +1,18 @@
 cmake_minimum_required(VERSION 3.14)
 project(runner LANGUAGES C CXX)
 
-# Define the application target. To change its name, change BINARY_NAME in the
-# top-level CMakeLists.txt, not the value here, or `flutter run` will no longer
-# work.
-#
-# Any new source files that you add to the application should be added here.
-add_executable(${BINARY_NAME} WIN32
+# Win7 包（KOTV_WIN7=1）：编入 WPF 播控桥。Win8+ DComp 包不编、不注册（与 macOS 一样只走 Flutter chrome）。
+if(DEFINED ENV{KOTV_WIN7} AND "$ENV{KOTV_WIN7}" STREQUAL "1")
+  set(_kotv_win7_chrome_default ON)
+else()
+  set(_kotv_win7_chrome_default OFF)
+endif()
+option(KOTV_WIN7_CHROME "Build Win7 WPF chrome MethodChannel bridge" ${_kotv_win7_chrome_default})
+
+set(KOTV_RUNNER_SOURCES
   "flutter_window.cpp"
   "kotv_external_player.cpp"
   "kotv_iface_rx.cpp"
-  "kotv_win_chrome.cpp"
   "main.cpp"
   "utils.cpp"
   "win32_window.cpp"
@@ -19,6 +21,20 @@ add_executable(${BINARY_NAME} WIN32
   "Runner.rc"
   "runner.exe.manifest"
 )
+if(KOTV_WIN7_CHROME)
+  list(APPEND KOTV_RUNNER_SOURCES "kotv_win_chrome.cpp")
+endif()
+
+# Define the application target. To change its name, change BINARY_NAME in the
+# top-level CMakeLists.txt, not the value here, or `flutter run` will no longer
+# work.
+#
+# Any new source files that you add to the application should be added here.
+add_executable(${BINARY_NAME} WIN32 ${KOTV_RUNNER_SOURCES})
+if(KOTV_WIN7_CHROME)
+  target_compile_definitions(${BINARY_NAME} PRIVATE "KOTV_WIN7_CHROME=1")
+  message(STATUS "KOTV: Win7 WPF chrome bridge enabled")
+endif()
 
 # kotv_mpv：vo=gpu-next + 子 HWND；头文件在 runner/mpv/include。
 # 链接必须用导入库：MSVC=mpv.lib，MinGW=libmpv.dll.a。勿把 .dll 交给 link.exe（LNK1107）。
