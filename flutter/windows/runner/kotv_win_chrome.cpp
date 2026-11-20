@@ -449,7 +449,9 @@ void KotvWinChrome::PaintBottomInline(HDC hdc, const RECT& rc) {
   if (show_direct_) paint_icon(direct_on_ ? L"D●" : L"D○");
   paint_icon(L"📺");  // 投屏
   paint_icon(mini_active_ ? L"▣" : L"⧉");
-  paint_icon(L"⛶");  // 全屏
+  paint_icon(L"⛶");  // 全屏选项
+  paint_icon(danmaku_enabled_ ? L"弹●" : L"弹○");
+  paint_icon(L"≡");  // 更多（弹幕设置等）
 
   std::wstring time = (pos_label_.empty() ? L"0:00" : pos_label_) + L" / " +
                       (dur_label_.empty() ? L"0:00" : dur_label_);
@@ -1046,6 +1048,8 @@ LRESULT KotvWinChrome::OnMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
           hit("cast");
           hit("mini");
           hit("expand");
+          hit("danmakuToggle");
+          hit("more");
           return 0;
         }
         if (y < 36) {

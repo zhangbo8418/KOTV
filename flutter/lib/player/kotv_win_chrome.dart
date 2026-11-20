@@ -1,9 +1,10 @@
-import 'dart:async' show unawaited;
+import 'dart:async' show Completer, unawaited;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import 'danmaku_layer.dart';
+import 'fullscreen_mode.dart';
 import 'kotv_platform.dart';
 import 'kotv_playback.dart';
 
@@ -62,7 +63,68 @@ class KotvWinChrome {
     ('texture', 'Texture'),
   ];
 
+  /// 对齐 [KotvFullscreenExpandButton] 桌面两项。
+  static const fullscreenKindOptions = <(String id, String label)>[
+    ('window', '铺满当前窗口'),
+    ('display', '占满整块屏幕'),
+  ];
+
   static bool get isNeeded => kotvUsesWindowsNativeChrome();
+
+  static Future<void> showFullscreenKindSheet() => showChoiceSheet(
+        kind: 'fullscreenKind',
+        title: '全屏',
+        options: fullscreenKindOptions,
+      );
+
+  /// 弹出原生「铺满窗口 / 占满屏幕」并返回选择；取消或超时返回 null。
+  /// 会短暂拦截 [onEvent]，其它事件仍转发给原 handler。
+  static Future<KotvDesktopFullscreenKind?> pickFullscreenKind() async {
+    if (!isNeeded) return null;
+    final c = Completer<KotvDesktopFullscreenKind?>();
+    final prev = onEvent;
+    late void Function(Map<String, dynamic>) intercept;
+    void restore() {
+      if (onEvent == intercept) onEvent = prev;
+    }
+
+    intercept = (e) {
+      final type = e['type'] as String? ?? '';
+      final kind = e['kind'] as String? ?? e['sheet'] as String? ?? '';
+      if (type == 'sheet' && kind == 'fullscreenKind') {
+        final id = e['id'] as String? ?? '';
+        if (!c.isCompleted) {
+          c.complete(
+            id == 'display'
+                ? KotvDesktopFullscreenKind.display
+                : KotvDesktopFullscreenKind.window,
+          );
+        }
+        restore();
+        return;
+      }
+      if (type == 'sheetClose' && kind == 'fullscreenKind') {
+        if (!c.isCompleted) c.complete(null);
+        restore();
+        prev?.call(e);
+        return;
+      }
+      prev?.call(e);
+    };
+    onEvent = intercept;
+    await showFullscreenKindSheet();
+    try {
+      return await c.future.timeout(
+        const Duration(minutes: 2),
+        onTimeout: () {
+          restore();
+          return null;
+        },
+      );
+    } finally {
+      restore();
+    }
+  }
 
   // ---------------------------------------------------------------------------
   // 行模型

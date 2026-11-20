@@ -3807,7 +3807,26 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         unawaited(_miniDesktop ? _exitMini() : _enterMini());
         break;
       case 'expand':
-        unawaited(_enterFullscreen());
+        // 对齐 KotvFullscreenExpandButton：原生选「铺满窗口 / 占满屏幕」
+        unawaited(() async {
+          final kind = await KotvWinChrome.pickFullscreenKind();
+          if (kind != null && mounted && !_immersiveFullscreen) {
+            await _enterFullscreen(kind);
+          }
+        }());
+        break;
+      case 'danmakuToggle':
+        setState(() => _danmakuOn = !_danmakuOn);
+        unawaited(_persistPlayerSetting('danmaku', _danmakuOn ? 'true' : 'false'));
+        _syncWinInlineChrome();
+        break;
+      case 'more':
+        final moreId = e['id'] as String? ?? '';
+        if (moreId.isEmpty || moreId == 'open') {
+          unawaited(_winOpenInlineMore());
+        } else {
+          unawaited(_onWinInlineMoreId(moreId));
+        }
         break;
       case 'direct':
         unawaited(_persistPlayerSetting(
@@ -3830,15 +3849,214 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           ],
         ));
         break;
+      case 'sheet':
+        unawaited(_onWinInlineSheet(e['id'] as String? ?? '', e['kind'] as String? ?? ''));
+        break;
+      case 'toggleItem':
+        unawaited(_onWinInlineToggleItem(e['id'] as String? ?? '', e['on'] == true));
+        break;
       case 'slider':
-        if (e['id'] == 'volume' && e['commit'] == true) {
-          final v = ((e['value'] as num?)?.toDouble() ?? 50).round().clamp(1, 100);
-          unawaited(_playback.setVolume(v.toDouble()));
-          unawaited(_persistPlayerSetting('playerVolume', '$v'));
-          _syncWinInlineChrome();
-        }
+        unawaited(_onWinInlineSlider(
+          e['id'] as String? ?? '',
+          (e['value'] as num?)?.toDouble() ?? 0,
+          commit: e['commit'] == true,
+        ));
         break;
     }
+  }
+
+  Future<void> _winOpenInlineMore() async {
+    await KotvWinChrome.showSheet(
+      kind: 'more',
+      title: '更多',
+      items: [
+        KotvWinChrome.lineItem(
+          id: 'danmaku',
+          label: '弹幕',
+          toggle: true,
+          on: _danmakuOn,
+        ),
+        KotvWinChrome.lineItem(id: 'danmakuSettings', label: '弹幕设置'),
+        if (_danmakuSources.length > 1)
+          KotvWinChrome.lineItem(
+            id: 'danmakuSource',
+            label: '弹幕源',
+            trailing: _danmakuSources[_danmakuSourceIdx.clamp(0, _danmakuSources.length - 1)].name,
+          ),
+        KotvWinChrome.lineItem(id: 'danmakuSearch', label: '搜索弹幕'),
+        KotvWinChrome.lineItem(id: 'expandWindow', label: '铺满当前窗口', chevron: false),
+        KotvWinChrome.lineItem(id: 'expandDisplay', label: '占满整块屏幕', chevron: false),
+      ],
+    );
+  }
+
+  Future<void> _winOpenInlineDanmakuSettings() async {
+    await KotvWinChrome.showSheet(
+      kind: 'danmaku',
+      title: '弹幕设置',
+      items: KotvWinChrome.danmakuSheetItems(
+        danmakuOn: _danmakuOn,
+        showScroll: _danmakuShowScroll,
+        showTop: _danmakuShowTop,
+        showBottom: _danmakuShowBottom,
+        showReverse: _danmakuShowReverse,
+        showPositioned: _danmakuShowPositioned,
+        showSpecial: _danmakuShowSpecial,
+        bold: _danmakuBold,
+        fontSize: _danmakuSize,
+        opacity: _danmakuOpacity,
+        rows: _danmakuRows,
+        maxOnScreen: _danmakuMaxOnScreen,
+        scrollArea: _danmakuScrollArea,
+        durationMs: _danmakuDurationMs,
+        fixedDurationMs: _danmakuFixedDurationMs,
+      ),
+    );
+  }
+
+  Future<void> _onWinInlineSheet(String id, String kind) async {
+    if (id.isEmpty) return;
+    // fullscreenKind 由 pickFullscreenKind 拦截，此处忽略
+    if (kind == 'fullscreenKind') return;
+    if (kind == 'danmakuSource') {
+      final i = int.tryParse(id);
+      if (i != null) unawaited(_loadDanmakuSource(i, notify: true));
+      return;
+    }
+    // kind == more 的子项由 type=more 处理；此处兼容仅发 sheet 的路径
+    if (kind == 'more' || kind.isEmpty) {
+      await _onWinInlineMoreId(id);
+    }
+  }
+
+  Future<void> _onWinInlineMoreId(String id) async {
+    switch (id) {
+      case 'danmakuSettings':
+        await _winOpenInlineDanmakuSettings();
+        break;
+      case 'danmakuSource':
+        await KotvWinChrome.showChoiceSheet(
+          kind: 'danmakuSource',
+          title: '选择弹幕源',
+          options: [
+            for (var i = 0; i < _danmakuSources.length; i++)
+              ('$i', _danmakuSources[i].name),
+          ],
+          selectedId: '$_danmakuSourceIdx',
+        );
+        break;
+      case 'danmakuSearch':
+        // 搜索需输入框：用引擎侧已有流程；Win7 下对话框盖不住 HWND 时改走原生提示
+        await KotvWinChrome.showSheet(
+          kind: 'more',
+          title: '搜索弹幕',
+          items: [
+            KotvWinChrome.lineItem(
+              id: 'danmakuSearchGo',
+              label: '打开搜索（将暂时隐藏播控）',
+              chevron: false,
+            ),
+          ],
+        );
+        break;
+      case 'danmakuSearchGo':
+        // 藏原生壳再弹搜索，避免被 HWND/壳挡住
+        _unbindWinInlineChrome();
+        try {
+          await _searchDanmaku();
+        } finally {
+          if (mounted && !_immersiveFullscreen && _playUrl.isNotEmpty) {
+            _bindWinInlineChrome();
+          }
+        }
+        break;
+      case 'expandWindow':
+        await _enterFullscreen(KotvDesktopFullscreenKind.window);
+        break;
+      case 'expandDisplay':
+        await _enterFullscreen(KotvDesktopFullscreenKind.display);
+        break;
+    }
+  }
+
+  Future<void> _onWinInlineToggleItem(String id, bool on) async {
+    switch (id) {
+      case 'danmaku':
+        setState(() => _danmakuOn = on);
+        await _persistPlayerSetting('danmaku', on ? 'true' : 'false');
+        break;
+      case 'danmakuShowScroll':
+        setState(() => _danmakuShowScroll = on);
+        await _persistPlayerSetting(id, on ? 'true' : 'false');
+        break;
+      case 'danmakuShowTop':
+        setState(() => _danmakuShowTop = on);
+        await _persistPlayerSetting(id, on ? 'true' : 'false');
+        break;
+      case 'danmakuShowBottom':
+        setState(() => _danmakuShowBottom = on);
+        await _persistPlayerSetting(id, on ? 'true' : 'false');
+        break;
+      case 'danmakuShowReverse':
+        setState(() => _danmakuShowReverse = on);
+        await _persistPlayerSetting(id, on ? 'true' : 'false');
+        break;
+      case 'danmakuShowPositioned':
+        setState(() => _danmakuShowPositioned = on);
+        await _persistPlayerSetting(id, on ? 'true' : 'false');
+        break;
+      case 'danmakuShowSpecial':
+        setState(() => _danmakuShowSpecial = on);
+        await _persistPlayerSetting(id, on ? 'true' : 'false');
+        break;
+      case 'danmakuBold':
+        setState(() => _danmakuBold = on);
+        await _persistPlayerSetting(id, on ? 'true' : 'false');
+        break;
+    }
+    _syncWinInlineChrome();
+  }
+
+  Future<void> _onWinInlineSlider(String id, double value, {required bool commit}) async {
+    if (!commit) return;
+    switch (id) {
+      case 'volume':
+        final v = value.round().clamp(1, 100);
+        await _playback.setVolume(v.toDouble());
+        await _persistPlayerSetting('playerVolume', '$v');
+        break;
+      case 'danmakuSize':
+        setState(() => _danmakuSize = value);
+        await _persistPlayerSetting(id, '${value.round()}');
+        break;
+      case 'danmakuOpacity':
+        setState(() => _danmakuOpacity = (value / 100).clamp(0.15, 1.0));
+        await _persistPlayerSetting(id, _danmakuOpacity.toStringAsFixed(2));
+        break;
+      case 'danmakuRows':
+        setState(() => _danmakuRows = value.round().clamp(1, 16));
+        await _persistPlayerSetting(id, '$_danmakuRows');
+        break;
+      case 'danmakuMaxOnScreen':
+        setState(() => _danmakuMaxOnScreen = value.round().clamp(10, 500));
+        await _persistPlayerSetting(id, '$_danmakuMaxOnScreen');
+        break;
+      case 'danmakuScrollArea':
+        setState(() => _danmakuScrollArea = (value / 100).clamp(0.1, 1.0));
+        await _persistPlayerSetting(id, _danmakuScrollArea.toStringAsFixed(2));
+        break;
+      case 'danmakuDurationMs':
+        setState(() => _danmakuDurationMs = (value * 1000).round());
+        await _persistPlayerSetting(id, '$_danmakuDurationMs');
+        break;
+      case 'danmakuFixedDurationMs':
+        setState(() => _danmakuFixedDurationMs = (value * 1000).round());
+        await _persistPlayerSetting(id, '$_danmakuFixedDurationMs');
+        break;
+      default:
+        return;
+    }
+    _syncWinInlineChrome();
   }
 
   /// 播控（内嵌、迷你、全屏）设置落盘后按键名同步本页状态与当前播放器。

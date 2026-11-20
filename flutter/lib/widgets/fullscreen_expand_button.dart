@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 
 import '../player/fullscreen_mode.dart';
 import '../player/kotv_platform.dart';
+import '../player/kotv_win_chrome.dart';
 import '../player/tv_remote_keys.dart';
 import '../theme/kotv_theme.dart';
 import '../theme/layout_scale.dart';
@@ -85,6 +86,13 @@ class _KotvFullscreenExpandButtonState extends State<KotvFullscreenExpandButton>
   void _onTap() {
     if (!_offerDisplayChoice) {
       widget.onSelect(KotvDesktopFullscreenKind.window);
+      return;
+    }
+    // Win7：Flutter Overlay 会被库存 HWND 挡住，改走原生全屏选项弹层。
+    if (KotvWinChrome.isNeeded) {
+      KotvWinChrome.pickFullscreenKind().then((kind) {
+        if (kind != null) widget.onSelect(kind);
+      });
       return;
     }
     if (_open) {
