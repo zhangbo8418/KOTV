@@ -7,10 +7,10 @@ import 'danmaku_layer.dart';
 import 'kotv_platform.dart';
 import 'kotv_playback.dart';
 
-/// Win7 原生播控套壳：推送与事件收拢入口。
+/// Win7 原生播控套壳：推送 / 弹层 / 事件的唯一收拢入口。
 ///
-/// 库存引擎下子 HWND 盖住 Flutter，用原生层承接点播顶底栏/更多/弹幕设置/选播放器，
-/// 以及直播左栏（分组·频道·EPG）/右栏药丸设置/频道条。Win8+ DComp 不启用。
+/// 库存引擎下子 HWND 盖住 Flutter，原生层承接播控栏、EPG、弹层（更多 / 弹幕设置 /
+/// 选播放器 / 调色预设等）。Win8+ DComp 不启用本通道。
 class KotvWinChrome {
   KotvWinChrome._();
 
@@ -20,9 +20,54 @@ class KotvWinChrome {
   static int _lastDanmakuSig = 0;
   static int _ownerToken = 0;
 
+  static const vodSpeeds = <double>[0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 5.0];
+
+  static const videoEqPresets = <(String id, String label)>[
+    ('off', '关闭'),
+    ('natural', '自然'),
+    ('vivid', '鲜艳'),
+    ('soft', '柔和'),
+    ('cinema', '影院'),
+    ('warm', '暖色'),
+    ('cool', '冷色'),
+    ('anime', '动漫'),
+    ('custom', '自定义'),
+  ];
+
+  static const audioEqPresets = <(String id, String label)>[
+    ('off', '关闭'),
+    ('music', '音乐'),
+    ('movie', '电影'),
+    ('voice', '人声'),
+    ('custom', '自定义'),
+  ];
+
+  static const sleepOptions = <(String id, String label)>[
+    ('0', '关闭'),
+    ('15', '15 分钟'),
+    ('30', '30 分钟'),
+    ('45', '45 分钟'),
+    ('60', '60 分钟'),
+    ('90', '90 分钟'),
+  ];
+
+  static const decodeOptions = <(String id, String label)>[
+    ('auto', '自动'),
+    ('soft', '软解码'),
+    ('hard', '硬解码'),
+  ];
+
+  static const renderOptions = <(String id, String label)>[
+    ('surface', 'Surface（推荐，HDR）'),
+    ('texture', 'Texture'),
+  ];
+
   static bool get isNeeded => kotvUsesWindowsNativeChrome();
 
-  /// 更多 / 弹幕设置 / 选播放器等行项。
+  // ---------------------------------------------------------------------------
+  // 行模型
+  // ---------------------------------------------------------------------------
+
   static Map<String, dynamic> lineItem({
     required String id,
     required String label,
@@ -37,8 +82,181 @@ class KotvWinChrome {
         'trailing': trailing,
         'toggle': toggle,
         'on': on,
-        'chevron': chevron,
+        'chevron': !toggle && chevron,
+        'slider': false,
       };
+
+  static Map<String, dynamic> sliderItem({
+    required String id,
+    required String label,
+    required double value,
+    required double min,
+    required double max,
+    String trailing = '',
+  }) =>
+      {
+        'id': id,
+        'label': label,
+        'trailing': trailing.isEmpty ? '${value.round()}' : trailing,
+        'toggle': false,
+        'on': false,
+        'chevron': false,
+        'slider': true,
+        'value': value,
+        'min': min,
+        'max': max,
+      };
+
+  static List<Map<String, dynamic>> choiceItems(
+    List<(String id, String label)> options, {
+    String selectedId = '',
+  }) =>
+      [
+        for (final o in options)
+          lineItem(
+            id: o.$1,
+            label: o.$2,
+            chevron: false,
+            trailing: o.$1 == selectedId ? '✓' : '',
+          ),
+      ];
+
+  /// 对齐 Flutter `_showMore` 主路径（含可原生弹层承接的子项入口）。
+  static List<Map<String, dynamic>> vodMoreItems({
+    required double rate,
+    required bool danmakuOn,
+    required bool ambientOn,
+    required bool repeatOne,
+    required bool stableVolume,
+    required bool supportsStableVolume,
+    required bool loopSkip,
+    required int sleepMinutes,
+    required String keepLabel,
+    required String renderLabel,
+    required bool supportsRenderMode,
+    required bool canSwitchPlayer,
+    required int danmakuSourceCount,
+    required String danmakuSourceName,
+    bool hasDanmakuSearch = false,
+    bool hasCast = false,
+    bool hasMini = false,
+    bool hasParse = false,
+    bool hasKeep = false,
+  }) {
+    final rateLabel =
+        'x${rate.toStringAsFixed(rate == rate.roundToDouble() ? 0 : 1)}';
+    final sleepLabel = sleepMinutes <= 0 ? '关闭' : '$sleepMinutes 分钟';
+    return [
+      lineItem(id: 'videoEq', label: '画面调色'),
+      lineItem(id: 'audioFx', label: '音频效果'),
+      lineItem(id: 'repeat', label: '循环播放视频', toggle: true, on: repeatOne),
+      lineItem(id: 'ambient', label: '氛围模式', toggle: true, on: ambientOn),
+      if (supportsStableVolume)
+        lineItem(id: 'stableVolume', label: '稳定音量', toggle: true, on: stableVolume),
+      lineItem(id: 'loopSkip', label: '跳过片头片尾', toggle: true, on: loopSkip),
+      lineItem(id: 'danmakuSettings', label: '弹幕设置'),
+      if (danmakuSourceCount > 1)
+        lineItem(id: 'danmakuSource', label: '弹幕源', trailing: danmakuSourceName),
+      if (hasDanmakuSearch) lineItem(id: 'danmakuSearch', label: '搜索弹幕'),
+      lineItem(id: 'sleep', label: '休眠定时器', trailing: sleepLabel),
+      if (hasCast) lineItem(id: 'cast', label: '投屏'),
+      if (hasMini) lineItem(id: 'mini', label: '迷你桌面播放'),
+      if (hasParse) lineItem(id: 'parse', label: '解析'),
+      lineItem(id: 'replay', label: '刷新', chevron: false),
+      if (hasKeep) lineItem(id: 'keep', label: keepLabel),
+      if (supportsRenderMode) lineItem(id: 'render', label: '渲染方式', trailing: renderLabel),
+      lineItem(id: 'speed', label: '倍速', trailing: rateLabel),
+      if (canSwitchPlayer) lineItem(id: 'player', label: '选播放器'),
+      lineItem(id: 'danmaku', label: '弹幕', toggle: true, on: danmakuOn),
+      lineItem(id: 'episodes', label: '选集'),
+      lineItem(id: 'playInfo', label: '播放信息'),
+      lineItem(id: 'exit', label: '退出全屏', chevron: false),
+    ];
+  }
+
+  /// 弹幕设置：开关 + 主滑条（与 `danmaku_settings_sheet` 主路径字段对应）。
+  static List<Map<String, dynamic>> danmakuSheetItems({
+    required bool danmakuOn,
+    required bool showScroll,
+    required bool showTop,
+    required bool showBottom,
+    required bool showReverse,
+    required bool showPositioned,
+    required bool showSpecial,
+    required bool bold,
+    required double fontSize,
+    required double opacity,
+    required int rows,
+    required int maxOnScreen,
+    required double scrollArea,
+    required int durationMs,
+    required int fixedDurationMs,
+  }) =>
+      [
+        lineItem(id: 'danmaku', label: '开启弹幕', toggle: true, on: danmakuOn),
+        lineItem(id: 'danmakuShowScroll', label: '滚动弹幕', toggle: true, on: showScroll),
+        lineItem(id: 'danmakuShowTop', label: '顶部弹幕', toggle: true, on: showTop),
+        lineItem(id: 'danmakuShowBottom', label: '底部弹幕', toggle: true, on: showBottom),
+        lineItem(id: 'danmakuShowReverse', label: '逆向弹幕', toggle: true, on: showReverse),
+        lineItem(id: 'danmakuShowPositioned', label: '定位弹幕', toggle: true, on: showPositioned),
+        lineItem(id: 'danmakuShowSpecial', label: '特殊弹幕', toggle: true, on: showSpecial),
+        lineItem(id: 'danmakuBold', label: '粗体', toggle: true, on: bold),
+        sliderItem(
+          id: 'danmakuSize',
+          label: '字号',
+          value: fontSize.clamp(12, 48),
+          min: 12,
+          max: 48,
+        ),
+        sliderItem(
+          id: 'danmakuOpacity',
+          label: '透明度',
+          value: (opacity * 100).clamp(15, 100),
+          min: 15,
+          max: 100,
+          trailing: '${(opacity * 100).round()}%',
+        ),
+        sliderItem(
+          id: 'danmakuRows',
+          label: '行数',
+          value: rows.clamp(1, 16).toDouble(),
+          min: 1,
+          max: 16,
+        ),
+        sliderItem(
+          id: 'danmakuMaxOnScreen',
+          label: '同屏上限',
+          value: maxOnScreen.clamp(10, 500).toDouble(),
+          min: 10,
+          max: 500,
+        ),
+        sliderItem(
+          id: 'danmakuScrollArea',
+          label: '滚动区域',
+          value: (scrollArea * 100).clamp(10, 100),
+          min: 10,
+          max: 100,
+          trailing: '${(scrollArea * 100).round()}%',
+        ),
+        sliderItem(
+          id: 'danmakuDurationMs',
+          label: '滚动时长(秒)',
+          value: (durationMs / 1000).clamp(3, 15),
+          min: 3,
+          max: 15,
+        ),
+        sliderItem(
+          id: 'danmakuFixedDurationMs',
+          label: '固定时长(秒)',
+          value: (fixedDurationMs / 1000).clamp(2, 10),
+          min: 2,
+          max: 10,
+        ),
+      ];
+
+  // ---------------------------------------------------------------------------
+  // 通道
+  // ---------------------------------------------------------------------------
 
   static void _ensureHandler() {
     if (_handlerBound || kIsWeb) return;
@@ -54,7 +272,6 @@ class KotvWinChrome {
     });
   }
 
-  /// 绑定事件与启用原生层；返回 token，解绑时校验避免串页。
   static int bind(void Function(Map<String, dynamic>) handler) {
     if (!isNeeded) return 0;
     _ensureHandler();
@@ -112,7 +329,7 @@ class KotvWinChrome {
         'title': title,
         'subtitle': subtitle,
         'items': items,
-        'selected': selected,
+        'selected': selected < 0 ? 0 : selected,
       });
     } catch (_) {}
   }
@@ -122,6 +339,23 @@ class KotvWinChrome {
     try {
       await _ch.invokeMethod('hideSheet');
     } catch (_) {}
+  }
+
+  static Future<void> showChoiceSheet({
+    required String kind,
+    required String title,
+    required List<(String id, String label)> options,
+    String selectedId = '',
+    String subtitle = '',
+  }) {
+    final idx = options.indexWhere((o) => o.$1 == selectedId);
+    return showSheet(
+      kind: kind,
+      title: title,
+      subtitle: subtitle,
+      items: choiceItems(options, selectedId: selectedId),
+      selected: idx < 0 ? 0 : idx,
+    );
   }
 
   static String formatClock(Duration d) {
@@ -136,12 +370,12 @@ class KotvWinChrome {
     return '${m.toString().padLeft(2, '0')}:${r.toString().padLeft(2, '0')}';
   }
 
-  static String _wallClock() {
+  static String wallClock() {
     final n = DateTime.now();
     return '${n.hour.toString().padLeft(2, '0')}:${n.minute.toString().padLeft(2, '0')}';
   }
 
-  static String _endsAt(Duration pos, Duration dur) {
+  static String endsAtLabel(Duration pos, Duration dur) {
     if (dur.inMilliseconds <= 0) return '';
     final left = dur - pos;
     if (left.inSeconds <= 0) return '';
@@ -149,7 +383,13 @@ class KotvWinChrome {
     return 'Ends at ${end.hour.toString().padLeft(2, '0')}:${end.minute.toString().padLeft(2, '0')}';
   }
 
-  /// 点播全屏快照（顶/底/选集/中心/更多项/弹幕）。
+  static double nextSpeed(double cur) {
+    var i = vodSpeeds.indexWhere((s) => (s - cur).abs() < 0.01);
+    if (i < 0) i = 2;
+    return vodSpeeds[(i + 1) % vodSpeeds.length];
+  }
+
+  /// 点播全屏快照。
   static Future<void> pushVod({
     required KotvPlayback playback,
     required String title,
@@ -178,24 +418,25 @@ class KotvWinChrome {
     final progress = dur.inMilliseconds > 0
         ? (pos.inMilliseconds / dur.inMilliseconds).clamp(0.0, 1.0)
         : 0.0;
-    final rate = playback.rate;
-    final rateLabel =
-        'x${rate.toStringAsFixed(rate == rate.roundToDouble() ? 0 : 1)}';
-    final fields = <String, dynamic>{
+    final w = playback.width;
+    final h = playback.height;
+    final res = resolution.isNotEmpty
+        ? resolution
+        : (w > 0 && h > 0 ? '$w x $h' : '');
+    await update({
       'mode': 'vod',
       'title': title,
       'subtitle': subtitle,
-      if (resolution.isNotEmpty) 'resolution': resolution,
-      'clock': _wallClock(),
-      'endsAt': _endsAt(pos, dur),
+      if (res.isNotEmpty) 'resolution': res,
+      'clock': wallClock(),
+      'endsAt': endsAtLabel(pos, dur),
       'positionLabel': formatClock(pos),
       'durationLabel': formatClock(dur),
-      'bottomText': '${formatClock(pos)} / ${formatClock(dur)} · $rateLabel',
       'episodes': episodes,
       'episodeSelected': episodeSelected,
       'progress': progress,
       'positionSec': pos.inMilliseconds / 1000.0,
-      'rate': rate,
+      'rate': playback.rate,
       'playing': playback.playing,
       'buffering': playback.buffering || playback.stalling,
       'top': chromeVisible,
@@ -207,8 +448,7 @@ class KotvWinChrome {
       'channelVisible': false,
       'actions': const ['prev', 'toggle', 'next', 'more'],
       if (moreItems != null) 'moreItems': moreItems,
-    };
-    await update(fields);
+    });
     await setDanmaku(
       enabled: danmakuOn,
       items: danmakuItems,
@@ -224,14 +464,14 @@ class KotvWinChrome {
     );
   }
 
-  /// 直播快照（分组/频道/EPG/右设置药丸/频道条/弹幕）。
+  /// 直播快照。
   static Future<void> pushLive({
     required KotvPlayback playback,
     required String title,
     required String channelText,
     required List<String> liveLeft,
     required int liveLeftSelected,
-    required List<String> liveRight,
+    required List<Map<String, dynamic>> liveRightItems,
     required bool leftOpen,
     required bool rightOpen,
     required bool channelVisible,
@@ -248,12 +488,14 @@ class KotvWinChrome {
     String channelName = '',
     String channelProgram = '',
     String channelTicker = '',
-    List<Map<String, dynamic>>? liveRightItems,
     bool danmakuEnabled = true,
   }) async {
     if (!isNeeded) return;
     final pos = playback.position;
     final dur = playback.duration;
+    final rightLabels = [
+      for (final a in liveRightItems) '${a['label'] ?? ''}',
+    ];
     await update({
       'mode': 'live',
       'title': title,
@@ -264,8 +506,8 @@ class KotvWinChrome {
       if (channelTicker.isNotEmpty) 'channelTicker': channelTicker,
       'liveLeft': liveLeft,
       'liveLeftSelected': liveLeftSelected,
-      'liveRight': liveRight,
-      if (liveRightItems != null) 'liveRightItems': liveRightItems,
+      'liveRight': rightLabels,
+      'liveRightItems': liveRightItems,
       if (groups != null) 'groups': groups,
       'groupSelected': groupSelected,
       if (channels != null) 'channels': channels,
@@ -316,6 +558,10 @@ class KotvWinChrome {
       enabled,
       fontSize,
       rows,
+      showScroll,
+      showTop,
+      showBottom,
+      showReverse,
     );
     final itemsChanged = sig != _lastDanmakuSig;
     _lastDanmakuSig = sig;

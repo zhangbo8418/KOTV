@@ -24,6 +24,10 @@ class KotvWinChrome {
     bool toggle = false;
     bool on = false;
     bool chevron = false;
+    bool slider = false;
+    double slider_min = 0;
+    double slider_max = 100;
+    double slider_value = 0;
   };
 
   explicit KotvWinChrome(flutter::PluginRegistrarWindows* registrar);

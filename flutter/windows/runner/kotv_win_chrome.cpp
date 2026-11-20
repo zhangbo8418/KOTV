@@ -102,7 +102,11 @@ std::vector<KotvWinChrome::LineItem> ParseLineItems(const flutter::EncodableMap&
     item.trailing = Utf8ToWide(GetString(row, "trailing"));
     item.toggle = GetBool(row, "toggle");
     item.on = GetBool(row, "on");
-    item.chevron = GetBool(row, "chevron", true);
+    item.chevron = GetBool(row, "chevron", !GetBool(row, "toggle") && !GetBool(row, "slider"));
+    item.slider = GetBool(row, "slider");
+    item.slider_min = GetDouble(row, "min", 0);
+    item.slider_max = GetDouble(row, "max", 100);
+    item.slider_value = GetDouble(row, "value", item.slider_min);
     if (item.id.empty() && !item.label.empty()) {
       item.id = GetString(row, "label");
     }
@@ -344,12 +348,12 @@ void KotvWinChrome::LayoutModal() {
   POINT origin{0, 0};
   ClientToScreen(parent, &origin);
 
-  const bool light = sheet_kind_ == "danmaku";
+  const bool light = sheet_kind_ == "danmaku" || sheet_kind_ == "volume";
   const int rows = static_cast<int>(sheet_items_.size());
-  const int row_h = light ? 52 : 48;
-  const int header = light ? 52 : 40;
+  const int row_h = light ? 56 : 48;
+  const int header = light ? 52 : (sheet_subtitle_.empty() ? 40 : 54);
   const int h = std::min(kModalMaxH, header + rows * row_h + 24);
-  const int w = light ? 360 : kModalW;
+  const int w = light ? 380 : kModalW;
   const int x = origin.x + (prc.right - w) / 2;
   const int y = origin.y + (prc.bottom - h) / 2;
   SetLayeredWindowAttributes(modal_hwnd_, 0, light ? 245 : 230, LWA_ALPHA);
@@ -521,7 +525,7 @@ void KotvWinChrome::PaintLiveLeft(HDC hdc, const RECT& rc) {
   RECT ecol{rc.left + gW + cW, rc.top, rc.right - 4, rc.bottom - 36};
   // day tabs
   int tx = ecol.left + 4;
-  for (size_t i = 0; i < epg_days_.size() && i < 5; ++i) {
+    for (size_t i = 0; i < epg_days_.size() && i < 14; ++i) {
     RECT tab{tx, ecol.top + 6, tx + 52, ecol.top + 30};
     if (static_cast<int>(i) == epg_day_selected_) {
       FillRoundRect(hdc, tab, 6, Blend(kPink, kPanelDark, 0.45));
@@ -597,34 +601,53 @@ void KotvWinChrome::PaintCenter(HDC hdc, const RECT& rc) {
 }
 
 void KotvWinChrome::PaintModal(HDC hdc, const RECT& rc) {
-  const bool light = sheet_kind_ == "danmaku";
+  const bool light = sheet_kind_ == "danmaku" || sheet_kind_ == "volume";
   FillRoundRect(hdc, rc, 16, light ? kSheetLight : Blend(kPanelDark, RGB(0, 0, 0), 0.05));
 
   if (light) {
     RECT title{rc.left + 16, rc.top + 12, rc.right - 48, rc.top + 40};
-    DrawTextLine(hdc, title, sheet_title_.empty() ? L"弹幕设置" : sheet_title_, RGB(30, 30, 36), 16,
-                 true);
+    DrawTextLine(hdc, title,
+                 sheet_title_.empty() ? (sheet_kind_ == "volume" ? L"音量" : L"弹幕设置") : sheet_title_,
+                 RGB(30, 30, 36), 16, true);
     RECT close{rc.right - 40, rc.top + 10, rc.right - 12, rc.top + 38};
     DrawTextLine(hdc, close, L"✕", RGB(90, 90, 100), 16, true, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 
     for (size_t i = 0; i < sheet_items_.size(); ++i) {
       const auto& it = sheet_items_[i];
-      const int y = rc.top + 52 + static_cast<int>(i) * 52;
-      RECT row{rc.left + 16, y, rc.right - 16, y + 44};
+      const int y = rc.top + 52 + static_cast<int>(i) * 56;
+      RECT row{rc.left + 16, y, rc.right - 16, y + 48};
       DrawTextLine(hdc, row, it.label, RGB(40, 40, 48), 13, false,
-                   DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+                   DT_LEFT | DT_TOP | DT_SINGLELINE);
       if (it.toggle) {
-        RECT sw{rc.right - 70, y + 10, rc.right - 24, y + 34};
+        RECT sw{rc.right - 70, y + 12, rc.right - 24, y + 36};
         FillRoundRect(hdc, sw, 12, it.on ? kGreenOn : RGB(200, 200, 208));
         const int knob_x = it.on ? sw.right - 22 : sw.left + 2;
+        HBRUSH white = CreateSolidBrush(RGB(255, 255, 255));
+        HGDIOBJ old = SelectObject(hdc, white);
+        HPEN pen = CreatePen(PS_NULL, 0, 0);
+        HGDIOBJ oldp = SelectObject(hdc, pen);
         Ellipse(hdc, knob_x, sw.top + 2, knob_x + 20, sw.bottom - 2);
-      } else if (!it.trailing.empty()) {
-        RECT tr{rc.right - 100, y, rc.right - 24, y + 44};
-        DrawTextLine(hdc, tr, it.trailing, RGB(100, 100, 110), 12, false,
-                     DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
-        // 简易滑条示意
-        RECT track{rc.left + 16, y + 34, rc.right - 16, y + 38};
+        SelectObject(hdc, old);
+        SelectObject(hdc, oldp);
+        DeleteObject(white);
+        DeleteObject(pen);
+      } else if (it.slider) {
+        const double span = std::max(1e-6, it.slider_max - it.slider_min);
+        const double t = std::clamp((it.slider_value - it.slider_min) / span, 0.0, 1.0);
+        RECT tr{rc.right - 72, y, rc.right - 16, y + 22};
+        DrawTextLine(hdc, tr, it.trailing.empty() ? Utf8ToWide(std::to_string(static_cast<int>(std::lround(it.slider_value)))) : it.trailing,
+                     RGB(100, 100, 110), 12, false, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+        RECT track{rc.left + 16, y + 30, rc.right - 16, y + 36};
         FillRoundRect(hdc, track, 2, RGB(210, 210, 218));
+        const int filled = static_cast<int>((track.right - track.left) * t);
+        RECT prog{track.left, track.top, track.left + filled, track.bottom};
+        FillRoundRect(hdc, prog, 2, kPink);
+        const int knob = track.left + filled;
+        Ellipse(hdc, knob - 6, track.top - 4, knob + 6, track.bottom + 4);
+      } else if (!it.trailing.empty() || it.chevron) {
+        RECT trail{rc.right - 100, y, rc.right - 16, y + 44};
+        DrawTextLine(hdc, trail, it.trailing.empty() ? L"›" : it.trailing, RGB(100, 100, 110), 12, false,
+                     DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
       }
     }
     return;
@@ -820,49 +843,66 @@ LRESULT KotvWinChrome::OnModalMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM
       EndPaint(hwnd, &ps);
       return 0;
     }
+    case WM_LBUTTONDOWN:
     case WM_LBUTTONUP: {
       const int x = LOWORD(lParam);
       const int y = HIWORD(lParam);
       RECT rc{};
       GetClientRect(hwnd, &rc);
-      const bool light = sheet_kind_ == "danmaku";
-      if (light && x > rc.right - 48 && y < 48) {
+      const bool light = sheet_kind_ == "danmaku" || sheet_kind_ == "volume";
+      if (msg == WM_LBUTTONUP && light && x > rc.right - 48 && y < 48) {
         CloseSheet();
         Emit({{EncodableValue("type"), EncodableValue("sheetClose")},
-              {EncodableValue("kind"), EncodableValue(std::string("danmaku"))}});
+              {EncodableValue("kind"), EncodableValue(sheet_kind_)}});
         return 0;
       }
       const int header = light ? 52 : (sheet_subtitle_.empty() ? 40 : 54);
-      const int row_h = light ? 52 : 48;
-      if (y >= header) {
-        const int idx = (y - header) / row_h;
-        if (idx >= 0 && idx < static_cast<int>(sheet_items_.size())) {
-          sheet_selected_ = idx;
-          const auto& it = sheet_items_[idx];
-          if (it.toggle) {
-            sheet_items_[idx].on = !sheet_items_[idx].on;
-            Emit({{EncodableValue("type"), EncodableValue("toggleItem")},
-                  {EncodableValue("id"), EncodableValue(it.id)},
-                  {EncodableValue("on"), EncodableValue(sheet_items_[idx].on)},
-                  {EncodableValue("sheet"), EncodableValue(sheet_kind_)}});
-            InvalidateRect(hwnd, nullptr, TRUE);
-          } else if (sheet_kind_ == "player") {
-            Emit({{EncodableValue("type"), EncodableValue("pickPlayer")},
-                  {EncodableValue("id"), EncodableValue(it.id)}});
-            CloseSheet();
-          } else if (sheet_kind_ == "more" || sheet_kind_ == "danmaku") {
-            Emit({{EncodableValue("type"), EncodableValue("more")},
-                  {EncodableValue("id"), EncodableValue(it.id)},
-                  {EncodableValue("sheet"), EncodableValue(sheet_kind_)}});
-            if (!it.toggle) CloseSheet();
-          } else {
-            Emit({{EncodableValue("type"), EncodableValue("sheet")},
-                  {EncodableValue("id"), EncodableValue(it.id)},
-                  {EncodableValue("kind"), EncodableValue(sheet_kind_)}});
-            CloseSheet();
-          }
-        }
+      const int row_h = light ? 56 : 48;
+      if (y < header) return 0;
+      const int idx = (y - header) / row_h;
+      if (idx < 0 || idx >= static_cast<int>(sheet_items_.size())) return 0;
+      sheet_selected_ = idx;
+      auto& it = sheet_items_[idx];
+      if (it.slider) {
+        const int track_l = rc.left + 16;
+        const int track_r = rc.right - 16;
+        const double t = std::clamp((x - track_l) / std::max(1.0, static_cast<double>(track_r - track_l)), 0.0, 1.0);
+        it.slider_value = it.slider_min + t * (it.slider_max - it.slider_min);
+        Emit({{EncodableValue("type"), EncodableValue("slider")},
+              {EncodableValue("id"), EncodableValue(it.id)},
+              {EncodableValue("value"), EncodableValue(it.slider_value)},
+              {EncodableValue("commit"), EncodableValue(msg == WM_LBUTTONUP)},
+              {EncodableValue("sheet"), EncodableValue(sheet_kind_)}});
+        InvalidateRect(hwnd, nullptr, TRUE);
+        return 0;
       }
+      if (msg != WM_LBUTTONUP) return 0;
+      if (it.toggle) {
+        it.on = !it.on;
+        Emit({{EncodableValue("type"), EncodableValue("toggleItem")},
+              {EncodableValue("id"), EncodableValue(it.id)},
+              {EncodableValue("on"), EncodableValue(it.on)},
+              {EncodableValue("sheet"), EncodableValue(sheet_kind_)}});
+        InvalidateRect(hwnd, nullptr, TRUE);
+        return 0;
+      }
+      if (sheet_kind_ == "player") {
+        Emit({{EncodableValue("type"), EncodableValue("pickPlayer")},
+              {EncodableValue("id"), EncodableValue(it.id)}});
+        CloseSheet();
+        return 0;
+      }
+      // more 菜单用 type=more；子选择表（调色/倍速等）用 type=sheet
+      if (sheet_kind_ == "more") {
+        Emit({{EncodableValue("type"), EncodableValue("more")},
+              {EncodableValue("id"), EncodableValue(it.id)},
+              {EncodableValue("sheet"), EncodableValue(sheet_kind_)}});
+      } else {
+        Emit({{EncodableValue("type"), EncodableValue("sheet")},
+              {EncodableValue("id"), EncodableValue(it.id)},
+              {EncodableValue("kind"), EncodableValue(sheet_kind_)}});
+      }
+      CloseSheet();
       return 0;
     }
     case WM_ERASEBKGND:

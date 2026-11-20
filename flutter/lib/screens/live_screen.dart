@@ -609,8 +609,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
 
   int _winChromeToken = 0;
 
-  /// 与 Flutter 右栏主操作同序；原生列表点选按 index 映射。
+  /// 与 Flutter 右栏药丸同序；原生列表点选按 index → id。
   List<({String id, String label})> _winLiveRightActions() {
+    final vol = _playback.volume.clamp(1, 100).round();
     final out = <({String id, String label})>[
       (id: 'prevCh', label: '上一频道'),
       (id: 'nextCh', label: '下一频道'),
@@ -640,6 +641,16 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         label: '渲染 · ${kotvPlayerRenderLabel(_renderMode)}',
       ));
     }
+    out.add((id: 'volume', label: '音量 · $vol'));
+    out.add((id: 'settings', label: '打开设置页'));
+    for (var i = 0; i < _sources.length; i++) {
+      final name = _sources.length == 1
+          ? '刷新'
+          : '${_sources[i]['name'] ?? _sources[i]['url']}';
+      final cur = _sources.length > 1 && (_sources[i]['current'] == true || i == _srcIdx);
+      out.add((id: 'source:$i', label: cur ? '$name（当前）' : name));
+    }
+    out.add((id: 'configureSources', label: '配置直播源'));
     out.add((id: 'close', label: '关闭面板'));
     return out;
   }
@@ -734,10 +745,48 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
           case 'render':
             unawaited(_pickRender());
             break;
+          case 'volume':
+            unawaited(_winShowVolumeSheet());
+            break;
+          case 'settings':
+            goKotvPage(ref, KotvPage.settings);
+            break;
+          case 'configureSources':
+            unawaited(() async {
+              await showLivePicker(context, ref);
+              await _bootstrap(forceLoad: true);
+            }());
+            break;
           case 'close':
             setState(() => _rightOpen = false);
             _syncWinChrome();
             break;
+          default:
+            if (acts[idx].id.startsWith('source:')) {
+              final i = int.tryParse(acts[idx].id.substring(7)) ?? -1;
+              if (i >= 0 && i < _sources.length) {
+                unawaited(_loadSource(
+                  i,
+                  autoPlay: true,
+                  force: _sources.length == 1 || i == _srcIdx,
+                ));
+              }
+            }
+            break;
+        }
+        break;
+      case 'pickPlayer':
+        unawaited(_winApplyPickedPlayer(e['id'] as String? ?? ''));
+        break;
+      case 'sheet':
+        unawaited(_onWinLiveSheet(e['id'] as String? ?? '', e['kind'] as String? ?? ''));
+        break;
+      case 'slider':
+        if (e['id'] == 'volume' && e['commit'] == true) {
+          final v = ((e['value'] as num?)?.toDouble() ?? 50).round().clamp(1, 100);
+          unawaited(_playback.setVolume(v.toDouble()));
+          unawaited(_persistLiveSetting('playerVolume', '$v'));
+          _syncWinChrome();
         }
         break;
       case 'toggle':
@@ -751,15 +800,119 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     }
   }
 
+  Future<void> _winShowVolumeSheet() async {
+    final vol = _playback.volume.clamp(1, 100).toDouble();
+    await KotvWinChrome.showSheet(
+      kind: 'volume',
+      title: '音量',
+      items: [
+        KotvWinChrome.sliderItem(
+          id: 'volume',
+          label: '音量',
+          value: vol,
+          min: 1,
+          max: 100,
+        ),
+      ],
+    );
+  }
+
+  Future<void> _onWinLiveSheet(String id, String kind) async {
+    if (id.isEmpty) return;
+    switch (kind) {
+      case 'player':
+        await _winApplyPickedPlayer(id);
+        break;
+      case 'decode':
+        final prev = _decodeMode;
+        final pos = _playUrl.isNotEmpty ? _playback.position : Duration.zero;
+        setState(() {
+          _decodeMode = id;
+          _prefDecodeMode = id;
+        });
+        if (_backend == KotvEmbedBackend.mpv &&
+            kotvMpvNeedsNewPlayer(
+              _mpvOpts.copyWith(decodeMode: prev),
+              _mpvOpts.copyWith(decodeMode: id),
+            )) {
+          await _releaseMpv();
+        } else {
+          await _playback.setDecodeMode(id);
+        }
+        try {
+          await _persistLiveSetting('playerDecode', id);
+        } catch (_) {}
+        await _reopenCurrent(pos);
+        break;
+      case 'render':
+        setState(() => _renderMode = id);
+        try {
+          await _persistLiveSetting('playerRender', id);
+        } catch (_) {}
+        break;
+    }
+    _syncWinChrome();
+  }
+
+  Future<void> _winApplyPickedPlayer(String id) async {
+    if (id.isEmpty) return;
+    final v = kotvClampPlayerVal(id, live: true);
+    final prev = _prefPlayerVal;
+    if (v != prev && flutterIsEmbedPlayer(v)) {
+      await _stopInactiveBackends(kotvEmbedBackend(v));
+      if (!mounted) return;
+    }
+    setState(() {
+      _playerVal = v;
+      _prefPlayerVal = v;
+    });
+    try {
+      await _persistLiveSetting('playerLive', v);
+    } catch (_) {}
+    if (kotvIsExternalPlayer(v) && _playUrl.isNotEmpty) {
+      try {
+        await _playback.pause();
+        if (!mounted) return;
+        final result = await kotvLaunchExternalPlayer(
+          player: v,
+          url: _playUrl,
+          headers: _playHeaders,
+          title: _title,
+          vod: false,
+          context: context,
+        );
+        if (!mounted) return;
+        if (!result.opened) {
+          await _playback.play();
+          return;
+        }
+      } catch (_) {}
+      return;
+    }
+    if (v != prev && _playUrl.isNotEmpty && flutterIsEmbedPlayer(v)) {
+      final pos = _playback.position;
+      final serial = ++_playSerial;
+      await _openLiveUrl(
+        _playUrl,
+        serial: serial,
+        directUrl: _playDirect,
+        headers: _playHeaders,
+        drm: _playDrm,
+        live: true,
+        startAt: pos > Duration.zero ? pos : Duration.zero,
+      );
+    }
+    _syncWinChrome();
+  }
+
   void _syncWinChrome() {
     if (!KotvWinChrome.isNeeded || !mounted) return;
     final chs = _channels;
     final left = [
       for (var i = 0; i < chs.length; i++)
-        '${chs[i]['number'] ?? chs[i]['n'] ?? (i + 1)}  ${chs[i]['name'] ?? ''}',
+        '${_channelNumberLabel(chs[i], i)}  ${chs[i]['name'] ?? ''}',
     ];
     final acts = _winLiveRightActions();
-    final right = [for (final a in acts) a.label];
     final rightItems = [
       for (final a in acts)
         KotvWinChrome.lineItem(id: a.id, label: a.label, chevron: false),
@@ -781,15 +934,23 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         ].join('  '),
     ];
     final chName = _playChName.isEmpty ? _title : _playChName;
+    final playing = _playingChannel;
+    final channelNo = playing == null ? (_chIdx >= 0 ? '${_chIdx + 1}' : '') : _channelNumberLabel(playing, _playChIdx);
     var progTitle = '';
+    var progTime = '';
     for (final p in _programs) {
       if (p['now'] == true) {
         progTitle = '${p['title'] ?? p['label'] ?? ''}'.trim();
+        final start = '${p['start'] ?? ''}'.trim();
+        final end = '${p['end'] ?? ''}'.trim();
+        if (start.isNotEmpty || end.isNotEmpty) {
+          progTime = end.isEmpty ? start : '$start~$end';
+        }
         break;
       }
     }
     final channelText = [
-      if (_chIdx >= 0) '#${_chIdx + 1}',
+      if (channelNo.isNotEmpty) '#$channelNo',
       chName,
       if (_lineName.isNotEmpty) _lineName,
       if (_status.isNotEmpty) _status,
@@ -800,7 +961,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       channelText: channelText,
       liveLeft: left,
       liveLeftSelected: _chIdx,
-      liveRight: right,
       liveRightItems: rightItems,
       leftOpen: _leftOpen,
       rightOpen: _rightOpen,
@@ -813,10 +973,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       epgDaySelected: _dayIdx,
       epgPrograms: epgPrograms,
       epgProgramSelected: _epgHighlightIndex(),
-      channelNo: _chIdx >= 0 ? '${_chIdx + 1}' : '',
+      channelNo: channelNo,
       channelName: chName,
-      channelProgram: progTitle,
-      channelTicker: _lineName.isNotEmpty ? _lineName : _status,
+      channelProgram: progTime.isEmpty ? progTitle : '$progTime  $progTitle',
+      channelTicker: _lineLabel.isNotEmpty ? _lineLabel : (_lineName.isNotEmpty ? _lineName : _status),
       danmakuItems: _danmakuItems.value,
     ));
   }
@@ -2938,6 +3098,15 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   }
 
   Future<void> _pickDecode() async {
+    if (KotvWinChrome.isNeeded) {
+      await KotvWinChrome.showChoiceSheet(
+        kind: 'decode',
+        title: '解码方式',
+        options: KotvWinChrome.decodeOptions,
+        selectedId: _decodeMode,
+      );
+      return;
+    }
     final v = await pickChoice(context, title: '解码方式', current: _decodeMode, options: const [
       ('自动', 'auto'),
       ('软解码', 'soft'),
@@ -2982,6 +3151,15 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   }
 
   Future<void> _pickRender() async {
+    if (KotvWinChrome.isNeeded) {
+      await KotvWinChrome.showChoiceSheet(
+        kind: 'render',
+        title: '渲染方式',
+        options: KotvWinChrome.renderOptions,
+        selectedId: _renderMode,
+      );
+      return;
+    }
     final v = await pickChoice(context, title: '渲染方式', current: _renderMode, options: const [
       ('Surface（推荐，HDR）', 'surface'),
       ('Texture', 'texture'),
@@ -3008,6 +3186,24 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         playerStatus: () => ref.read(apiProvider).playerStatus(),
       );
       if (!navCtx.mounted || !mounted) return;
+      if (KotvWinChrome.isNeeded) {
+        await KotvWinChrome.showSheet(
+          kind: 'player',
+          title: '直播播放器',
+          subtitle: '当前：${flutterPlayerLabel(_prefPlayerVal)}',
+          items: [
+            for (final o in options)
+              KotvWinChrome.lineItem(
+                id: o.$2,
+                label: o.$1,
+                chevron: false,
+                trailing: o.$2 == _prefPlayerVal ? '✓' : '',
+              ),
+          ],
+          selected: options.indexWhere((o) => o.$2 == _prefPlayerVal).clamp(0, options.isEmpty ? 0 : options.length - 1),
+        );
+        return;
+      }
       final v = await pickChoice(navCtx, title: '直播播放器', current: _prefPlayerVal, options: options);
       if (v == null || !mounted) return;
       final prev = _prefPlayerVal;

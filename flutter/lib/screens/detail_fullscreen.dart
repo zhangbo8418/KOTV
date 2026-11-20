@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../player/danmaku_layer.dart';
+import '../player/external_player.dart';
 import '../player/fullscreen_mode.dart';
 import '../player/fullscreen_gesture.dart';
 import '../player/kotv_playback.dart';
@@ -14,6 +15,7 @@ import '../player/kotv_platform.dart';
 import '../player/kotv_win_chrome.dart';
 import '../player/native_mpv_playback.dart';
 import '../player/tv_remote_keys.dart';
+import '../remote/remote_bridge.dart';
 import '../theme/kotv_theme.dart';
 import '../theme/layout_scale.dart';
 import '../widgets/buffering_overlay.dart';
@@ -319,98 +321,112 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     });
   }
 
-  static const _winSpeeds = <double>[0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 5.0];
   int _winChromeToken = 0;
+  int _winSleepMinutes = 0;
+  Timer? _winSleepTimer;
+  bool _winStableVolume = false;
+  bool _winLoopSkip = true;
+  String _winKeepLabel = '收藏';
 
   void _bindWinChrome() {
     if (!KotvWinChrome.isNeeded) return;
+    _winStableVolume = widget.stableVolumeOn;
+    _winKeepLabel = widget.keepLabel;
     _winChromeToken = KotvWinChrome.bind(_onWinChromeEvent);
     _syncWinChrome();
   }
 
   List<Map<String, dynamic>> _winMoreItems() {
-    final rate = widget.playback.rate;
-    final rateLabel =
-        'x${rate.toStringAsFixed(rate == rate.roundToDouble() ? 0 : 1)}';
-    return [
-      KotvWinChrome.lineItem(id: 'speed', label: '倍速', trailing: rateLabel),
-      KotvWinChrome.lineItem(
-        id: 'danmaku',
-        label: '弹幕',
-        toggle: true,
-        on: _danmakuOn,
-        chevron: false,
-      ),
-      KotvWinChrome.lineItem(id: 'danmakuSettings', label: '弹幕设置'),
-      KotvWinChrome.lineItem(
-        id: 'ambient',
-        label: '氛围模式',
-        toggle: true,
-        on: _ambientOn,
-        chevron: false,
-      ),
-      KotvWinChrome.lineItem(
-        id: 'repeat',
-        label: '循环播放',
-        toggle: true,
-        on: widget.playback.repeatOne,
-        chevron: false,
-      ),
-      KotvWinChrome.lineItem(id: 'episodes', label: '选集'),
-      if (widget.onCast != null) KotvWinChrome.lineItem(id: 'cast', label: '投屏'),
-      if (widget.onMini != null) KotvWinChrome.lineItem(id: 'mini', label: '迷你桌面播放'),
-      if (widget.onExternalPlayer != null)
-        KotvWinChrome.lineItem(id: 'player', label: '选播放器'),
-      KotvWinChrome.lineItem(id: 'replay', label: '刷新', chevron: false),
-    ];
+    final srcIdx = widget.danmakuSourceIdx.clamp(0, widget.danmakuSources.isEmpty ? 0 : widget.danmakuSources.length - 1);
+    final srcName = widget.danmakuSources.isEmpty ? '' : widget.danmakuSources[srcIdx].name;
+    final renderLabel = _renderMode == 'texture' ? 'Texture' : 'Surface（推荐，HDR）';
+    return KotvWinChrome.vodMoreItems(
+      rate: widget.playback.rate,
+      danmakuOn: _danmakuOn,
+      ambientOn: _ambientOn,
+      repeatOne: widget.playback.repeatOne,
+      stableVolume: _winStableVolume,
+      supportsStableVolume: widget.playback.supportsStableVolume,
+      loopSkip: _winLoopSkip,
+      sleepMinutes: _winSleepMinutes,
+      keepLabel: _winKeepLabel,
+      renderLabel: renderLabel,
+      supportsRenderMode: widget.playback.supportsRenderMode,
+      canSwitchPlayer: kotvCanSwitchPlayer(live: false),
+      danmakuSourceCount: widget.danmakuSources.length,
+      danmakuSourceName: srcName,
+      hasDanmakuSearch: widget.onDanmakuSearch != null,
+      hasCast: widget.onCast != null,
+      hasMini: widget.onMini != null,
+      hasParse: widget.onParse != null,
+      hasKeep: widget.onToggleKeep != null,
+    );
+  }
+
+  Future<void> _winPersist(String key, String value) async {
+    await widget.onPersistSetting?.call(key, value);
   }
 
   Future<void> _winOpenDanmakuSettings() async {
     await KotvWinChrome.showSheet(
       kind: 'danmaku',
       title: '弹幕设置',
-      items: [
-        KotvWinChrome.lineItem(
-          id: 'danmaku',
-          label: '开启弹幕',
-          toggle: true,
-          on: _danmakuOn,
-          chevron: false,
-        ),
-        KotvWinChrome.lineItem(
-          id: 'danmakuScroll',
-          label: '滚动弹幕',
-          toggle: true,
-          on: widget.danmakuShowScroll,
-          chevron: false,
-        ),
-        KotvWinChrome.lineItem(
-          id: 'danmakuTop',
-          label: '顶部弹幕',
-          toggle: true,
-          on: widget.danmakuShowTop,
-          chevron: false,
-        ),
-        KotvWinChrome.lineItem(
-          id: 'danmakuBottom',
-          label: '底部弹幕',
-          toggle: true,
-          on: widget.danmakuShowBottom,
-          chevron: false,
-        ),
-        KotvWinChrome.lineItem(
-          id: 'danmakuMore',
-          label: '更多设置…',
-          chevron: true,
-        ),
-      ],
+      items: KotvWinChrome.danmakuSheetItems(
+        danmakuOn: _danmakuOn,
+        showScroll: widget.danmakuShowScroll,
+        showTop: widget.danmakuShowTop,
+        showBottom: widget.danmakuShowBottom,
+        showReverse: widget.danmakuShowReverse,
+        showPositioned: widget.danmakuShowPositioned,
+        showSpecial: widget.danmakuShowSpecial,
+        bold: widget.danmakuBold,
+        fontSize: widget.danmakuSize,
+        opacity: widget.danmakuOpacity,
+        rows: widget.danmakuRows,
+        maxOnScreen: widget.danmakuMaxOnScreen,
+        scrollArea: widget.danmakuScrollArea,
+        durationMs: widget.danmakuDurationMs,
+        fixedDurationMs: widget.danmakuFixedDurationMs,
+      ),
     );
   }
 
   Future<void> _winOpenPlayerPicker() async {
-    await KotvWinChrome.hideSheet();
-    // 外部列表等复杂子页：Flutter sheet 兜底
-    await _chromeKey.currentState?.openPlayerPicker();
+    if (!kotvCanSwitchPlayer(live: false)) return;
+    Map<String, dynamic> status = {};
+    try {
+      status = await widget.onPlayerStatus?.call() ?? {};
+    } catch (_) {}
+    final cur = kotvClampPlayerVal('${status['current'] ?? ''}'.trim(), live: false);
+    final opts = await kotvInstalledPlayerOptions(live: false, engineStatus: status);
+    if (!mounted) return;
+    await KotvWinChrome.showSheet(
+      kind: 'player',
+      title: '请选择播放器',
+      subtitle: '当前：${flutterPlayerLabel(cur)}',
+      items: [
+        for (final o in opts)
+          KotvWinChrome.lineItem(
+            id: o.$2,
+            label: o.$1,
+            chevron: false,
+            trailing: o.$2 == cur ? '✓' : '',
+          ),
+      ],
+      selected: opts.indexWhere((o) => o.$2 == cur).clamp(0, opts.isEmpty ? 0 : opts.length - 1),
+    );
+  }
+
+  Future<void> _winApplyPlayer(String id) async {
+    final next = kotvClampPlayerVal(id, live: false);
+    await _winPersist('player', next);
+    if (kotvIsExternalPlayer(next)) {
+      final opened = await widget.onExternalPlayer?.call(next);
+      if (opened == false) return;
+      unawaited(_exitFullscreen());
+      return;
+    }
+    _syncWinChrome();
   }
 
   void _onWinChromeEvent(Map<String, dynamic> e) {
@@ -442,11 +458,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
         }());
         break;
       case 'speed':
-        final cur = widget.playback.rate;
-        var i = _winSpeeds.indexWhere((s) => (s - cur).abs() < 0.01);
-        if (i < 0) i = 2;
-        final next = _winSpeeds[(i + 1) % _winSpeeds.length];
-        unawaited(widget.playback.setRate(next));
+        unawaited(widget.playback.setRate(KotvWinChrome.nextSpeed(widget.playback.rate)));
         break;
       case 'episodes':
         _toggleEpisodes();
@@ -462,13 +474,23 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
         }
         break;
       case 'more':
-        _onWinMore(e['id'] as String? ?? '');
+      case 'sheet':
+        _onWinSheet(e['id'] as String? ?? '', e['kind'] as String? ?? e['sheet'] as String? ?? '');
         break;
       case 'toggleItem':
-        _onWinToggleItem(e['id'] as String? ?? '', e['on'] == true);
+        unawaited(_onWinToggleItem(e['id'] as String? ?? '', e['on'] == true));
+        break;
+      case 'slider':
+        unawaited(_onWinSlider(
+          e['id'] as String? ?? '',
+          (e['value'] as num?)?.toDouble() ?? 0,
+          commit: e['commit'] == true,
+        ));
         break;
       case 'pickPlayer':
-        unawaited(_winOpenPlayerPicker());
+        unawaited(_winApplyPlayer(e['id'] as String? ?? ''));
+        break;
+      case 'sheetClose':
         break;
       case 'exit':
       case 'back':
@@ -477,43 +499,173 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     }
   }
 
-  void _onWinToggleItem(String id, bool on) {
+  Future<void> _onWinToggleItem(String id, bool on) async {
     switch (id) {
       case 'danmaku':
         setState(() => _danmakuOn = on);
+        await _winPersist('danmaku', on ? 'true' : 'false');
+        widget.onDanmakuSettingsChanged?.call();
         break;
       case 'ambient':
         setState(() => _ambientOn = on);
         widget.onAmbientChanged?.call(on);
+        await _winPersist('playerAmbient', on ? 'true' : 'false');
         break;
       case 'repeat':
         widget.onRepeatOneChanged?.call(on);
+        break;
+      case 'stableVolume':
+        setState(() => _winStableVolume = on);
+        await _winPersist('playerStableVolume', on ? 'true' : 'false');
+        break;
+      case 'loopSkip':
+        setState(() => _winLoopSkip = on);
+        await _winPersist('playerSkipOpeningEnding', on ? 'true' : 'false');
+        break;
+      case 'danmakuShowScroll':
+      case 'danmakuShowTop':
+      case 'danmakuShowBottom':
+      case 'danmakuShowReverse':
+      case 'danmakuShowPositioned':
+      case 'danmakuShowSpecial':
+      case 'danmakuBold':
+        await _winPersist(id, on ? 'true' : 'false');
+        widget.onDanmakuSettingsChanged?.call();
         break;
     }
     _syncWinChrome();
   }
 
-  void _onWinMore(String id) {
+  Future<void> _onWinSlider(String id, double value, {required bool commit}) async {
+    if (!commit) return;
+    switch (id) {
+      case 'danmakuSize':
+        await _winPersist(id, '${value.round()}');
+        break;
+      case 'danmakuOpacity':
+        await _winPersist(id, (value / 100).toStringAsFixed(2));
+        break;
+      case 'danmakuRows':
+      case 'danmakuMaxOnScreen':
+        await _winPersist(id, '${value.round()}');
+        break;
+      case 'danmakuScrollArea':
+        await _winPersist(id, (value / 100).toStringAsFixed(2));
+        break;
+      case 'danmakuDurationMs':
+        await _winPersist(id, '${(value * 1000).round()}');
+        break;
+      case 'danmakuFixedDurationMs':
+        await _winPersist(id, '${(value * 1000).round()}');
+        break;
+      default:
+        return;
+    }
+    widget.onDanmakuSettingsChanged?.call();
+    _syncWinChrome();
+  }
+
+  void _onWinSheet(String id, String kind) {
+    if (id.isEmpty) return;
+    if (kind == 'player' || id.startsWith('outie#') || id == 'mpv' || id == 'fvp' || id == 'exo' || id == 'html') {
+      // pickPlayer 已处理；sheet 双发时忽略
+    }
+    switch (kind) {
+      case 'videoEq':
+        unawaited(_winPersist('videoEq', id));
+        widget.onDanmakuSettingsChanged?.call();
+        return;
+      case 'audioFx':
+        unawaited(_winPersist('audioEq', id));
+        return;
+      case 'speed':
+        final v = double.tryParse(id);
+        if (v != null) unawaited(widget.playback.setRate(v));
+        return;
+      case 'sleep':
+        _winArmSleep(int.tryParse(id) ?? 0);
+        return;
+      case 'danmakuSource':
+        final i = int.tryParse(id);
+        if (i != null) widget.onDanmakuSourceChanged?.call(i);
+        return;
+      case 'render':
+        unawaited(_winPersist('playerRender', id));
+        widget.onRenderChanged?.call(id);
+        return;
+      case 'playInfo':
+        return;
+    }
     switch (id) {
       case 'open':
-        // 无 moreItems 快照时由原生请求；再推一次并让用户点底栏更多
         _syncWinChrome();
         break;
-      case 'speed':
-        final cur = widget.playback.rate;
-        var i = _winSpeeds.indexWhere((s) => (s - cur).abs() < 0.01);
-        if (i < 0) i = 2;
-        unawaited(widget.playback.setRate(_winSpeeds[(i + 1) % _winSpeeds.length]));
+      case 'videoEq':
+        unawaited(KotvWinChrome.showChoiceSheet(
+          kind: 'videoEq',
+          title: '画面调色',
+          options: KotvWinChrome.videoEqPresets,
+        ));
+        break;
+      case 'audioFx':
+        unawaited(KotvWinChrome.showChoiceSheet(
+          kind: 'audioFx',
+          title: '音频效果',
+          options: KotvWinChrome.audioEqPresets,
+        ));
         break;
       case 'danmakuSettings':
         unawaited(_winOpenDanmakuSettings());
         break;
-      case 'danmakuMore':
-        unawaited(KotvWinChrome.hideSheet());
-        unawaited(_chromeKey.currentState?.openDanmakuSettingsFull());
+      case 'danmakuSource':
+        unawaited(KotvWinChrome.showChoiceSheet(
+          kind: 'danmakuSource',
+          title: '选择弹幕源',
+          options: [
+            for (var i = 0; i < widget.danmakuSources.length; i++)
+              ('$i', widget.danmakuSources[i].name),
+          ],
+          selectedId: '${widget.danmakuSourceIdx}',
+        ));
+        break;
+      case 'danmakuSearch':
+        widget.onDanmakuSearch?.call();
+        break;
+      case 'sleep':
+        unawaited(KotvWinChrome.showChoiceSheet(
+          kind: 'sleep',
+          title: '休眠定时器',
+          options: KotvWinChrome.sleepOptions,
+          selectedId: '$_winSleepMinutes',
+        ));
+        break;
+      case 'speed':
+        unawaited(KotvWinChrome.showChoiceSheet(
+          kind: 'speed',
+          title: '倍速',
+          options: [
+            for (final s in KotvWinChrome.vodSpeeds)
+              (
+                '$s',
+                'x${s.toStringAsFixed(s == s.roundToDouble() ? 0 : 1)}',
+              ),
+          ],
+          selectedId: '${widget.playback.rate}',
+        ));
         break;
       case 'player':
         unawaited(_winOpenPlayerPicker());
+        break;
+      case 'render':
+        unawaited(KotvWinChrome.showChoiceSheet(
+          kind: 'render',
+          title: '渲染方式',
+          options: KotvWinChrome.renderOptions,
+          selectedId: _renderMode,
+        ));
+        break;
+      case 'playInfo':
+        unawaited(_winShowPlayInfo());
         break;
       case 'episodes':
         _toggleEpisodes();
@@ -523,6 +675,18 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
         break;
       case 'mini':
         widget.onMini?.call();
+        break;
+      case 'parse':
+        widget.onParse?.call();
+        break;
+      case 'keep':
+        unawaited(() async {
+          final label = await widget.onToggleKeep?.call();
+          if (mounted && label != null && label.isNotEmpty) {
+            setState(() => _winKeepLabel = label);
+            _syncWinChrome();
+          }
+        }());
         break;
       case 'replay':
         if (widget.onRefresh != null) {
@@ -534,19 +698,56 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
           }());
         }
         break;
+      case 'exit':
+        unawaited(_exitFullscreen());
+        break;
     }
+  }
+
+  void _winArmSleep(int minutes) {
+    _winSleepTimer?.cancel();
+    _winSleepMinutes = minutes;
+    if (minutes <= 0) {
+      _syncWinChrome();
+      return;
+    }
+    _winSleepTimer = Timer(Duration(minutes: minutes), () {
+      if (!mounted) return;
+      unawaited(widget.playback.pause());
+      setState(() => _winSleepMinutes = 0);
+      _syncWinChrome();
+    });
+    _syncWinChrome();
+  }
+
+  Future<void> _winShowPlayInfo() async {
+    Map<String, dynamic> status = {};
+    try {
+      status = await widget.onPlayerStatus?.call() ?? {};
+    } catch (_) {}
+    if (!mounted) return;
+    final lines = <(String, String)>[
+      ('engine', '${status['engine'] ?? widget.playback.engineLabel}'),
+      ('url', widget.playUrl.isEmpty ? '（无）' : widget.playUrl),
+      ('size', '${widget.playback.width}x${widget.playback.height}'),
+      ('rate', '${widget.playback.rate}'),
+    ];
+    await KotvWinChrome.showSheet(
+      kind: 'playInfo',
+      title: '播放信息',
+      items: [
+        for (final e in lines)
+          KotvWinChrome.lineItem(id: e.$1, label: '${e.$1}: ${e.$2}', chevron: false),
+      ],
+    );
   }
 
   void _syncWinChrome() {
     if (!KotvWinChrome.isNeeded || !mounted) return;
-    final w = widget.playback.width;
-    final h = widget.playback.height;
-    final resolution = (w > 0 && h > 0) ? '$w x $h' : '';
     unawaited(KotvWinChrome.pushVod(
       playback: widget.playback,
       title: '${widget.vodName}${widget.title.isNotEmpty ? ' · ${widget.title}' : ''}',
       subtitle: widget.title,
-      resolution: resolution,
       episodes: List<String>.from(widget.episodes),
       episodeSelected: _epIdx,
       chromeVisible: _showChrome,
@@ -598,6 +799,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     _wheelHudTimer?.cancel();
     _swipeAnim.dispose();
     widget.playback.removeListener(_onPlaybackChanged);
+    _winSleepTimer?.cancel();
     if (KotvWinChrome.isNeeded) {
       KotvWinChrome.unbind(_winChromeToken);
       _winChromeToken = 0;
