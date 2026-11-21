@@ -658,6 +658,55 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   void _onWinChromeEvent(Map<String, dynamic> e) {
     if (!mounted) return;
     switch (e['type'] as String? ?? '') {
+      case 'pointerHold':
+        final on = e['on'] == true;
+        setState(() {
+          _pointerInLeftPanel = on && _leftOpen;
+          _pointerInRightPanel = on && _rightOpen;
+          _pointerAtBottom = on && _channelInfoVisible;
+        });
+        if (on) {
+          _cancelHideOverlays();
+        } else {
+          _scheduleHideOverlays();
+        }
+        break;
+      case 'epgToggle':
+        final open = e['open'] == true;
+        setState(() {
+          _epgOpen = open;
+          if (open) _leftOpen = true;
+        });
+        _syncWinChrome();
+        _scheduleHideOverlays();
+        if (open && _programs.isEmpty && _chIdx >= 0) unawaited(_loadEpg());
+        break;
+      case 'tap':
+        // 对齐 Flutter：单击显隐左右栏/频道条
+        if (_leftOpen || _rightOpen || _channelInfoVisible) {
+          setState(() {
+            _leftOpen = false;
+            _rightOpen = false;
+            _epgOpen = false;
+            _channelInfoVisible = false;
+          });
+          _syncWinChrome();
+        } else {
+          _openLeft();
+        }
+        break;
+      case 'liveFling':
+        final sign = (e['sign'] as num?)?.toInt() ?? 0;
+        if (sign != 0) {
+          unawaited(_stepChannel(delta: _liveInvert ? -sign : sign));
+        }
+        break;
+      case 'key':
+        final ke = KotvWinChrome.keyEventFromMap(e);
+        if (ke != null) {
+          _onKey(FocusManager.instance.primaryFocus ?? _focus, ke);
+        }
+        break;
       case 'liveLeft':
       case 'channel':
         final idx = (e['index'] as num?)?.toInt() ?? -1;
@@ -960,6 +1009,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       epgDaySelected: _dayIdx,
       epgPrograms: epgPrograms,
       epgProgramSelected: _epgHighlightIndex(),
+      epgOpen: _epgOpen,
       channelNo: channelNo,
       channelName: chName,
       channelProgram: progTime.isEmpty ? progTitle : '$progTime  $progTitle',
@@ -1098,7 +1148,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   }
 
   Widget _buildLiveDanmakuOverlay() {
-    // Win7：弹幕由 WPF 壳绘制；与 macOS/Win8+ Flutter DanmakuOverlay 隔离。
+    // Win7：弹幕由进程内原生壳绘制；与 macOS/Win8+ Flutter DanmakuOverlay 隔离。
     if (KotvWinChrome.isNeeded) return const SizedBox.shrink();
     return ValueListenableBuilder<List<DanmakuItem>>(
       valueListenable: _danmakuItems,
@@ -4626,7 +4676,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                               onTap: () => unawaited(_exitImmersive()),
                             ),
                           ),
-                        // Win7：左栏由 WPF 承接，勿再建 Flutter 面板（会被 HWND 挡住）。
+                        // Win7：左栏由原生壳承接，勿再建 Flutter 面板（会被 HWND 挡住）。
                         if (_leftOpen && !KotvWinChrome.isNeeded)
                           Positioned(
                             left: 0,
@@ -5119,7 +5169,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                               ),
                             ),
                           ),
-                        // 底栏信息条（频道名）；Win7 由 WPF channel 条承接。
+                        // 底栏信息条（频道名）；Win7 由原生 channel 条承接。
                         if (!KotvWinChrome.isNeeded &&
                             _channelInfoVisible &&
                             !_leftOpen &&

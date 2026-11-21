@@ -37,7 +37,7 @@ bool FlutterWindow::OnCreate() {
   KotvMpvPluginRegisterWithRegistrar(
       flutter_controller_->engine()->GetRegistrarForPlugin("KotvMpvPlugin"));
 #if defined(KOTV_WIN7_CHROME)
-  // 仅 Win7 包：MethodChannel → kotv_win7_chrome.exe（WPF）。Win8+ 与 macOS 同为 Flutter chrome。
+  // 仅 Win7 包：进程内 GDI+ 播控壳。Win8+ 与 macOS 同为 Flutter chrome。
   KotvWinChromeRegisterWithRegistrar(
       flutter_controller_->engine()->GetRegistrarForPlugin("KotvWinChrome"));
 #endif

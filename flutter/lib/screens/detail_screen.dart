@@ -3141,7 +3141,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
                       ValueListenableBuilder<List<DanmakuItem>>(
                         valueListenable: _danmakuItems,
                         builder: (context, items, _) {
-                          // Win7：弹幕由 WPF 壳绘制；此处再画会被 mpv HWND 挡住。
+                          // Win7：弹幕由进程内原生壳绘制；此处再画会被 mpv HWND 挡住。
                           if (KotvWinChrome.isNeeded) return const SizedBox.shrink();
                           return DanmakuOverlay(
                           enabled: _danmakuOn,
@@ -3774,6 +3774,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     if (_winChromeToken == 0) {
       _winChromeToken = KotvWinChrome.bind(_onWinInlineChromeEvent);
     }
+    final srcName = _danmakuSources.isEmpty
+        ? ''
+        : _danmakuSources[_danmakuSourceIdx.clamp(0, _danmakuSources.length - 1)].name;
     unawaited(KotvWinChrome.pushVodInline(
       playback: _playback,
       anchorScreen: anchor,
@@ -3784,12 +3787,30 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       miniActive: _miniDesktop,
       danmakuOn: _danmakuOn,
       danmakuItems: _danmakuItems.value,
+      moreItems: KotvWinChrome.vodInlineMoreItems(
+        danmakuOn: _danmakuOn,
+        danmakuSourceCount: _danmakuSources.length,
+        danmakuSourceName: srcName,
+      ),
     ));
   }
 
   void _onWinInlineChromeEvent(Map<String, dynamic> e) {
     if (!mounted || _immersiveFullscreen) return;
     switch (e['type'] as String? ?? '') {
+      case 'pointerHold':
+        // 内嵌无自动藏栏计时；保留契约以免壳侧双发
+        break;
+      case 'tap':
+      case 'doubleTap':
+        break;
+      case 'key':
+        final ke = KotvWinChrome.keyEventFromMap(e);
+        if (ke != null) {
+          final node = FocusManager.instance.primaryFocus;
+          if (node != null) _onInlinePlayerKey(node, ke);
+        }
+        break;
       case 'toggle':
       case 'togglePlay':
         unawaited(_playback.playOrPause());
@@ -3803,6 +3824,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         }());
         break;
       case 'seekFraction':
+        if (e['commit'] == false) break;
         final frac = (e['value'] as num?)?.toDouble() ?? 0;
         final dur = _playback.duration;
         if (dur.inMilliseconds > 0) {
@@ -3832,9 +3854,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         _syncWinInlineChrome();
         break;
       case 'more':
+        if (e['nativeSheet'] == true) break;
         final moreId = e['id'] as String? ?? '';
         if (moreId.isEmpty || moreId == 'open') {
-          unawaited(_winOpenInlineMore());
+          // 原生 OpenMoreSheet 已展示；勿再弹一层
+          break;
         } else {
           unawaited(_onWinInlineMoreId(moreId));
         }
@@ -3846,6 +3870,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         ));
         break;
       case 'sheet':
+        if (e['nativeSheet'] == true) break;
         unawaited(_onWinInlineSheet(e['id'] as String? ?? '', e['kind'] as String? ?? ''));
         break;
       case 'toggleItem':
@@ -3859,21 +3884,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         ));
         break;
     }
-  }
-
-  Future<void> _winOpenInlineMore() async {
-    final srcName = _danmakuSources.isEmpty
-        ? ''
-        : _danmakuSources[_danmakuSourceIdx.clamp(0, _danmakuSources.length - 1)].name;
-    await KotvWinChrome.showSheet(
-      kind: 'more',
-      title: '更多',
-      items: KotvWinChrome.vodInlineMoreItems(
-        danmakuOn: _danmakuOn,
-        danmakuSourceCount: _danmakuSources.length,
-        danmakuSourceName: srcName,
-      ),
-    );
   }
 
   Future<void> _winOpenInlineDanmakuSettings() async {
@@ -3898,8 +3908,15 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
 
   Future<void> _onWinInlineSheet(String id, String kind) async {
     if (id.isEmpty) return;
-    // fullscreenKind 由 pickFullscreenKind 拦截，此处忽略
-    if (kind == 'fullscreenKind') return;
+    // 底栏「全屏」原生 sheet：直接进入对应全屏；pickFullscreenKind Completer 另路也会收到
+    if (kind == 'fullscreenKind') {
+      if (id == 'window') {
+        await _enterFullscreen(KotvDesktopFullscreenKind.window);
+      } else if (id == 'display') {
+        await _enterFullscreen(KotvDesktopFullscreenKind.display);
+      }
+      return;
+    }
     if (kind == 'danmakuSource') {
       final i = int.tryParse(id);
       if (i != null) unawaited(_loadDanmakuSource(i, notify: true));

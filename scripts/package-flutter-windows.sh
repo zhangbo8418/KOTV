@@ -80,7 +80,7 @@ kotv_export_fvp_deps
 flutter config --enable-windows-desktop
 KOTV_FLUTTER_TARGET=windows "$ROOT/scripts/flutter-pub-get.sh"
 kotv_ensure_mdk_windows_sdk
-# Win7：CMake 编入 WPF 播控桥；Win8+：显式关闭，与 macOS 一样只走 Flutter chrome。
+# Win7：CMake 编入进程内 GDI+ 播控；Win8+：显式关闭，与 macOS 一样只走 Flutter chrome。
 if [[ "${KOTV_WIN7:-}" == "1" ]]; then
   flutter build windows --release -- -DKOTV_WIN7_CHROME=ON
 else
@@ -125,28 +125,21 @@ chmod +x "$ROOT/scripts/bundle-app-libmpv.sh"
   exit 1
 }
 
-# Win7 专用：WPF 播控遮罩进程（与 Win8+ DComp 完全独立，勿在非 Win7 包打入）。
-if [[ "${KOTV_WIN7:-}" == "1" ]]; then
-  echo "==> build Win7 WPF chrome overlay"
-  chmod +x "$ROOT/scripts/build-win7-chrome.sh"
-  CHROME_OUT="$ROOT/flutter/windows/win7_chrome/bin/Release"
-  "$ROOT/scripts/build-win7-chrome.sh" "$CHROME_OUT"
-  cp -f "$CHROME_OUT/kotv_win7_chrome.exe" "$RELEASE_DIR/kotv_win7_chrome.exe"
-  # Newtonsoft.Json 等依赖与 exe 同目录
-  while IFS= read -r _dll; do
-    [[ -n "$_dll" ]] && cp -f "$_dll" "$RELEASE_DIR/"
-  done < <(find "$CHROME_OUT" -maxdepth 1 -iname '*.dll' -print)
-  [[ -f "$RELEASE_DIR/kotv_win7_chrome.exe" ]] || {
-    echo "missing $RELEASE_DIR/kotv_win7_chrome.exe" >&2
-    exit 1
-  }
-else
-  # Win8+ 包不得夹带 Win7 WPF 壳
-  if [[ -f "$RELEASE_DIR/kotv_win7_chrome.exe" ]]; then
-    echo "ERROR: kotv_win7_chrome.exe must not ship in non-Win7 package" >&2
+# Win7 播控在 kotv.exe 进程内（GDI+）；发行包不得夹带旧 WPF 副进程或独立 harness exe。
+for _stale in kotv_win7_chrome.exe kotv-win7-mpv-chrome.exe; do
+  if [[ -f "$RELEASE_DIR/$_stale" ]]; then
+    echo "ERROR: stale $_stale must not ship (in-process GDI+ chrome only)" >&2
     exit 1
   fi
-  rm -f "$RELEASE_DIR/Newtonsoft.Json.dll" 2>/dev/null || true
+done
+rm -f "$RELEASE_DIR/Newtonsoft.Json.dll" 2>/dev/null || true
+if [[ "${KOTV_WIN7:-}" == "1" ]]; then
+  # 确认本包编入了 Win7 壳（CMake KOTV_WIN7_CHROME），而非漏链仍出空壳
+  if ! python3 -c "import sys; d=open(sys.argv[1],'rb').read(); sys.exit(0 if b'KotvWinChromeModal' in d else 1)" \
+      "$RELEASE_DIR/kotv.exe"; then
+    echo "ERROR: Win7 package kotv.exe missing KotvWinChromeModal (chrome not linked?)" >&2
+    exit 1
+  fi
 fi
 
 # Win7：只改写时间 API（不再用 k7ws2 整 DLL 代理，避免序数导入崩溃）。

@@ -1,13 +1,13 @@
 cmake_minimum_required(VERSION 3.14)
 project(runner LANGUAGES C CXX)
 
-# Win7 包（KOTV_WIN7=1）：编入 WPF 播控桥。Win8+ DComp 包不编、不注册（与 macOS 一样只走 Flutter chrome）。
+# Win7 包（KOTV_WIN7=1）：编入进程内 GDI+ 播控壳。Win8+ 不编、不注册（与 macOS 同为 Flutter chrome）。
 if(DEFINED ENV{KOTV_WIN7} AND "$ENV{KOTV_WIN7}" STREQUAL "1")
   set(_kotv_win7_chrome_default ON)
 else()
   set(_kotv_win7_chrome_default OFF)
 endif()
-option(KOTV_WIN7_CHROME "Build Win7 WPF chrome MethodChannel bridge" ${_kotv_win7_chrome_default})
+option(KOTV_WIN7_CHROME "Build Win7 in-process GDI+ chrome" ${_kotv_win7_chrome_default})
 
 set(KOTV_RUNNER_SOURCES
   "flutter_window.cpp"
@@ -22,7 +22,7 @@ set(KOTV_RUNNER_SOURCES
   "runner.exe.manifest"
 )
 if(KOTV_WIN7_CHROME)
-  list(APPEND KOTV_RUNNER_SOURCES "kotv_win_chrome.cpp")
+  list(APPEND KOTV_RUNNER_SOURCES "win7_chrome_shell.cpp" "kotv_win_chrome.cpp")
 endif()
 
 # Define the application target. To change its name, change BINARY_NAME in the
@@ -33,7 +33,8 @@ endif()
 add_executable(${BINARY_NAME} WIN32 ${KOTV_RUNNER_SOURCES})
 if(KOTV_WIN7_CHROME)
   target_compile_definitions(${BINARY_NAME} PRIVATE "KOTV_WIN7_CHROME=1")
-  message(STATUS "KOTV: Win7 WPF chrome bridge enabled")
+  target_link_libraries(${BINARY_NAME} PRIVATE "gdiplus.lib")
+  message(STATUS "KOTV: Win7 in-process GDI+ chrome enabled")
 endif()
 
 # kotv_mpv：vo=gpu-next + 子 HWND；头文件在 runner/mpv/include。

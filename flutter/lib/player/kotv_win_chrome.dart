@@ -10,8 +10,8 @@ import 'kotv_playback.dart';
 
 /// Win7 原生播控套壳：推送 / 弹层 / 事件的唯一收拢入口。
 ///
-/// 库存引擎下 mpv 子 HWND 盖住 Flutter；本通道经 C++ 桥拉起独立进程
-/// `kotv_win7_chrome.exe`（WPF 透明遮罩）承接播控栏、EPG、弹层与弹幕。
+/// 库存引擎下 mpv 子 HWND 盖住 Flutter；本通道驱动 **进程内 GDI+ 子窗**
+///（与 `kotv.exe` 同进程）承接播控栏、EPG、弹层与弹幕。
 /// 样式与事件契约对齐本应用 Flutter 播控（[VodInlineControls] /
 /// [VodFullscreenChrome] / 直播栏）。**Win8+ DComp 不启用本通道**（与 macOS 同为 Flutter chrome）。
 class KotvWinChrome {
@@ -23,10 +23,10 @@ class KotvWinChrome {
   static int _lastDanmakuSig = 0;
   static int _ownerToken = 0;
 
-  /// 与 WPF OverlayController / 全屏 HWND inset 同源（逻辑像素）。
+  /// 与原生壳 / 全屏 HWND inset 同源（逻辑像素）。
   static const double topH = 56;
-  static const double bottomH = 108;
-  static const double inlineBottomH = 78;
+  static const double bottomH = 128;
+  static const double inlineBottomH = 72;
   static const double episodeW = 280;
 
   static const vodSpeeds = <double>[0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 5.0];
@@ -43,11 +43,13 @@ class KotvWinChrome {
     ('custom', '自定义'),
   ];
 
+  /// 与 Flutter `_showAudioFxSheet` / settings 一致（勿用 music/movie）。
   static const audioEqPresets = <(String id, String label)>[
     ('off', '关闭'),
-    ('music', '音乐'),
-    ('movie', '电影'),
+    ('natural', '自然'),
     ('voice', '人声'),
+    ('bass', '低音'),
+    ('cinema', '影院'),
     ('custom', '自定义'),
   ];
 
@@ -481,6 +483,7 @@ class KotvWinChrome {
     bool miniActive = false,
     bool danmakuOn = false,
     List<DanmakuItem> danmakuItems = const [],
+    List<Map<String, dynamic>>? moreItems,
   }) async {
     if (!isNeeded) return;
     final pos = playback.position;
@@ -511,6 +514,7 @@ class KotvWinChrome {
       'liveRightVisible': false,
       'channelVisible': false,
       'actions': const ['toggle', 'stop', 'cast', 'mini', 'expand'],
+      if (moreItems != null) 'moreItems': moreItems,
     });
     await setDanmaku(enabled: danmakuOn, items: danmakuItems);
   }
@@ -537,6 +541,12 @@ class KotvWinChrome {
     bool danmakuShowTop = true,
     bool danmakuShowBottom = true,
     bool danmakuShowReverse = true,
+    int openingSec = 0,
+    int endingSec = 0,
+    String aspect = 'default',
+    String decodeMode = 'auto',
+    bool showDirect = false,
+    bool directOn = false,
   }) async {
     if (!isNeeded) return;
     final pos = playback.position;
@@ -565,6 +575,13 @@ class KotvWinChrome {
       'rate': playback.rate,
       'playing': playback.playing,
       'buffering': playback.buffering || playback.stalling,
+      'volume': playback.volume.clamp(0, 100),
+      'openingSec': openingSec,
+      'endingSec': endingSec,
+      'aspect': aspect,
+      'decode': decodeMode,
+      'showDirect': showDirect,
+      'directOn': directOn,
       'top': chromeVisible,
       'bottom': chromeVisible,
       'episodesVisible': episodesVisible,
@@ -572,7 +589,21 @@ class KotvWinChrome {
       'liveLeftVisible': false,
       'liveRightVisible': false,
       'channelVisible': false,
-      'actions': const ['prev', 'toggle', 'next', 'more'],
+      'actions': const [
+        'prev',
+        'toggle',
+        'next',
+        'speed',
+        'replay',
+        'aspect',
+        'decode',
+        'subtitle',
+        'audio',
+        'video',
+        'player',
+        'more',
+        'episodes',
+      ],
       if (moreItems != null) 'moreItems': moreItems,
     });
     await setDanmaku(
@@ -610,6 +641,7 @@ class KotvWinChrome {
     int epgDaySelected = 0,
     List<String>? epgPrograms,
     int epgProgramSelected = -1,
+    bool epgOpen = true,
     String channelNo = '',
     String channelName = '',
     String channelProgram = '',
@@ -642,6 +674,7 @@ class KotvWinChrome {
       'epgDaySelected': epgDaySelected,
       if (epgPrograms != null) 'epgPrograms': epgPrograms,
       'epgProgramSelected': epgProgramSelected,
+      'epgOpen': epgOpen,
       'playing': playback.playing,
       'buffering': playback.buffering || playback.stalling,
       'positionSec': pos.inMilliseconds / 1000.0,
@@ -869,5 +902,88 @@ class KotvWinChrome {
       default:
         return false;
     }
+  }
+
+  /// 原生壳 `key.logical` 名称 → Flutter [LogicalKeyboardKey]。
+  static LogicalKeyboardKey? logicalKeyFromName(String name) {
+    switch (name) {
+      case 'Escape':
+        return LogicalKeyboardKey.escape;
+      case 'Enter':
+        return LogicalKeyboardKey.enter;
+      case 'Space':
+        return LogicalKeyboardKey.space;
+      case 'ArrowLeft':
+        return LogicalKeyboardKey.arrowLeft;
+      case 'ArrowRight':
+        return LogicalKeyboardKey.arrowRight;
+      case 'ArrowUp':
+        return LogicalKeyboardKey.arrowUp;
+      case 'ArrowDown':
+        return LogicalKeyboardKey.arrowDown;
+      case 'PageUp':
+        return LogicalKeyboardKey.pageUp;
+      case 'PageDown':
+        return LogicalKeyboardKey.pageDown;
+      case 'ContextMenu':
+        return LogicalKeyboardKey.contextMenu;
+      case 'GoBack':
+        return LogicalKeyboardKey.goBack;
+      case 'MediaPlayPause':
+        return LogicalKeyboardKey.mediaPlayPause;
+      case 'MediaRewind':
+        return LogicalKeyboardKey.mediaRewind;
+      case 'MediaFastForward':
+        return LogicalKeyboardKey.mediaFastForward;
+      case 'MediaTrackPrevious':
+        return LogicalKeyboardKey.mediaTrackPrevious;
+      case 'MediaTrackNext':
+        return LogicalKeyboardKey.mediaTrackNext;
+      case 'VolumeUp':
+        return LogicalKeyboardKey.audioVolumeUp;
+      case 'VolumeDown':
+        return LogicalKeyboardKey.audioVolumeDown;
+      case 'VolumeMute':
+        return LogicalKeyboardKey.audioVolumeMute;
+      case 'KeyE':
+        return LogicalKeyboardKey.keyE;
+      case 'KeyM':
+        return LogicalKeyboardKey.keyM;
+      case 'KeyS':
+        return LogicalKeyboardKey.keyS;
+      default:
+        if (name.startsWith('Digit') && name.length == 6) {
+          const digits = <LogicalKeyboardKey>[
+            LogicalKeyboardKey.digit0,
+            LogicalKeyboardKey.digit1,
+            LogicalKeyboardKey.digit2,
+            LogicalKeyboardKey.digit3,
+            LogicalKeyboardKey.digit4,
+            LogicalKeyboardKey.digit5,
+            LogicalKeyboardKey.digit6,
+            LogicalKeyboardKey.digit7,
+            LogicalKeyboardKey.digit8,
+            LogicalKeyboardKey.digit9,
+          ];
+          final d = int.tryParse(name.substring(5));
+          if (d != null && d >= 0 && d <= 9) return digits[d];
+        }
+        return null;
+    }
+  }
+
+  /// 由原生壳 key 事件构造 Flutter [KeyEvent]（供复用 `_onKey`）。
+  static KeyEvent? keyEventFromMap(Map<String, dynamic> e) {
+    final logical = logicalKeyFromName(e['logical'] as String? ?? '');
+    if (logical == null) return null;
+    final time = Duration.zero;
+    final physical = PhysicalKeyboardKey(logical.keyId & 0xFFFFFFFF);
+    if (e['up'] == true) {
+      return KeyUpEvent(physicalKey: physical, logicalKey: logical, timeStamp: time);
+    }
+    if (e['repeat'] == true) {
+      return KeyRepeatEvent(physicalKey: physical, logicalKey: logical, timeStamp: time);
+    }
+    return KeyDownEvent(physicalKey: physical, logicalKey: logical, timeStamp: time);
   }
 }

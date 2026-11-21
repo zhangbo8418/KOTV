@@ -67,4 +67,8 @@ flutter/android/build/
 
 # Local agent notes (not part of the product)
 .workbuddy/
+.cursor/
+
+# Win7 UI harness 指针目录（真仓为 zhangbo8418/kotv-win7-mpv-chrome，勿当本仓构建入口）
+/tools/win7_mpv_chrome/
 

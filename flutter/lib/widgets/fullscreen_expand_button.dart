@@ -88,7 +88,7 @@ class _KotvFullscreenExpandButtonState extends State<KotvFullscreenExpandButton>
       widget.onSelect(KotvDesktopFullscreenKind.window);
       return;
     }
-    // Win7：mpv HWND 盖住 Flutter Overlay，改走 WPF 全屏选项弹层。
+    // Win7：mpv HWND 盖住 Flutter Overlay，改走原生全屏选项弹层。
     if (KotvWinChrome.isNeeded) {
       KotvWinChrome.pickFullscreenKind().then((kind) {
         if (kind != null) widget.onSelect(kind);

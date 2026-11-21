@@ -47,7 +47,7 @@ bool kotvUsesNativeMpv() =>
 /// Win7：无 DComp，走 [kotvUsesWindowsNativeChrome]。
 bool kotvUsesWindowsDcompUnderlay() => kotvIsWindows() && !kotvIsWindows7();
 
-/// Win7：WPF 透明遮罩播控/选集/直播菜单（库存引擎 + mpv 子 HWND；与 Win8+ DComp 隔离）。
+/// Win7：进程内 GDI+ 播控/选集/直播菜单（库存引擎 + mpv 子 HWND；与 Win8+ DComp 隔离）。
 bool kotvUsesWindowsNativeChrome() => kotvIsWindows7();
 
 /// 设为 true 时 macOS 发行包不链 FVP/mdk（仅原生 MPV）；默认 false，MPV+FVP 全功能。
