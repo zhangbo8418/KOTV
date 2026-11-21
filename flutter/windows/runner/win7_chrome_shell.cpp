@@ -2329,6 +2329,7 @@ LRESULT Win7ChromeShell::OnDanmakuMessage(HWND hwnd, UINT msg, WPARAM wParam, LP
     default:
       return DefWindowProcW(hwnd, msg, wParam, lParam);
   }
+  return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
 LRESULT Win7ChromeShell::OnModalMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -2385,7 +2386,7 @@ LRESULT Win7ChromeShell::OnModalMessage(HWND hwnd, UINT msg, WPARAM wParam, LPAR
         }
         return 0;
       }
-      break;
+      return DefWindowProcW(hwnd, msg, wParam, lParam);
     }
     case WM_LBUTTONDOWN:
     case WM_LBUTTONUP: {
@@ -2587,6 +2588,7 @@ LRESULT Win7ChromeShell::OnModalMessage(HWND hwnd, UINT msg, WPARAM wParam, LPAR
     default:
       return DefWindowProcW(hwnd, msg, wParam, lParam);
   }
+  return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
 LRESULT Win7ChromeShell::OnMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -2634,13 +2636,13 @@ LRESULT Win7ChromeShell::OnMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
         TrackMouseEvent(&tme);
         EmitPointerHold(true);
       }
-      break;
+      return DefWindowProcW(hwnd, msg, wParam, lParam);
     }
     case WM_MOUSELEAVE:
       if (!sheet_open_hold_) EmitPointerHold(false);
       return 0;
     case WM_RBUTTONUP: {
-      // 对齐 Flutter：倍速长按 → 细调列表
+      // 底栏倍速右键 → 细调列表
       if (hwnd == bottom_.hwnd) {
         const int x = GET_X_LPARAM(lParam);
         const int y = GET_Y_LPARAM(lParam);
@@ -2650,7 +2652,7 @@ LRESULT Win7ChromeShell::OnMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
           return 0;
         }
       }
-      break;
+      return DefWindowProcW(hwnd, msg, wParam, lParam);
     }
     case WM_LBUTTONDOWN:
     case WM_LBUTTONUP: {
@@ -2794,6 +2796,7 @@ LRESULT Win7ChromeShell::OnMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
     default:
       return DefWindowProcW(hwnd, msg, wParam, lParam);
   }
+  return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
 void Win7ChromeShell::ApplyDanmaku(const ChromeMap& args_ref) {
