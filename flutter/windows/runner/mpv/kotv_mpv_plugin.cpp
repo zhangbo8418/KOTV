@@ -150,18 +150,12 @@ class KotvMpvPlugin : public flutter::Plugin {
     raise_class(L"KotvWinChromePanel");
   }
 
-  // 必须先有槽几何再创建 HWND：按槽位置/大小 CreateWindow，再绑 mpv wid。
-  bool EnsureMpv() {
-    if (mpv_ && hwnd_) return true;
+  // 只按槽建/挪 HWND（快）。禁止在 updateFrame 里 mpv_initialize，否则会堵 UI → 未响应且底栏来不及 Layout。
+  bool EnsureVideoHwnd() {
     HWND parent = FlutterHwnd();
     if (!parent) return false;
-
     int cx = 0, cy = 0, cw = 0, ch = 0;
-    if (!ResolveFramePhysical(&cx, &cy, &cw, &ch)) {
-      // 槽还没到：不创建占位窗；等 updateFrame 再 EnsureMpv。
-      return false;
-    }
-
+    if (!ResolveFramePhysical(&cx, &cy, &cw, &ch)) return false;
     if (!hwnd_) {
       hwnd_ = CreateWindowExW(WS_EX_NOPARENTNOTIFY, L"STATIC", L"",
                               WS_CHILD | WS_CLIPSIBLINGS | WS_DISABLED, cx, cy, cw, ch,
@@ -171,7 +165,13 @@ class KotvMpvPlugin : public flutter::Plugin {
     } else {
       MoveWindow(hwnd_, cx, cy, cw, ch, TRUE);
     }
+    return true;
+  }
 
+  // 有槽 HWND 后再 mpv_create/initialize（重；仅 create/open 调用）。
+  bool EnsureMpv() {
+    if (mpv_ && hwnd_) return true;
+    if (!EnsureVideoHwnd()) return false;
     if (mpv_) return true;
 
     mpv_ = mpv_create();
@@ -548,20 +548,10 @@ class KotvMpvPlugin : public flutter::Plugin {
         const double w = ArgDouble(args, "w", ArgDouble(args, "width"));
         const double h = ArgDouble(args, "h", ArgDouble(args, "height"));
         const double dpr = ArgDouble(args, "dpr", 0);
-        // 先记槽；无 HWND 时按槽直接创建，不再 Move 占位小窗。
+        // 只记槽 + 建/挪 HWND。mpv_initialize / loadfile 留给 open，避免堵死 UI 导致底栏出不来。
         StoreFrame(x, y, w, h, dpr);
         if (have_frame_) {
-          if (!hwnd_ || !mpv_) {
-            if (EnsureMpv()) {
-              ApplyDecode();
-              FlushPendingOpen();
-            }
-          } else {
-            int cx = 0, cy = 0, cw = 0, ch = 0;
-            if (ResolveFramePhysical(&cx, &cy, &cw, &ch)) {
-              MoveWindow(hwnd_, cx, cy, cw, ch, TRUE);
-            }
-          }
+          EnsureVideoHwnd();
           if (hwnd_ && visible_) ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
           RaiseChromeOverVideo();
         }

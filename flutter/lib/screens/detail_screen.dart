@@ -2620,7 +2620,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         await WidgetsBinding.instance.endOfFrame;
         if (serial != _playAtSerial || !mounted) return;
         _wirePlaybackNotify(pb);
-        if (!_immersiveFullscreen) _bindWinInlineChrome();
         try {
           // 每次 open 复位 force-iso，避免会话复用粘滞。
           pb.setExtraOpenProps(KotvDiscPlay.openPropsFor(disc?.props));
@@ -2659,12 +2658,18 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           if (_skipOpeningEnding || startMs > 0) {
             _openingSeekDone = true;
           }
-          // Win7：先量槽并按槽建 HWND，再 open/loadfile；否则 native 挂起 URL + waitReady 会死等。
+          // Win7：先量槽建 HWND（快）→ await 推底栏 → 最后 open 里 mpv_initialize。
+          // 若把 initialize 放进 updateFrame，UI 未响应时底栏 Layout 永远排不上。
           if (KotvWinChrome.isNeeded) {
             final ok = await _ensureWin7VideoSlotFrame();
             if (!ok) {
               throw StateError('视频槽未就绪');
             }
+            if (!_immersiveFullscreen) {
+              await _pushWinInlineChromeNow();
+            }
+          } else if (!_immersiveFullscreen) {
+            _bindWinInlineChrome();
           }
           // 开播标定 live；引擎 media-live / isLive 仅供守卫，不预拉节目单。
           await pb.open(
@@ -3793,7 +3798,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     }
   }
 
-  /// Win7：有槽才建 HWND / loadfile。open 前必须 await，避免挂起 URL 后 waitReady 永等 ready。
+  /// Win7：有槽才建 HWND。open 前必须 await（仅 CreateWindow，不含 mpv_initialize）。
   Future<bool> _ensureWin7VideoSlotFrame() async {
     if (!kotvUsesWindowsNativeChrome() || !mounted) return true;
     final dpr = MediaQuery.devicePixelRatioOf(context);
@@ -3815,6 +3820,47 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       }
     }
     return false;
+  }
+
+  /// Win7：开播前 await 推内嵌底栏，保证在可能变慢的 open/initialize 之前已经 Layout。
+  Future<void> _pushWinInlineChromeNow() async {
+    if (!KotvWinChrome.isNeeded || !mounted || _immersiveFullscreen) return;
+    if (_playUrl.isEmpty) return;
+    for (var i = 0; i < 10; i++) {
+      if (!mounted) return;
+      await WidgetsBinding.instance.endOfFrame;
+      final anchor = _winRectOf(_inlineChromeAnchorKey);
+      if (anchor == null) continue;
+      if (_winChromeToken == 0) {
+        _winChromeToken = KotvWinChrome.bind(_onWinInlineChromeEvent);
+      }
+      final surface = _winRectOf(_inlineSurfaceKey);
+      final srcName = _danmakuSources.isEmpty
+          ? ''
+          : _danmakuSources[_danmakuSourceIdx.clamp(0, _danmakuSources.length - 1)].name;
+      await KotvWinChrome.pushVodInline(
+        playback: _playback,
+        anchorScreen: anchor,
+        surfaceScreen: surface,
+        chromeVisible: true,
+        showDirect: kotvShowDirectOutput(_playback, _decodeMode),
+        directOn: _playback.directOutput,
+        miniActive: _miniDesktop,
+        danmakuOn: _danmakuOn,
+        danmakuItems: _danmakuItems.value,
+        moreItems: KotvWinChrome.vodInlineMoreItems(
+          danmakuOn: _danmakuOn,
+          danmakuSourceCount: _danmakuSources.length,
+          danmakuSourceName: srcName,
+        ),
+      );
+      _lastWinInlineChromeSnap = _winInlineChromeSnapshot(
+        anchor: anchor,
+        surface: surface,
+        srcName: srcName,
+      );
+      return;
+    }
   }
 
   void _syncWinInlineChrome() {
