@@ -841,16 +841,13 @@ void Win7ChromeShell::Layout() {
   if (!channel_info_.hwnd) channel_info_.hwnd = CreateChildPanel(L"kotv_ch");
   if (!center_play_.hwnd) center_play_.hwnd = CreateChildPanel(L"kotv_center");
   if (!gesture_.hwnd) {
-    HWND parent = HostHwnd();
-    if (parent) {
-      gesture_.hwnd = CreateWindowExW(WS_EX_LAYERED | WS_EX_NOACTIVATE, kGestureClass, L"kotv_gesture",
-                                      WS_CHILD | WS_CLIPSIBLINGS, 0, 0, 0, 0, parent, nullptr,
-                                      GetModuleHandleW(nullptr), this);
-      if (gesture_.hwnd) {
-        SetWindowLongPtrW(gesture_.hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
-        // 几乎全透明但可命中（对齐 Flutter 画面手势层）
-        SetLayeredWindowAttributes(gesture_.hwnd, 0, 1, LWA_ALPHA);
-      }
+    gesture_.hwnd = CreateWindowExW(WS_EX_LAYERED | WS_EX_NOACTIVATE, kGestureClass, L"kotv_gesture",
+                                    WS_CHILD | WS_CLIPSIBLINGS, 0, 0, 0, 0, parent, nullptr,
+                                    GetModuleHandleW(nullptr), this);
+    if (gesture_.hwnd) {
+      SetWindowLongPtrW(gesture_.hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
+      // 几乎全透明但可命中（与 Flutter 画面手势层同职责）
+      SetLayeredWindowAttributes(gesture_.hwnd, 0, 1, LWA_ALPHA);
     }
   }
   if (!danmaku_hwnd_) {

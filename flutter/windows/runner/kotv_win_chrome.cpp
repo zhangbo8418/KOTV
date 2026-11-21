@@ -1,10 +1,11 @@
 #include "kotv_win_chrome.h"
 
 #include <flutter/method_channel.h>
-#include <flutter/plugin_registrar_manager.h>
 #include <flutter/plugin_registrar_windows.h>
 #include <flutter/standard_method_codec.h>
 #include <flutter_windows.h>
+// PluginRegistrarManager 在 plugin_registrar_windows.h（Flutter 3.19 无独立
+// plugin_registrar_manager.h；与 kotv_mpv_plugin 同写法）。
 
 #include <sstream>
 #include <type_traits>
