@@ -2984,11 +2984,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           ? stackSize
           : MediaQuery.sizeOf(context);
       var r = Offset.zero & s;
-      // Win7：HWND 在 Flutter 上，全屏给顶/底栏留空隙（Win8+ DComp 不需要）。
-      if (kotvUsesWindowsNativeChrome()) {
-        final epOpen = _fsPageKey.currentState?.winEpisodesOpen ?? false;
-        r = kotvWindowsOverlayFullscreenInset(r, episodesOpen: epOpen);
-      }
+      // Win7 全屏/铺满：视频 HWND 铺满，顶底栏半透明叠上（同 VodFullscreenChrome），勿 inset 挤出黑边。
       // 氛围模式：画面略内缩，四周透出壳层壁纸（默认适应仍是黑边）。
       if (_ambientOn && r.width > 80 && r.height > 96) {
         return Rect.fromLTRB(r.left + 28, r.top + 36, r.right - 28, r.bottom - 36);

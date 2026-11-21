@@ -45,6 +45,8 @@ constexpr COLORREF kPink = RGB(229, 45, 39);       // #E52D27（全屏等旧强�
 constexpr COLORREF kPrimary = RGB(207, 66, 116);   // #CF4274 = KotvColors.primary
 constexpr COLORREF kPinkMuted = RGB(180, 90, 110);
 constexpr BYTE kInlineBarAlpha = 204;             // 0xCC ≈ VodInlineControls 0xCC0A0A12
+constexpr BYTE kFsTopBarAlpha = 0x66;             // VodFullscreenChrome 顶栏 0x66000000
+constexpr BYTE kFsBottomBarAlpha = 0x99;          // VodFullscreenChrome 底栏 0x99000000
 constexpr COLORREF kPanelDark = RGB(18, 10, 28);    // #120A1C
 constexpr COLORREF kBarDark = RGB(12, 8, 18);
 constexpr COLORREF kBarAlpha = RGB(28, 20, 36);
@@ -925,19 +927,21 @@ void Win7ChromeShell::Layout() {
         channel_visible_ && !live_left_visible_ && !live_right_visible_;
     ShowPanel(channel_info_, show_ch, 16, H - kChannelH - 16, std::max(0, W - 32), kChannelH);
   } else {
-    if (bottom_.hwnd) {
-      const LONG ex = GetWindowLongW(bottom_.hwnd, GWL_EXSTYLE);
-      if (ex & WS_EX_LAYERED) {
-        SetWindowLongW(bottom_.hwnd, GWL_EXSTYLE, ex & ~WS_EX_LAYERED);
+    // 全屏/铺满：半透明顶底栏叠在满屏视频上（对齐 VodFullscreenChrome），勿清 LAYERED。
+    auto make_layered = [](HWND h, BYTE alpha) {
+      if (!h) return;
+      const LONG ex = GetWindowLongW(h, GWL_EXSTYLE);
+      if ((ex & WS_EX_LAYERED) == 0) {
+        SetWindowLongW(h, GWL_EXSTYLE, ex | WS_EX_LAYERED);
       }
-    }
+      SetLayeredWindowAttributes(h, 0, alpha, LWA_ALPHA);
+    };
+    make_layered(top_.hwnd, kFsTopBarAlpha);
+    make_layered(bottom_.hwnd, kFsBottomBarAlpha);
     ShowPanel(top_, top_visible_, 0, 0, W, kTopH);
     ShowPanel(bottom_, bottom_visible_, 0, H - kBottomH, W, kBottomH);
-    // 仅开选集时顶底栏隐藏：面板应顶满客户区，避免头尾悬空断开。
-    const int ep_top = top_visible_ ? kTopH : 0;
-    const int ep_bot = bottom_visible_ ? kBottomH : 0;
-    ShowPanel(episodes_, episodes_visible_, W - kEpW, ep_top, kEpW,
-              std::max(0, H - ep_top - ep_bot));
+    // 选集叠在右侧；视频已铺满，面板盖住画面即可（勿再靠缩 HWND 留边）。
+    ShowPanel(episodes_, episodes_visible_, W - kEpW, 0, kEpW, H);
     ShowPanel(live_left_, false, 0, 0, 0, 0);
     ShowPanel(live_right_, false, 0, 0, 0, 0);
     ShowPanel(channel_info_, false, 0, 0, 0, 0);
@@ -960,14 +964,11 @@ void Win7ChromeShell::LayoutGesture() {
     HWND parent = HostHwnd();
     RECT rc{};
     if (parent) GetClientRect(parent, &rc);
+    // 视频铺满客户区时手势层也铺满；栏为叠层，勿再按 top/bottom 内缩命中区。
     x = 0;
-    y = top_visible_ ? kTopH : 0;
+    y = 0;
     w = rc.right - rc.left;
-    h = (rc.bottom - rc.top) - y - (bottom_visible_ ? kBottomH : 0);
-    if (mode_ == "live") {
-      y = 0;
-      h = rc.bottom - rc.top;
-    }
+    h = rc.bottom - rc.top;
     show = enabled_ && w > 8 && h > 8;
   }
   ShowPanel(gesture_, show && enabled_, x, y, w, h);
@@ -3385,8 +3386,10 @@ LRESULT CALLBACK Win7ChromeShell::HostSubclassProc(HWND hwnd, UINT msg, WPARAM w
   if (!self || !self->enabled_) {
     return DefSubclassProc(hwnd, msg, wParam, lParam);
   }
-  if (msg == WM_SIZE && !self->sheet_kind_.empty()) {
-    self->SyncModalToHost(true);
+  // 窗口缩放：顶底栏/选集跟客户区重排；视频洞由 Flutter updateFrame 同步。
+  if (msg == WM_SIZE) {
+    self->Layout();
+    if (!self->sheet_kind_.empty()) self->SyncModalToHost(true);
   }
   if (msg == WM_TIMER && wParam == kEpisodesCloseTimerId) {
     KillTimer(hwnd, kEpisodesCloseTimerId);

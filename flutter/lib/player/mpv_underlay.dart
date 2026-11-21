@@ -92,16 +92,10 @@ class KotvMpvUnderlayClip extends InheritedWidget {
   }
 }
 
-/// Win7 全屏：给原生顶/底栏留空；选集打开时再给右侧面板留宽。Win8+/macOS 不走此 inset。
+/// 旧：Win7 全屏曾用 inset 给顶/底栏留黑边。现改为栏叠视频，保留函数仅兼容旧调用。
+@Deprecated('Win7 fullscreen chrome overlays video; do not inset the HWND')
 Rect kotvWindowsOverlayFullscreenInset(Rect full, {bool episodesOpen = false}) {
-  if (full.width <= 120 || full.height <= 160) return full;
-  final rightPad = episodesOpen ? KotvWinChrome.episodeW : 12.0;
-  return Rect.fromLTRB(
-    full.left,
-    full.top + KotvWinChrome.topH,
-    full.right - rightPad,
-    full.bottom - KotvWinChrome.bottomH,
-  );
+  return full;
 }
 
 /// 播放洞：下发几何 `updateFrame`；未就绪黑遮。
