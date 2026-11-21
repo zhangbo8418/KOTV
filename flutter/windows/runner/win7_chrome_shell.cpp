@@ -2329,7 +2329,6 @@ LRESULT Win7ChromeShell::OnDanmakuMessage(HWND hwnd, UINT msg, WPARAM wParam, LP
     default:
       return DefWindowProcW(hwnd, msg, wParam, lParam);
   }
-  return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
 LRESULT Win7ChromeShell::OnModalMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -2588,7 +2587,6 @@ LRESULT Win7ChromeShell::OnModalMessage(HWND hwnd, UINT msg, WPARAM wParam, LPAR
     default:
       return DefWindowProcW(hwnd, msg, wParam, lParam);
   }
-  return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
 LRESULT Win7ChromeShell::OnMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -2796,7 +2794,6 @@ LRESULT Win7ChromeShell::OnMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
     default:
       return DefWindowProcW(hwnd, msg, wParam, lParam);
   }
-  return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
 void Win7ChromeShell::ApplyDanmaku(const ChromeMap& args_ref) {
@@ -3577,5 +3574,4 @@ LRESULT Win7ChromeShell::OnGestureMessage(HWND hwnd, UINT msg, WPARAM wParam, LP
     default:
       return DefWindowProcW(hwnd, msg, wParam, lParam);
   }
-  return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
