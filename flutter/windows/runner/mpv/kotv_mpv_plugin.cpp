@@ -105,18 +105,74 @@ class KotvMpvPlugin : public flutter::Plugin {
     return registrar_->GetView() ? registrar_->GetView()->GetNativeWindow() : nullptr;
   }
 
+  // 把 Dart 槽矩形落到物理像素；无有效槽则失败（绝不造左上角 1×1 占位窗）。
+  bool ResolveFramePhysical(int* cx, int* cy, int* cw, int* ch) const {
+    if (!have_frame_ || frame_w_ <= 1 || frame_h_ <= 1) return false;
+    double dpr = frame_dpr_;
+    if (dpr <= 0) {
+      HWND parent = const_cast<KotvMpvPlugin*>(this)->FlutterHwnd();
+      if (parent) {
+        HDC dc = GetDC(parent);
+        if (dc) {
+          dpr = GetDeviceCaps(dc, LOGPIXELSX) / 96.0;
+          ReleaseDC(parent, dc);
+        }
+      }
+    }
+    if (dpr <= 0) dpr = 1.0;
+    *cx = static_cast<int>(std::lround(frame_x_ * dpr));
+    *cy = static_cast<int>(std::lround(frame_y_ * dpr));
+    *cw = std::max(1, static_cast<int>(std::lround(frame_w_ * dpr)));
+    *ch = std::max(1, static_cast<int>(std::lround(frame_h_ * dpr)));
+    return *cw > 1 && *ch > 1;
+  }
+
+  void StoreFrame(double x, double y, double w, double h, double dpr) {
+    if (w <= 1 || h <= 1) return;
+    frame_x_ = x;
+    frame_y_ = y;
+    frame_w_ = w;
+    frame_h_ = h;
+    if (dpr > 0) frame_dpr_ = dpr;
+    have_frame_ = true;
+  }
+
+  void RaiseChromeOverVideo() {
+    HWND parent = FlutterHwnd();
+    if (!parent) return;
+    auto raise_class = [parent](const wchar_t* cls) {
+      HWND child = nullptr;
+      while ((child = FindWindowExW(parent, child, cls, nullptr)) != nullptr) {
+        SetWindowPos(child, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+      }
+    };
+    raise_class(L"KotvWinChromeDanmaku");
+    raise_class(L"KotvWinChromePanel");
+  }
+
+  // 必须先有槽几何再创建 HWND：按槽位置/大小 CreateWindow，再绑 mpv wid。
   bool EnsureMpv() {
-    if (mpv_) return true;
+    if (mpv_ && hwnd_) return true;
     HWND parent = FlutterHwnd();
     if (!parent) return false;
 
-    // 1×1 且保持隐藏，直到第一次有效 updateFrame，避免默认 100×100 露在左上角。
-    hwnd_ = CreateWindowExW(WS_EX_NOPARENTNOTIFY, L"STATIC", L"",
-                            WS_CHILD | WS_CLIPSIBLINGS | WS_DISABLED, 0, 0, 1, 1,
-                            parent, nullptr, GetModuleHandle(nullptr), nullptr);
-    if (!hwnd_) return false;
-    have_frame_ = false;
-    ShowWindow(hwnd_, SW_HIDE);
+    int cx = 0, cy = 0, cw = 0, ch = 0;
+    if (!ResolveFramePhysical(&cx, &cy, &cw, &ch)) {
+      // 槽还没到：不创建占位窗；等 updateFrame 再 EnsureMpv。
+      return false;
+    }
+
+    if (!hwnd_) {
+      hwnd_ = CreateWindowExW(WS_EX_NOPARENTNOTIFY, L"STATIC", L"",
+                              WS_CHILD | WS_CLIPSIBLINGS | WS_DISABLED, cx, cy, cw, ch,
+                              parent, nullptr, GetModuleHandle(nullptr), nullptr);
+      if (!hwnd_) return false;
+      ShowWindow(hwnd_, SW_HIDE);
+    } else {
+      MoveWindow(hwnd_, cx, cy, cw, ch, TRUE);
+    }
+
+    if (mpv_) return true;
 
     mpv_ = mpv_create();
     if (!mpv_) {
@@ -162,6 +218,12 @@ class KotvMpvPlugin : public flutter::Plugin {
     }
     have_frame_ = false;
     visible_ = false;
+    frame_x_ = frame_y_ = frame_w_ = frame_h_ = 0;
+    frame_dpr_ = 0;
+    pending_open_ = false;
+    pending_url_.clear();
+    pending_start_ms_ = 0;
+    pending_http_headers_.clear();
   }
 
   void ApplyDecode() {
@@ -185,6 +247,82 @@ class KotvMpvPlugin : public flutter::Plugin {
     direct_ = ArgBool(args, "direct", direct_);
     const auto hw = ArgString(args, "hwdec");
     if (!hw.empty()) hwdec_ = hw;
+  }
+
+  void IngestOpenExtras(const EncodableMap* args) {
+    if (!mpv_ || !args) return;
+    auto pit = args->find(EncodableValue("props"));
+    if (pit != args->end()) {
+      if (const auto* props = std::get_if<EncodableMap>(&pit->second)) {
+        for (const auto& kv : *props) {
+          const auto* k = std::get_if<std::string>(&kv.first);
+          if (!k) continue;
+          std::string v;
+          if (const auto* s = std::get_if<std::string>(&kv.second))
+            v = *s;
+          else if (const auto* b = std::get_if<bool>(&kv.second))
+            v = *b ? "yes" : "no";
+          else if (const auto* i = std::get_if<int32_t>(&kv.second))
+            v = std::to_string(*i);
+          else if (const auto* d = std::get_if<double>(&kv.second))
+            v = std::to_string(*d);
+          if (!v.empty()) mpv_set_property_string(mpv_, k->c_str(), v.c_str());
+        }
+      }
+    }
+    auto hit = args->find(EncodableValue("headers"));
+    if (hit != args->end()) {
+      if (const auto* headers = std::get_if<EncodableMap>(&hit->second)) {
+        std::string fields;
+        for (const auto& kv : *headers) {
+          const auto* k = std::get_if<std::string>(&kv.first);
+          const auto* v = std::get_if<std::string>(&kv.second);
+          if (!k || !v) continue;
+          if (!fields.empty()) fields += "\r\n";
+          fields += *k + ": " + *v;
+        }
+        if (!fields.empty())
+          mpv_set_property_string(mpv_, "http-header-fields", fields.c_str());
+      }
+    }
+  }
+
+  void FlushPendingOpen() {
+    if (!pending_open_ || pending_url_.empty() || !mpv_) return;
+    if (!pending_http_headers_.empty()) {
+      mpv_set_property_string(mpv_, "http-header-fields", pending_http_headers_.c_str());
+    }
+    if (hwnd_) ShowWindow(hwnd_, SW_HIDE);
+    // replace 即可换片；勿 stop（打断无缝换集）。
+    if (pending_start_ms_ > 0) {
+      char start_opt[64];
+      snprintf(start_opt, sizeof(start_opt), "start=%.3f", pending_start_ms_ / 1000.0);
+      Command({"loadfile", pending_url_, "replace", start_opt});
+    } else {
+      Command({"loadfile", pending_url_, "replace"});
+    }
+    Command({"set", "pause", "no"});
+    pending_open_ = false;
+    pending_url_.clear();
+    pending_start_ms_ = 0;
+    pending_http_headers_.clear();
+  }
+
+  std::string ExtractHttpHeaders(const EncodableMap* args) {
+    if (!args) return {};
+    auto hit = args->find(EncodableValue("headers"));
+    if (hit == args->end()) return {};
+    const auto* headers = std::get_if<EncodableMap>(&hit->second);
+    if (!headers) return {};
+    std::string fields;
+    for (const auto& kv : *headers) {
+      const auto* k = std::get_if<std::string>(&kv.first);
+      const auto* v = std::get_if<std::string>(&kv.second);
+      if (!k || !v) continue;
+      if (!fields.empty()) fields += "\r\n";
+      fields += *k + ": " + *v;
+    }
+    return fields;
   }
 
   void Command(const std::vector<std::string>& args) {
@@ -306,72 +444,35 @@ class KotvMpvPlugin : public flutter::Plugin {
     }
     if (method == "create") {
       IngestDecodeArgs(args);
-      if (!EnsureMpv()) {
-        result->Error("CREATE_FAILED", "mpv init failed");
-        return;
+      // 有槽则按槽创建；无槽也先返回 ok，等 updateFrame 再真正建 HWND。
+      if (have_frame_) {
+        if (!EnsureMpv()) {
+          result->Error("CREATE_FAILED", "mpv init failed");
+          return;
+        }
+        ApplyDecode();
       }
-      ApplyDecode();
       result->Success(EncodableValue(EncodableMap{
           {EncodableValue("ok"), EncodableValue(true)},
           {EncodableValue("ready"), EncodableValue(true)},
+          {EncodableValue("deferred"), EncodableValue(mpv_ == nullptr)},
       }));
       return;
     }
     if (method == "open") {
       IngestDecodeArgs(args);
+      pending_url_ = ArgString(args, "url");
+      pending_start_ms_ = ArgInt64(args, "startAtMs");
+      pending_http_headers_ = ExtractHttpHeaders(args);
+      pending_open_ = !pending_url_.empty();
+      // 槽未到：先挂起 URL，updateFrame 按槽建窗后再 loadfile（绝不先造左上角小窗）。
       if (!EnsureMpv()) {
-        result->Error("OPEN_FAILED", "mpv init failed");
+        result->Success();
         return;
       }
       ApplyDecode();
-      if (args) {
-        auto pit = args->find(EncodableValue("props"));
-        if (pit != args->end()) {
-          if (const auto* props = std::get_if<EncodableMap>(&pit->second)) {
-            for (const auto& kv : *props) {
-              const auto* k = std::get_if<std::string>(&kv.first);
-              if (!k) continue;
-              std::string v;
-              if (const auto* s = std::get_if<std::string>(&kv.second))
-                v = *s;
-              else if (const auto* b = std::get_if<bool>(&kv.second))
-                v = *b ? "yes" : "no";
-              else if (const auto* i = std::get_if<int32_t>(&kv.second))
-                v = std::to_string(*i);
-              else if (const auto* d = std::get_if<double>(&kv.second))
-                v = std::to_string(*d);
-              if (!v.empty()) mpv_set_property_string(mpv_, k->c_str(), v.c_str());
-            }
-          }
-        }
-        auto hit = args->find(EncodableValue("headers"));
-        if (hit != args->end()) {
-          if (const auto* headers = std::get_if<EncodableMap>(&hit->second)) {
-            std::string fields;
-            for (const auto& kv : *headers) {
-              const auto* k = std::get_if<std::string>(&kv.first);
-              const auto* v = std::get_if<std::string>(&kv.second);
-              if (!k || !v) continue;
-              if (!fields.empty()) fields += "\r\n";
-              fields += *k + ": " + *v;
-            }
-            if (!fields.empty())
-              mpv_set_property_string(mpv_, "http-header-fields", fields.c_str());
-          }
-        }
-      }
-      ShowWindow(hwnd_, SW_HIDE);
-      const std::string url = ArgString(args, "url");
-      const int64_t start = ArgInt64(args, "startAtMs");
-      // replace 即可换片；勿 stop（打断无缝换集）。
-      if (start > 0) {
-        char start_opt[64];
-        snprintf(start_opt, sizeof(start_opt), "start=%.3f", start / 1000.0);
-        Command({"loadfile", url, "replace", start_opt});
-      } else {
-        Command({"loadfile", url, "replace"});
-      }
-      Command({"set", "pause", "no"});
+      IngestOpenExtras(args);
+      FlushPendingOpen();
       result->Success();
       return;
     }
@@ -437,44 +538,28 @@ class KotvMpvPlugin : public flutter::Plugin {
       return;
     }
     if (method == "updateFrame" || method == "setVideoRect") {
-      if (hwnd_ && args) {
+      if (args) {
         const double x = ArgDouble(args, "x");
         const double y = ArgDouble(args, "y");
         const double w = ArgDouble(args, "w", ArgDouble(args, "width"));
         const double h = ArgDouble(args, "h", ArgDouble(args, "height"));
-        if (w > 1 && h > 1) {
-          // Dart localToGlobal：相对 Flutter 视图的逻辑像素（不是 Win32 屏幕坐标）。
-          // 子 HWND 用物理像素；勿 ScreenToClient（会把视图坐标误当屏幕坐标缩到一角）。
-          // 优先用 Dart 传入的 MediaQuery.devicePixelRatio，与 Flutter 布局一致。
-          HWND parent = FlutterHwnd();
-          double dpr = ArgDouble(args, "dpr", 0);
-          if (dpr <= 0 && parent) {
-            HDC dc = GetDC(parent);
-            if (dc) {
-              dpr = GetDeviceCaps(dc, LOGPIXELSX) / 96.0;
-              ReleaseDC(parent, dc);
+        const double dpr = ArgDouble(args, "dpr", 0);
+        // 先记槽；无 HWND 时按槽直接创建，不再 Move 占位小窗。
+        StoreFrame(x, y, w, h, dpr);
+        if (have_frame_) {
+          if (!hwnd_ || !mpv_) {
+            if (EnsureMpv()) {
+              ApplyDecode();
+              FlushPendingOpen();
+            }
+          } else {
+            int cx = 0, cy = 0, cw = 0, ch = 0;
+            if (ResolveFramePhysical(&cx, &cy, &cw, &ch)) {
+              MoveWindow(hwnd_, cx, cy, cw, ch, TRUE);
             }
           }
-          if (dpr <= 0) dpr = 1.0;
-          const int cx = static_cast<int>(std::lround(x * dpr));
-          const int cy = static_cast<int>(std::lround(y * dpr));
-          const int cw = std::max(1, static_cast<int>(std::lround(w * dpr)));
-          const int ch = std::max(1, static_cast<int>(std::lround(h * dpr)));
-          MoveWindow(hwnd_, cx, cy, cw, ch, TRUE);
-          have_frame_ = true;
-          if (visible_) ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
-          // Win7：抬升进程内播控/弹幕子窗，避免被视频 HWND 压住。
-          if (parent) {
-            auto raise_class = [parent](const wchar_t* cls) {
-              HWND child = nullptr;
-              while ((child = FindWindowExW(parent, child, cls, nullptr)) != nullptr) {
-                SetWindowPos(child, HWND_TOP, 0, 0, 0, 0,
-                             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-              }
-            };
-            raise_class(L"KotvWinChromeDanmaku");
-            raise_class(L"KotvWinChromePanel");
-          }
+          if (hwnd_ && visible_) ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
+          RaiseChromeOverVideo();
         }
       }
       result->Success();
@@ -525,6 +610,15 @@ class KotvMpvPlugin : public flutter::Plugin {
   bool direct_ = false;
   bool visible_ = false;
   bool have_frame_ = false;
+  double frame_x_ = 0;
+  double frame_y_ = 0;
+  double frame_w_ = 0;
+  double frame_h_ = 0;
+  double frame_dpr_ = 0;
+  bool pending_open_ = false;
+  std::string pending_url_;
+  int64_t pending_start_ms_ = 0;
+  std::string pending_http_headers_;
 };
 
 }  // namespace
