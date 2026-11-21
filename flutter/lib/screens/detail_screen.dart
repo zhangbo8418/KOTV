@@ -2659,6 +2659,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           if (_skipOpeningEnding || startMs > 0) {
             _openingSeekDone = true;
           }
+          // Win7：先量槽并按槽建 HWND，再 open/loadfile；否则 native 挂起 URL + waitReady 会死等。
+          if (KotvWinChrome.isNeeded) {
+            final ok = await _ensureWin7VideoSlotFrame();
+            if (!ok) {
+              throw StateError('视频槽未就绪');
+            }
+          }
           // 开播标定 live；引擎 media-live / isLive 仅供守卫，不预拉节目单。
           await pb.open(
             openUrl,
@@ -3786,25 +3793,39 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     }
   }
 
+  /// Win7：有槽才建 HWND / loadfile。open 前必须 await，避免挂起 URL 后 waitReady 永等 ready。
+  Future<bool> _ensureWin7VideoSlotFrame() async {
+    if (!kotvUsesWindowsNativeChrome() || !mounted) return true;
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    for (var i = 0; i < 20; i++) {
+      if (!mounted) return false;
+      _syncVideoSlotRect();
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return false;
+      final video = _winRectOf(_videoSlotKey) ?? _winRectOf(_inlineSurfaceKey);
+      if (video != null) {
+        await kotvMpvUpdateVideoFrame(
+          x: video['left']!,
+          y: video['top']!,
+          w: video['width']!,
+          h: video['height']!,
+          dpr: dpr,
+        );
+        return true;
+      }
+    }
+    return false;
+  }
+
   void _syncWinInlineChrome() {
     if (!KotvWinChrome.isNeeded || !mounted) return;
     if (_immersiveFullscreen || _playUrl.isEmpty) {
       _unbindWinInlineChrome();
       return;
     }
-    final anchor = _winRectOf(_inlineChromeAnchorKey);
-    if (anchor == null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _syncWinInlineChrome();
-      });
-      return;
-    }
-    if (_winChromeToken == 0) {
-      _winChromeToken = KotvWinChrome.bind(_onWinInlineChromeEvent);
-    }
     final surface = _winRectOf(_inlineSurfaceKey);
     final slot = _winRectOf(_videoSlotKey);
-    // 视频 HWND 与黑槽（或 surface）同矩形，和 chrome ResolveSurface 同源。
+    // 视频几何不依赖底栏锚点：锚点未好也要先推槽，否则 open 挂起后永远等不到 ready。
     final video = slot ?? surface;
     if (video != null) {
       final dpr = MediaQuery.devicePixelRatioOf(context);
@@ -3815,6 +3836,16 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         h: video['height']!,
         dpr: dpr,
       ));
+    }
+    final anchor = _winRectOf(_inlineChromeAnchorKey);
+    if (anchor == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _syncWinInlineChrome();
+      });
+      return;
+    }
+    if (_winChromeToken == 0) {
+      _winChromeToken = KotvWinChrome.bind(_onWinInlineChromeEvent);
     }
     final srcName = _danmakuSources.isEmpty
         ? ''

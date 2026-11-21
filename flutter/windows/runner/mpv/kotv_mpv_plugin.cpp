@@ -465,9 +465,13 @@ class KotvMpvPlugin : public flutter::Plugin {
       pending_start_ms_ = ArgInt64(args, "startAtMs");
       pending_http_headers_ = ExtractHttpHeaders(args);
       pending_open_ = !pending_url_.empty();
-      // 槽未到：先挂起 URL，updateFrame 按槽建窗后再 loadfile（绝不先造左上角小窗）。
+      // 必须先有槽（Dart 在 open 前 await updateFrame）。无槽则失败，避免 Success+waitReady 死等。
       if (!EnsureMpv()) {
-        result->Success();
+        pending_open_ = false;
+        pending_url_.clear();
+        pending_start_ms_ = 0;
+        pending_http_headers_.clear();
+        result->Error("NO_SLOT", "video slot rect required before open");
         return;
       }
       ApplyDecode();
