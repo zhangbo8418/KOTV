@@ -80,12 +80,14 @@ kotv_export_fvp_deps
 flutter config --enable-windows-desktop
 KOTV_FLUTTER_TARGET=windows "$ROOT/scripts/flutter-pub-get.sh"
 kotv_ensure_mdk_windows_sdk
-# Win7：CMake 编入进程内 GDI+ 播控；Win8+：显式关闭，与 macOS 一样只走 Flutter chrome。
+# Win7 播控开关由 runner/CMakeLists.txt 读 ENV{KOTV_WIN7}（option 默认 ON/OFF）。
+# 勿写 `flutter build -- -DKOTV_WIN7_CHROME=…`：会被当成 Dart target（Target file not found）。
 if [[ "${KOTV_WIN7:-}" == "1" ]]; then
-  flutter build windows --release -- -DKOTV_WIN7_CHROME=ON
+  echo "==> Win7: expect KOTV_WIN7_CHROME via ENV KOTV_WIN7=1"
 else
-  flutter build windows --release -- -DKOTV_WIN7_CHROME=OFF
+  echo "==> Win8+: KOTV_WIN7 unset → chrome OFF (Flutter chrome only)"
 fi
+flutter build windows --release
 
 [[ -f "$RELEASE_DIR/kotv.exe" ]] || { echo "missing $RELEASE_DIR/kotv.exe" >&2; exit 1; }
 kotv_flutter_asset_engines_restore
