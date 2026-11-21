@@ -491,6 +491,9 @@ class KotvWinChrome {
     final progress = dur.inMilliseconds > 0
         ? (pos.inMilliseconds / dur.inMilliseconds).clamp(0.0, 1.0)
         : 0.0;
+    final buffered = dur.inMilliseconds > 0
+        ? (playback.buffered.inMilliseconds / dur.inMilliseconds).clamp(0.0, 1.0)
+        : 0.0;
     await update({
       'mode': 'vod_inline',
       'anchorScreen': anchorScreen,
@@ -498,6 +501,7 @@ class KotvWinChrome {
       'positionLabel': formatClock(pos),
       'durationLabel': formatClock(dur),
       'progress': progress,
+      'buffered': buffered,
       'positionSec': pos.inMilliseconds / 1000.0,
       'rate': playback.rate,
       'playing': playback.playing,

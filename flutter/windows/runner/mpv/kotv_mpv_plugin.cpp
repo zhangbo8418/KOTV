@@ -110,10 +110,13 @@ class KotvMpvPlugin : public flutter::Plugin {
     HWND parent = FlutterHwnd();
     if (!parent) return false;
 
+    // 1×1 且保持隐藏，直到第一次有效 updateFrame，避免默认 100×100 露在左上角。
     hwnd_ = CreateWindowExW(WS_EX_NOPARENTNOTIFY, L"STATIC", L"",
-                            WS_CHILD | WS_CLIPSIBLINGS | WS_DISABLED, 0, 0, 100, 100,
+                            WS_CHILD | WS_CLIPSIBLINGS | WS_DISABLED, 0, 0, 1, 1,
                             parent, nullptr, GetModuleHandle(nullptr), nullptr);
     if (!hwnd_) return false;
+    have_frame_ = false;
+    ShowWindow(hwnd_, SW_HIDE);
 
     mpv_ = mpv_create();
     if (!mpv_) {
@@ -157,6 +160,8 @@ class KotvMpvPlugin : public flutter::Plugin {
       DestroyWindow(hwnd_);
       hwnd_ = nullptr;
     }
+    have_frame_ = false;
+    visible_ = false;
   }
 
   void ApplyDecode() {
@@ -420,7 +425,14 @@ class KotvMpvPlugin : public flutter::Plugin {
     }
     if (method == "setVisible") {
       visible_ = ArgBool(args, "visible");
-      if (hwnd_) ShowWindow(hwnd_, visible_ ? SW_SHOWNOACTIVATE : SW_HIDE);
+      if (hwnd_) {
+        // 无有效几何前不 Show，避免 1×1/默认窗停在客户区左上角。
+        if (visible_ && have_frame_) {
+          ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
+        } else {
+          ShowWindow(hwnd_, SW_HIDE);
+        }
+      }
       result->Success();
       return;
     }
@@ -433,9 +445,10 @@ class KotvMpvPlugin : public flutter::Plugin {
         if (w > 1 && h > 1) {
           // Dart localToGlobal：相对 Flutter 视图的逻辑像素（不是 Win32 屏幕坐标）。
           // 子 HWND 用物理像素；勿 ScreenToClient（会把视图坐标误当屏幕坐标缩到一角）。
+          // 优先用 Dart 传入的 MediaQuery.devicePixelRatio，与 Flutter 布局一致。
           HWND parent = FlutterHwnd();
-          double dpr = 1.0;
-          if (parent) {
+          double dpr = ArgDouble(args, "dpr", 0);
+          if (dpr <= 0 && parent) {
             HDC dc = GetDC(parent);
             if (dc) {
               dpr = GetDeviceCaps(dc, LOGPIXELSX) / 96.0;
@@ -448,6 +461,8 @@ class KotvMpvPlugin : public flutter::Plugin {
           const int cw = std::max(1, static_cast<int>(std::lround(w * dpr)));
           const int ch = std::max(1, static_cast<int>(std::lround(h * dpr)));
           MoveWindow(hwnd_, cx, cy, cw, ch, TRUE);
+          have_frame_ = true;
+          if (visible_) ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
           // Win7：抬升进程内播控/弹幕子窗，避免被视频 HWND 压住。
           if (parent) {
             auto raise_class = [parent](const wchar_t* cls) {
@@ -509,6 +524,7 @@ class KotvMpvPlugin : public flutter::Plugin {
   std::string hwdec_;
   bool direct_ = false;
   bool visible_ = false;
+  bool have_frame_ = false;
 };
 
 }  // namespace

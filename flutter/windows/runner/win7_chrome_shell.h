@@ -60,11 +60,13 @@ class Win7ChromeShell {
   void SetEnabled(bool enabled);
   bool enabled() const { return enabled_; }
 
-  void ApplyUpdate(const ChromeMap& args);
+  // 返回 true 表示几何/显隐/mode 变化，调用方应 Layout；仅进度/标签等则 Invalidate 即可。
+  bool ApplyUpdate(const ChromeMap& args);
   void ApplyDanmaku(const ChromeMap& args);
   void ApplySheet(const ChromeMap& args);
   void HideSheet();
   void Layout();
+  void InvalidateChrome();
 
   void LoadDemoVodFullscreen();
   void LoadDemoVodInline();
@@ -75,6 +77,11 @@ class Win7ChromeShell {
  private:
   struct Panel {
     HWND hwnd = nullptr;
+    int x = 0;
+    int y = 0;
+    int w = 0;
+    int h = 0;
+    bool shown = false;
   };
 
   struct DanmakuItem {
@@ -128,7 +135,6 @@ class Win7ChromeShell {
   void PaintListSheet(HDC hdc, const RECT& card, bool light);
   void PaintDanmaku(HWND hwnd);
   void CloseSheet(bool emit_close = true);
-  void InvalidateChrome();
   void ApplyLocalAction(const std::string& type, double value = 0);
   void EmitOffsets();
   void OpenSheet(const std::string& kind, const std::wstring& title,
@@ -261,6 +267,7 @@ class Win7ChromeShell {
   bool playing_ = true;
   bool buffering_ = false;
   double progress_ = 0;
+  double buffered_ = 0;
   double position_sec_ = 0;
   double rate_ = 1.0;
   int opening_sec_ = 0;

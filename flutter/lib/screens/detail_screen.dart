@@ -252,6 +252,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   /// Win7 画面区（含底栏 Stack）锚点，弹幕只盖此矩形。
   final GlobalKey _inlineSurfaceKey = GlobalKey(debugLabel: 'kotv_inline_surface');
   int _winChromeToken = 0;
+  /// Win7 pushVodInline 去抖快照（几何/播态/量化进度）。
+  String? _lastWinInlineChromeSnap;
   int _epPage = 0;
   /// 焦点停留后切换线路 / 分集区间。
   final KotvFocusArm _detailFocusArm = KotvFocusArm();
@@ -3042,6 +3044,24 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     }
 
     final underlayClip = _underlayGlobalClip();
+    // Win7：洞 HWND 与黑槽/surface 同全局矩形，避免自测缩到左上角。
+    Rect? forcedGeom;
+    if (kotvUsesWindowsNativeChrome() && !holdFullscreen) {
+      final slot = _winRectOf(_videoSlotKey);
+      final surface = _winRectOf(_inlineSurfaceKey);
+      final m = slot ?? surface;
+      if (m != null) {
+        forcedGeom = Rect.fromLTWH(m['left']!, m['top']!, m['width']!, m['height']!);
+      } else {
+        final stackBox =
+            _detailStackKey.currentContext?.findRenderObject() as RenderBox?;
+        if (stackBox != null && stackBox.hasSize && stackBox.attached) {
+          try {
+            forcedGeom = stackBox.localToGlobal(paint.topLeft) & paint.size;
+          } catch (_) {}
+        }
+      }
+    }
     return ValueListenableBuilder<double>(
       valueListenable: _fsSwipeDy,
       builder: (context, swipeDy, child) {
@@ -3062,6 +3082,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         );
         if (underlayClip != null) {
           layer = KotvMpvUnderlayClip(globalClip: underlayClip, child: layer);
+        }
+        if (forcedGeom != null) {
+          layer = KotvMpvForcedGeom(globalRect: forcedGeom, child: layer);
         }
         return Positioned(
           left: clip!.left,
@@ -3697,7 +3720,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   Widget _inlineChrome() {
     // Win7：HWND 盖住 Flutter 内嵌栏 → 占位量锚，原生 kotv_win_chrome 承接。
     if (KotvWinChrome.isNeeded) {
-      return SizedBox(key: _inlineChromeAnchorKey, height: 78, width: double.infinity);
+      return SizedBox(
+        key: _inlineChromeAnchorKey,
+        height: KotvWinChrome.inlineBottomH,
+        width: double.infinity,
+      );
     }
     return VodInlineControls(
       key: _inlineChromeKey,
@@ -3738,6 +3765,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     if (_winChromeToken == 0) return;
     KotvWinChrome.unbind(_winChromeToken);
     _winChromeToken = 0;
+    _lastWinInlineChromeSnap = null;
   }
 
   Map<String, double>? _winRectOf(GlobalKey key) {
@@ -3774,13 +3802,34 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     if (_winChromeToken == 0) {
       _winChromeToken = KotvWinChrome.bind(_onWinInlineChromeEvent);
     }
+    final surface = _winRectOf(_inlineSurfaceKey);
+    final slot = _winRectOf(_videoSlotKey);
+    // 视频 HWND 与黑槽（或 surface）同矩形，和 chrome ResolveSurface 同源。
+    final video = slot ?? surface;
+    if (video != null) {
+      final dpr = MediaQuery.devicePixelRatioOf(context);
+      unawaited(kotvMpvUpdateVideoFrame(
+        x: video['left']!,
+        y: video['top']!,
+        w: video['width']!,
+        h: video['height']!,
+        dpr: dpr,
+      ));
+    }
     final srcName = _danmakuSources.isEmpty
         ? ''
         : _danmakuSources[_danmakuSourceIdx.clamp(0, _danmakuSources.length - 1)].name;
+    final snap = _winInlineChromeSnapshot(
+      anchor: anchor,
+      surface: surface,
+      srcName: srcName,
+    );
+    if (snap == _lastWinInlineChromeSnap) return;
+    _lastWinInlineChromeSnap = snap;
     unawaited(KotvWinChrome.pushVodInline(
       playback: _playback,
       anchorScreen: anchor,
-      surfaceScreen: _winRectOf(_inlineSurfaceKey),
+      surfaceScreen: surface,
       chromeVisible: true,
       showDirect: kotvShowDirectOutput(_playback, _decodeMode),
       directOn: _playback.directOutput,
@@ -3793,6 +3842,42 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         danmakuSourceName: srcName,
       ),
     ));
+  }
+
+  String _winInlineChromeSnapshot({
+    required Map<String, double> anchor,
+    required Map<String, double>? surface,
+    required String srcName,
+  }) {
+    final p = _playback;
+    final dur = p.duration.inMilliseconds;
+    final pos = p.position.inMilliseconds;
+    final buf = p.buffered.inMilliseconds;
+    final progress = dur > 0 ? (pos / dur).clamp(0.0, 1.0) : 0.0;
+    final buffered = dur > 0 ? (buf / dur).clamp(0.0, 1.0) : 0.0;
+    // 进度量化到 0.5%，减少 listener 刷屏；几何/播态变化仍立即推。
+    final progQ = (progress * 200).round();
+    final bufQ = (buffered * 200).round();
+    return [
+      anchor['left']?.toStringAsFixed(1),
+      anchor['top']?.toStringAsFixed(1),
+      anchor['width']?.toStringAsFixed(1),
+      anchor['height']?.toStringAsFixed(1),
+      surface?['left']?.toStringAsFixed(1),
+      surface?['top']?.toStringAsFixed(1),
+      surface?['width']?.toStringAsFixed(1),
+      surface?['height']?.toStringAsFixed(1),
+      p.playing,
+      p.buffering || p.stalling,
+      progQ,
+      bufQ,
+      p.volume.round(),
+      p.directOutput,
+      _miniDesktop,
+      _danmakuOn,
+      srcName,
+      kotvShowDirectOutput(p, _decodeMode),
+    ].join('|');
   }
 
   void _onWinInlineChromeEvent(Map<String, dynamic> e) {

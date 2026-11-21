@@ -1,8 +1,57 @@
+import 'dart:async' show unawaited;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'kotv_platform.dart';
 import 'kotv_win_chrome.dart';
+
+/// 下发视频 HWND 几何（逻辑像素 + 可选 dpr）。Win7 详情内嵌与 Hole 共用。
+Future<void> kotvMpvUpdateVideoFrame({
+  required double x,
+  required double y,
+  required double w,
+  required double h,
+  double? dpr,
+}) async {
+  if (w < 8 || h < 8) return;
+  try {
+    await const MethodChannel('kotv_mpv').invokeMethod('updateFrame', {
+      'x': x,
+      'y': y,
+      'w': w,
+      'h': h,
+      if (dpr != null && dpr > 0) 'dpr': dpr,
+    });
+  } catch (_) {}
+}
+
+/// Win7：强制洞矩形（视图逻辑坐标），与 chrome surface/slot 同源，避免自测漂移。
+class KotvMpvForcedGeom extends InheritedWidget {
+  const KotvMpvForcedGeom({
+    super.key,
+    required this.globalRect,
+    required super.child,
+  });
+
+  final Rect? globalRect;
+
+  static Rect? maybeOf(BuildContext context) {
+    return context.dependOnInheritedWidgetOfExactType<KotvMpvForcedGeom>()?.globalRect;
+  }
+
+  @override
+  bool updateShouldNotify(covariant KotvMpvForcedGeom oldWidget) {
+    final a = globalRect;
+    final b = oldWidget.globalRect;
+    if (identical(a, b)) return false;
+    if (a == null || b == null) return a != b;
+    return (a.left - b.left).abs() > 0.5 ||
+        (a.top - b.top).abs() > 0.5 ||
+        (a.width - b.width).abs() > 0.5 ||
+        (a.height - b.height).abs() > 0.5;
+  }
+}
 
 /// macOS ASBDL / Win8+ DComp：画面在 Flutter 之下，洞须 clear。
 bool kotvMpvUsesUnderlayHole() =>
@@ -118,16 +167,18 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
 
   Future<void> _updateFrame(Rect r) async {
     try {
+      final dpr = MediaQuery.maybeDevicePixelRatioOf(context) ?? 1.0;
       await _ch.invokeMethod('updateFrame', {
         'x': r.left,
         'y': r.top,
         'w': r.width,
         'h': r.height,
+        'dpr': dpr,
       });
     } catch (_) {}
   }
 
-  void _sync() {
+  Future<void> _syncAsync() async {
     if (!mounted) return;
     final box = context.findRenderObject() as RenderBox?;
     if (box == null || !box.hasSize) return;
@@ -135,7 +186,7 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
     // Win7：路由被盖住时藏 HWND，避免挡住对话框。
     final route = ModalRoute.of(context);
     if (_win7Overlay && route != null && !route.isCurrent) {
-      _setVisible(false);
+      await _setVisible(false);
       return;
     }
 
@@ -144,9 +195,15 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
     var hole = origin & size;
 
     if (_win7Overlay) {
-      final clip = KotvMpvUnderlayClip.maybeOf(context);
-      if (clip != null) {
-        hole = hole.intersect(clip);
+      // 详情内嵌优先用槽/surface 覆盖几何（与 chrome 同源），避免洞自测漂移。
+      final forced = KotvMpvForcedGeom.maybeOf(context);
+      if (forced != null && forced.width >= 8 && forced.height >= 8) {
+        hole = forced;
+      } else {
+        final clip = KotvMpvUnderlayClip.maybeOf(context);
+        if (clip != null) {
+          hole = hole.intersect(clip);
+        }
       }
     }
 
@@ -155,7 +212,7 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
     _lastSize = size;
 
     if (hole.width < 1 || hole.height < 1) {
-      if (_win7Overlay) _setVisible(false);
+      if (_win7Overlay) await _setVisible(false);
       return;
     }
 
@@ -166,14 +223,18 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
         (_lastSent!.height - hole.height).abs() < 0.5;
     if (!sameSent || moved) {
       _lastSent = hole;
-      _updateFrame(hole);
+      await _updateFrame(hole);
     }
 
     if (_win7Overlay) {
       if (widget.ready && !widget.coverUntilReady) {
-        _setVisible(true);
+        await _setVisible(true);
       }
     }
+  }
+
+  void _sync() {
+    unawaited(_syncAsync());
   }
 
   @override

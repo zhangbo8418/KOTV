@@ -41,8 +41,10 @@ constexpr int kCenterSz = 72;
 constexpr int kModalW = 360;
 constexpr int kModalMaxH = 560;
 constexpr int kModalMoreW = 420;
-constexpr COLORREF kPink = RGB(229, 45, 39);       // #E52D27
+constexpr COLORREF kPink = RGB(229, 45, 39);       // #E52D27（全屏等旧强调）
+constexpr COLORREF kPrimary = RGB(207, 66, 116);   // #CF4274 = KotvColors.primary
 constexpr COLORREF kPinkMuted = RGB(180, 90, 110);
+constexpr BYTE kInlineBarAlpha = 204;             // 0xCC ≈ VodInlineControls 0xCC0A0A12
 constexpr COLORREF kPanelDark = RGB(18, 10, 28);    // #120A1C
 constexpr COLORREF kBarDark = RGB(12, 8, 18);
 constexpr COLORREF kBarAlpha = RGB(28, 20, 36);
@@ -612,13 +614,21 @@ void DrawBadge(HDC hdc, int x, int y, const std::wstring& text) {
   DrawTextLine(hdc, brc, text, RGB(255, 255, 255), 8, true, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 }
 
-void DrawSeekTrack(HDC hdc, const RECT& track, double progress, bool knob) {
+void DrawSeekTrack(HDC hdc, const RECT& track, double progress, bool knob,
+                   COLORREF fill = kPink, double buffered = -1) {
   FillRoundRect(hdc, track, 2, RGB(55, 48, 62));
   const int w = track.right - track.left;
+  if (buffered > progress && buffered > 0) {
+    const int bw = static_cast<int>(w * std::clamp(buffered, 0.0, 1.0));
+    if (bw > 0) {
+      RECT buf{track.left, track.top, track.left + bw, track.bottom};
+      FillRoundRect(hdc, buf, 2, RGB(90, 78, 98));
+    }
+  }
   const int filled = static_cast<int>(w * std::clamp(progress, 0.0, 1.0));
   if (filled > 0) {
     RECT prog{track.left, track.top, track.left + filled, track.bottom};
-    FillRoundRect(hdc, prog, 2, kPink);
+    FillRoundRect(hdc, prog, 2, fill);
   }
   if (knob && filled >= 0) {
     const int kx = track.left + filled;
@@ -818,11 +828,23 @@ void Win7ChromeShell::DestroyAll() {
 void Win7ChromeShell::ShowPanel(Panel& p, bool show, int x, int y, int w, int h) {
   if (!p.hwnd) return;
   if (!show || w <= 0 || h <= 0) {
-    ShowWindow(p.hwnd, SW_HIDE);
+    if (p.shown) ShowWindow(p.hwnd, SW_HIDE);
+    p.shown = false;
     return;
   }
-  SetWindowPos(p.hwnd, HWND_TOP, x, y, w, h, SWP_SHOWWINDOW | SWP_NOACTIVATE);
-  InvalidateRect(p.hwnd, nullptr, TRUE);
+  const bool moved = !p.shown || p.x != x || p.y != y || p.w != w || p.h != h;
+  if (moved) {
+    SetWindowPos(p.hwnd, HWND_TOP, x, y, w, h, SWP_SHOWWINDOW | SWP_NOACTIVATE);
+    p.x = x;
+    p.y = y;
+    p.w = w;
+    p.h = h;
+    // 几何变才擦背景；进度刷新走 InvalidateChrome(FALSE)。
+    InvalidateRect(p.hwnd, nullptr, FALSE);
+  } else if (!IsWindowVisible(p.hwnd)) {
+    ShowWindow(p.hwnd, SW_SHOWNOACTIVATE);
+  }
+  p.shown = true;
 }
 
 void Win7ChromeShell::Layout() {
@@ -864,7 +886,7 @@ void Win7ChromeShell::Layout() {
   const bool inline_mode = mode_ == "vod_inline";
   const bool live_mode = mode_ == "live";
   if (inline_mode) {
-    // 详情非全屏：底栏锚在视频卡片控件区（屏幕坐标 → Flutter 客户区）
+    // 详情非全屏：底栏锚在视频卡片控件区（视图逻辑坐标 × DPI → 子窗客户区）
     int ax = 0, ay = 0, aw = 0, ah = 0;
     const bool ok = bottom_visible_ && ResolveAnchor(&ax, &ay, &aw, &ah);
     ShowPanel(top_, false, 0, 0, 0, 0);
@@ -874,9 +896,23 @@ void Win7ChromeShell::Layout() {
     ShowPanel(channel_info_, false, 0, 0, 0, 0);
     ShowPanel(center_play_, false, 0, 0, 0, 0);
     ShowPanel(bottom_, ok, ax, ay, aw, ah > 0 ? ah : kInlineBottomH);
+    // 整栏半透明近似 VodInlineControls 0xCC0A0A12
+    if (bottom_.hwnd) {
+      const LONG ex = GetWindowLongW(bottom_.hwnd, GWL_EXSTYLE);
+      if ((ex & WS_EX_LAYERED) == 0) {
+        SetWindowLongW(bottom_.hwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED);
+      }
+      SetLayeredWindowAttributes(bottom_.hwnd, 0, kInlineBarAlpha, LWA_ALPHA);
+    }
   } else if (live_mode) {
     // 直播：无点播顶底栏；左栏顶满；频道信息条仅在左右栏都关时出现（对齐 Flutter）
     ShowPanel(top_, false, 0, 0, 0, 0);
+    if (bottom_.hwnd) {
+      const LONG ex = GetWindowLongW(bottom_.hwnd, GWL_EXSTYLE);
+      if (ex & WS_EX_LAYERED) {
+        SetWindowLongW(bottom_.hwnd, GWL_EXSTYLE, ex & ~WS_EX_LAYERED);
+      }
+    }
     ShowPanel(bottom_, false, 0, 0, 0, 0);
     ShowPanel(episodes_, false, 0, 0, 0, 0);
     ShowPanel(center_play_, false, 0, 0, 0, 0);
@@ -889,6 +925,12 @@ void Win7ChromeShell::Layout() {
         channel_visible_ && !live_left_visible_ && !live_right_visible_;
     ShowPanel(channel_info_, show_ch, 16, H - kChannelH - 16, std::max(0, W - 32), kChannelH);
   } else {
+    if (bottom_.hwnd) {
+      const LONG ex = GetWindowLongW(bottom_.hwnd, GWL_EXSTYLE);
+      if (ex & WS_EX_LAYERED) {
+        SetWindowLongW(bottom_.hwnd, GWL_EXSTYLE, ex & ~WS_EX_LAYERED);
+      }
+    }
     ShowPanel(top_, top_visible_, 0, 0, W, kTopH);
     ShowPanel(bottom_, bottom_visible_, 0, H - kBottomH, W, kBottomH);
     // 仅开选集时顶底栏隐藏：面板应顶满客户区，避免头尾悬空断开。
@@ -936,8 +978,9 @@ void Win7ChromeShell::LayoutGesture() {
 }
 
 void Win7ChromeShell::InvalidateChrome() {
+  // FALSE：不擦背景，减轻进度刷新时整栏闪烁。
   auto inv = [](HWND h) {
-    if (h) InvalidateRect(h, nullptr, TRUE);
+    if (h) InvalidateRect(h, nullptr, FALSE);
   };
   inv(top_.hwnd);
   inv(bottom_.hwnd);
@@ -1602,14 +1645,16 @@ void Win7ChromeShell::PaintBottom(HDC hdc, const RECT& rc) {
 }
 
 void Win7ChromeShell::PaintBottomInline(HDC hdc, const RECT& rc) {
-  // 详情内嵌：对齐 VodInlineControls —— 动作行 + 时间 + 音量，底下一根进度
+  // 与 VodInlineControls 同结构：动作行 + 时间 + 音量，底下一根进度（主色 #CF4274）
   BeginHits(&bottom_hits_);
   FillRectColor(hdc, rc, RGB(10, 10, 18));
   const int W = static_cast<int>(rc.right - rc.left);
-  const int icon = W < 480 ? 32 : 40;
+  const bool narrow = W < 480;
+  const int icon = narrow ? 32 : 40;
+  const int pad = narrow ? 4 : 8;
   const int bar_h = static_cast<int>(rc.bottom - rc.top);
   const int ay = rc.top + (std::max)(2, (bar_h - 18 - icon) / 2);
-  int ax = rc.left + 6;
+  int ax = rc.left + pad;
   auto paint = [&](ChromeIcon kind, const char* id) {
     RECT ir{ax, ay, ax + icon, ay + icon};
     DrawChromeIcon(hdc, ir, kind, RGB(235, 235, 240));
@@ -1625,32 +1670,28 @@ void Win7ChromeShell::PaintBottomInline(HDC hdc, const RECT& rc) {
 
   std::wstring time = (pos_label_.empty() ? L"0:00" : pos_label_) + L" / " +
                       (dur_label_.empty() ? L"0:00" : dur_label_);
-  RECT time_rc{ax + 6, ay, rc.right - 56, ay + icon};
-  DrawTextLine(hdc, time_rc, time, RGB(200, 200, 210), 12);
+  const int vol_reserve = volume_expanded_ ? 150 : (narrow ? 44 : 50);
+  RECT time_rc{ax + pad, ay, rc.right - vol_reserve, ay + icon};
+  DrawTextLine(hdc, time_rc, time, RGB(200, 200, 210), narrow ? 11 : 12);
 
   if (volume_expanded_) {
-    RECT vol_rc{rc.right - 150, ay + 2, rc.right - 6, ay + icon - 2};
+    RECT vol_rc{rc.right - 150, ay + 2, rc.right - pad, ay + icon - 2};
     FillRoundRect(hdc, vol_rc, 8, RGB(40, 36, 48));
     RECT icon_rc{vol_rc.left, vol_rc.top, vol_rc.left + 32, vol_rc.bottom};
     DrawChromeIcon(hdc, icon_rc, ChromeIcon::Volume, RGB(235, 235, 240));
     AddHit("volumeToggle", icon_rc);
     RECT vtrack{vol_rc.left + 34, vol_rc.top + 12, vol_rc.right - 8, vol_rc.bottom - 12};
-    DrawSeekTrack(hdc, vtrack, volume_ / 100.0, false);
+    DrawSeekTrack(hdc, vtrack, volume_ / 100.0, false, kPrimary);
     AddHit("volume", vtrack);
   } else {
-    RECT vol_rc{rc.right - 44, ay, rc.right - 6, ay + icon};
+    RECT vol_rc{rc.right - 44, ay, rc.right - pad, ay + icon};
     DrawChromeIcon(hdc, vol_rc, ChromeIcon::Volume, RGB(235, 235, 240));
     AddHit("volumeToggle", vol_rc);
   }
 
   RECT track{rc.left + 10, rc.bottom - 14, rc.right - 10, rc.bottom - 10};
-  DrawSeekTrack(hdc, track, progress_, true);
+  DrawSeekTrack(hdc, track, progress_, true, kPrimary, buffered_);
   AddHit("seek", track);
-  if (buffering_) {
-    RECT b{rc.left, rc.top, rc.right, rc.top + 14};
-    DrawTextLine(hdc, b, L"加载中…", RGB(220, 180, 190), 10, false,
-                 DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-  }
 }
 
 void Win7ChromeShell::PaintBottomFullscreen(HDC hdc, const RECT& rc) {
@@ -2877,26 +2918,45 @@ void Win7ChromeShell::ApplySheet(const ChromeMap& args_ref) {
   LayoutModal();
 }
 
-void Win7ChromeShell::ApplyUpdate(const ChromeMap& args_ref) {
+bool Win7ChromeShell::ApplyUpdate(const ChromeMap& args_ref) {
   const ChromeMap* args = &args_ref;
+  bool need_layout = false;
+  auto mark_layout_if = [&](bool changed) {
+    if (changed) need_layout = true;
+  };
   if (HasKey(*args, "mode")) {
     const auto next = GetString(*args, "mode");
-    if (next != mode_) volume_expanded_ = false;
+    if (next != mode_) {
+      volume_expanded_ = false;
+      need_layout = true;
+    }
     mode_ = next;
   }
   // 矩形用扁平字段（适配层从 Dart map 展开）：anchorLeft/Top/Width/Height
   if (HasKey(*args, "anchorLeft") || HasKey(*args, "anchorWidth")) {
-    anchor_screen_l_ = GetDouble(*args, "anchorLeft");
-    anchor_screen_t_ = GetDouble(*args, "anchorTop");
-    anchor_screen_w_ = GetDouble(*args, "anchorWidth");
-    anchor_screen_h_ = GetDouble(*args, "anchorHeight");
+    const double l = GetDouble(*args, "anchorLeft");
+    const double t = GetDouble(*args, "anchorTop");
+    const double w = GetDouble(*args, "anchorWidth");
+    const double h = GetDouble(*args, "anchorHeight");
+    mark_layout_if(std::abs(l - anchor_screen_l_) > 0.5 || std::abs(t - anchor_screen_t_) > 0.5 ||
+                   std::abs(w - anchor_screen_w_) > 0.5 || std::abs(h - anchor_screen_h_) > 0.5);
+    anchor_screen_l_ = l;
+    anchor_screen_t_ = t;
+    anchor_screen_w_ = w;
+    anchor_screen_h_ = h;
     anchor_valid_ = anchor_screen_w_ >= 8 && anchor_screen_h_ >= 8;
   }
   if (HasKey(*args, "surfaceLeft") || HasKey(*args, "surfaceWidth")) {
-    surface_screen_l_ = GetDouble(*args, "surfaceLeft");
-    surface_screen_t_ = GetDouble(*args, "surfaceTop");
-    surface_screen_w_ = GetDouble(*args, "surfaceWidth");
-    surface_screen_h_ = GetDouble(*args, "surfaceHeight");
+    const double l = GetDouble(*args, "surfaceLeft");
+    const double t = GetDouble(*args, "surfaceTop");
+    const double w = GetDouble(*args, "surfaceWidth");
+    const double h = GetDouble(*args, "surfaceHeight");
+    mark_layout_if(std::abs(l - surface_screen_l_) > 0.5 || std::abs(t - surface_screen_t_) > 0.5 ||
+                   std::abs(w - surface_screen_w_) > 0.5 || std::abs(h - surface_screen_h_) > 0.5);
+    surface_screen_l_ = l;
+    surface_screen_t_ = t;
+    surface_screen_w_ = w;
+    surface_screen_h_ = h;
     surface_valid_ = surface_screen_w_ >= 8 && surface_screen_h_ >= 8;
   }
   if (HasKey(*args, "volume")) volume_ = GetDouble(*args, "volume", volume_);
@@ -2971,17 +3031,28 @@ void Win7ChromeShell::ApplyUpdate(const ChromeMap& args_ref) {
   if (HasKey(*args, "moreItems"))
     more_items_ = ParseLineItems(*args, "moreItems");
 
-  top_visible_ = GetBool(*args, "top", top_visible_);
-  bottom_visible_ = GetBool(*args, "bottom", bottom_visible_);
-  episodes_visible_ = GetBool(*args, "episodesVisible", episodes_visible_);
-  live_left_visible_ = GetBool(*args, "liveLeftVisible", live_left_visible_);
-  live_right_visible_ = GetBool(*args, "liveRightVisible", live_right_visible_);
-  channel_visible_ = GetBool(*args, "channelVisible", channel_visible_);
-  if (HasKey(*args, "epgOpen")) epg_open_ = GetBool(*args, "epgOpen", epg_open_);
-  center_visible_ = GetBool(*args, "centerVisible", center_visible_);
+  auto set_vis = [&](bool& field, const char* key) {
+    if (!HasKey(*args, key)) return;
+    const bool v = GetBool(*args, key, field);
+    mark_layout_if(v != field);
+    field = v;
+  };
+  set_vis(top_visible_, "top");
+  set_vis(bottom_visible_, "bottom");
+  set_vis(episodes_visible_, "episodesVisible");
+  set_vis(live_left_visible_, "liveLeftVisible");
+  set_vis(live_right_visible_, "liveRightVisible");
+  set_vis(channel_visible_, "channelVisible");
+  set_vis(center_visible_, "centerVisible");
+  if (HasKey(*args, "epgOpen")) {
+    const bool v = GetBool(*args, "epgOpen", epg_open_);
+    mark_layout_if(v != epg_open_);
+    epg_open_ = v;
+  }
   playing_ = GetBool(*args, "playing", playing_);
   buffering_ = GetBool(*args, "buffering", buffering_);
   progress_ = GetDouble(*args, "progress", progress_);
+  if (HasKey(*args, "buffered")) buffered_ = GetDouble(*args, "buffered", buffered_);
   if (HasKey(*args, "positionSec"))
     position_sec_ = GetDouble(*args, "positionSec", position_sec_);
   else if (HasKey(*args, "position"))
@@ -3008,6 +3079,7 @@ void Win7ChromeShell::ApplyUpdate(const ChromeMap& args_ref) {
   if (HasKey(*args, "actions")) actions_ = GetUtf8List(*args, "actions");
 
   /* nested danmaku: call ApplyDanmaku separately */
+  return need_layout;
 }
 
 

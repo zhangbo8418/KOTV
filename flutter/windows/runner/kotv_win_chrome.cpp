@@ -274,14 +274,21 @@ void KotvWinChrome::HandleMethod(const std::string& method, const EncodableMap* 
     return;
   }
   if (method == "update") {
+    bool need_layout = false;
     if (args) {
       auto cm = ToChromeMap(*args);
       const bool nested_dm = cm.count("__danmaku_nested") != 0;
       cm.erase("__danmaku_nested");
-      shell_.ApplyUpdate(cm);
+      need_layout = shell_.ApplyUpdate(cm);
       if (nested_dm) shell_.ApplyDanmaku(cm);
     }
-    if (shell_.enabled()) shell_.Layout();
+    if (shell_.enabled()) {
+      if (need_layout) {
+        shell_.Layout();
+      } else {
+        shell_.InvalidateChrome();
+      }
+    }
     success(EncodableValue(true));
     return;
   }
