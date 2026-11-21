@@ -3423,7 +3423,7 @@ LRESULT Win7ChromeShell::OnGestureMessage(HWND hwnd, UINT msg, WPARAM wParam, LP
         return 0;
       }
 
-      if (ges_mode_ == GestureMode::None) break;
+      if (ges_mode_ == GestureMode::None) return 0;
       const int dx = x - ges_down_.x;
       const int dy = y - ges_down_.y;
       if (!ges_moved_ && (std::abs(dx) > kGestureSlop || std::abs(dy) > kGestureSlop)) {
