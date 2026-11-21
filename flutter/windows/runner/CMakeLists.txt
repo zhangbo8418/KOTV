@@ -2,12 +2,13 @@ cmake_minimum_required(VERSION 3.14)
 project(runner LANGUAGES C CXX)
 
 # Win7 包（KOTV_WIN7=1）：编入进程内 GDI+ 播控壳。Win8+ 不编、不注册（与 macOS 同为 Flutter chrome）。
-if(DEFINED ENV{KOTV_WIN7} AND "$ENV{KOTV_WIN7}" STREQUAL "1")
-  set(_kotv_win7_chrome_default ON)
+# 不用 option() 默认值：CMakeCache 会粘住上次的 OFF，导致 CI 有 ENV 仍不编壳。
+if("$ENV{KOTV_WIN7}" STREQUAL "1")
+  set(KOTV_WIN7_CHROME ON)
 else()
-  set(_kotv_win7_chrome_default OFF)
+  set(KOTV_WIN7_CHROME OFF)
 endif()
-option(KOTV_WIN7_CHROME "Build Win7 in-process GDI+ chrome" ${_kotv_win7_chrome_default})
+message(STATUS "KOTV_WIN7_CHROME=${KOTV_WIN7_CHROME} (ENV KOTV_WIN7=$ENV{KOTV_WIN7})")
 
 set(KOTV_RUNNER_SOURCES
   "flutter_window.cpp"

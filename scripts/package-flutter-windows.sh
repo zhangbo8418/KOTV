@@ -80,10 +80,12 @@ kotv_export_fvp_deps
 flutter config --enable-windows-desktop
 KOTV_FLUTTER_TARGET=windows "$ROOT/scripts/flutter-pub-get.sh"
 kotv_ensure_mdk_windows_sdk
-# Win7 播控开关由 runner/CMakeLists.txt 读 ENV{KOTV_WIN7}（option 默认 ON/OFF）。
+# Win7 播控由 runner/CMakeLists.txt 读 ENV{KOTV_WIN7}（每次 configure 重算，不依赖 option 缓存）。
 # 勿写 `flutter build -- -DKOTV_WIN7_CHROME=…`：会被当成 Dart target（Target file not found）。
 if [[ "${KOTV_WIN7:-}" == "1" ]]; then
-  echo "==> Win7: expect KOTV_WIN7_CHROME via ENV KOTV_WIN7=1"
+  echo "==> Win7: KOTV_WIN7=1 → CMake 编入 GDI+ chrome"
+  # 清掉可能粘住 KOTV_WIN7_CHROME=OFF 的旧缓存（本地反复打包时）
+  find "$ROOT/flutter/build/windows" -name CMakeCache.txt -delete 2>/dev/null || true
 else
   echo "==> Win8+: KOTV_WIN7 unset → chrome OFF (Flutter chrome only)"
 fi
@@ -136,12 +138,17 @@ for _stale in kotv_win7_chrome.exe kotv-win7-mpv-chrome.exe; do
 done
 rm -f "$RELEASE_DIR/Newtonsoft.Json.dll" 2>/dev/null || true
 if [[ "${KOTV_WIN7:-}" == "1" ]]; then
-  # 确认本包编入了 Win7 壳（CMake KOTV_WIN7_CHROME），而非漏链仍出空壳
-  if ! python3 -c "import sys; d=open(sys.argv[1],'rb').read(); sys.exit(0 if b'KotvWinChromeModal' in d else 1)" \
-      "$RELEASE_DIR/kotv.exe"; then
-    echo "ERROR: Win7 package kotv.exe missing KotvWinChromeModal (chrome not linked?)" >&2
+  # 确认编入了壳：频道名 ASCII；窗类名是 wchar → UTF-16LE
+  if ! python3 -c "
+import sys
+d = open(sys.argv[1], 'rb').read()
+ok = b'kotv_win_chrome' in d or 'KotvWinChromeModal'.encode('utf-16-le') in d
+sys.exit(0 if ok else 1)
+" "$RELEASE_DIR/kotv.exe"; then
+    echo "ERROR: Win7 package kotv.exe missing win chrome symbols (not linked?)" >&2
     exit 1
   fi
+  echo "==> Win7 chrome symbols present in kotv.exe"
 fi
 
 # Win7：只改写时间 API（不再用 k7ws2 整 DLL 代理，避免序数导入崩溃）。
