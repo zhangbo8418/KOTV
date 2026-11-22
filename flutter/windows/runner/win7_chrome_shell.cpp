@@ -1381,6 +1381,11 @@ void Win7ChromeShell::HandleMoreId(const std::string& id) {
 }
 
 bool Win7ChromeShell::DispatchHit(HWND hwnd, int x, int y) {
+  // 浮层打开时点播控先关 sheet（对齐点遮罩外关闭）。
+  if (!sheet_kind_.empty()) {
+    CloseSheet(true);
+    return true;
+  }
   const std::vector<HitTarget>* bucket = nullptr;
   if (hwnd == top_.hwnd) bucket = &top_hits_;
   else if (hwnd == bottom_.hwnd) bucket = &bottom_hits_;
@@ -1673,12 +1678,16 @@ int Win7ChromeShell::EstimateSheetContentH() const {
 RECT Win7ChromeShell::ModalCardRect(const RECT& full) const {
   const int fw = full.right - full.left;
   const int fh = full.bottom - full.top;
-  const int card_w = (std::max)(0, fw - kSheetPad * 2);
-  const int max_h = static_cast<int>(fh * 0.72);
+  // 居中浮层：限宽（更多略宽），勿铺满；高度跟内容，最高约 80%。
+  int prefer_w = kModalW;
+  if (sheet_kind_ == "more" || sheet_kind_ == "danmaku") prefer_w = kModalMoreW;
+  if (IsEqSheet()) prefer_w = kModalMoreW;
+  const int card_w = (std::min)(prefer_w, (std::max)(200, fw - kSheetPad * 2));
+  const int max_h = (std::min)(kModalMaxH, static_cast<int>(fh * 0.80));
   const int content = EstimateSheetContentH();
   const int card_h = (std::min)(max_h, (std::max)(80, content));
-  const int x = full.left + kSheetPad;
-  const int y = full.bottom - kSheetPad - card_h;
+  const int x = full.left + (fw - card_w) / 2;
+  const int y = full.top + (fh - card_h) / 2;
   return RECT{x, y, x + card_w, y + card_h};
 }
 
@@ -1691,10 +1700,16 @@ void Win7ChromeShell::SyncModalToHost(bool invalidate) {
   const int fw = prc.right - prc.left;
   const int fh = prc.bottom - prc.top;
   if (fw <= 0 || fh <= 0) return;
-  SetWindowPos(modal_hwnd_, nullptr, origin.x, origin.y, fw, fh,
-               SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+  // 窗本身就是卡片矩形（非全屏遮罩），两侧透出视频。
   RECT full{0, 0, fw, fh};
-  modal_card_ = ModalCardRect(full);
+  const RECT card = ModalCardRect(full);
+  const int cw = card.right - card.left;
+  const int ch = card.bottom - card.top;
+  if (cw <= 0 || ch <= 0) return;
+  SetWindowPos(modal_hwnd_, HWND_TOP, origin.x + card.left, origin.y + card.top, cw, ch,
+               SWP_NOACTIVATE | SWP_SHOWWINDOW);
+  modal_card_ = RECT{0, 0, cw, ch};
+  ApplyRoundRegion(modal_hwnd_, cw, ch, kSheetRadius);
   if (invalidate) InvalidateRect(modal_hwnd_, nullptr, TRUE);
 }
 
@@ -1709,9 +1724,8 @@ void Win7ChromeShell::LayoutModal() {
   if (!modal_hwnd_) modal_hwnd_ = CreateLayeredPopup(kModalClass);
   if (!modal_hwnd_) return;
 
-  // 整窗恒定 alpha（约 Flutter black38 观感）；卡片用不透明色绘制
-  SetLayeredWindowAttributes(modal_hwnd_, 0, 235, LWA_ALPHA);
-  SetWindowRgn(modal_hwnd_, nullptr, TRUE);
+  // 卡片半透明玻璃（对齐 Flutter Material 0xCC2A2A30）；圆角用 RGN。
+  SetLayeredWindowAttributes(modal_hwnd_, 0, 0xCC, LWA_ALPHA);
   SyncModalToHost(true);
   EmitPointerHold(true);
   sheet_open_hold_ = true;
@@ -2111,12 +2125,12 @@ void Win7ChromeShell::PaintCenter(HDC hdc, const RECT& rc) {
 
 void Win7ChromeShell::PaintModal(HDC hdc, const RECT& rc) {
   BeginHits(&modal_hits_);
-  // Win7：LWA_ALPHA 整窗半透明 + 不透明 GDI 填充（per-pixel SourceCopy/ARGB 在 BeginPaint 下无效）
-  FillRectColor(hdc, rc, RGB(0, 0, 0));
+  // 窗=卡片：整客户区就是浮层，勿再铺全屏黑底。
   RECT card = modal_card_;
-  if (card.right <= card.left) card = ModalCardRect(rc);
+  if (card.right <= card.left) card = rc;
 
   const bool light = sheet_kind_ == "danmaku" || sheet_kind_ == "volume";
+  FillRectColor(hdc, card, light ? kSheetLight : kSheetDark);
   FillRoundRect(hdc, card, kSheetRadius, light ? kSheetLight : kSheetDark);
 
   // 顶手柄 40×4
@@ -2575,14 +2589,7 @@ LRESULT Win7ChromeShell::OnModalMessage(HWND hwnd, UINT msg, WPARAM wParam, LPAR
       const int y = GET_Y_LPARAM(lParam);
       RECT rc{};
       GetClientRect(hwnd, &rc);
-      RECT card = modal_card_;
-      if (card.right <= card.left) card = ModalCardRect(rc);
-      // 点卡片外：关闭
-      if (msg == WM_LBUTTONUP &&
-          (x < card.left || x > card.right || y < card.top || y > card.bottom)) {
-        CloseSheet(true);
-        return 0;
-      }
+      // 窗即卡片；点窗外由手势/播控层 CloseSheet。
       if (IsEqSheet()) {
         if (msg == WM_LBUTTONDOWN) SetCapture(hwnd);
         if (msg == WM_LBUTTONUP && GetCapture() == hwnd) ReleaseCapture();
@@ -3621,6 +3628,8 @@ LRESULT Win7ChromeShell::OnGestureMessage(HWND hwnd, UINT msg, WPARAM wParam, LP
       }
       return 0;
     case WM_LBUTTONDOWN: {
+      // 浮层卡片外：点画面关掉 sheet（窗不再铺满）。
+      if (!sheet_kind_.empty()) return 0;
       SetCapture(hwnd);
       RECT rc{};
       GetClientRect(hwnd, &rc);
@@ -3732,6 +3741,10 @@ LRESULT Win7ChromeShell::OnGestureMessage(HWND hwnd, UINT msg, WPARAM wParam, LP
       return 0;
     }
     case WM_LBUTTONUP: {
+      if (!sheet_kind_.empty()) {
+        CloseSheet(true);
+        return 0;
+      }
       if (GetCapture() == hwnd) ReleaseCapture();
       if (hold_speed_timer_) {
         KillTimer(hwnd, hold_speed_timer_);
