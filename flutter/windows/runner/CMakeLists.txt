@@ -23,7 +23,7 @@ set(KOTV_RUNNER_SOURCES
   "runner.exe.manifest"
 )
 if(KOTV_WIN7_CHROME)
-  list(APPEND KOTV_RUNNER_SOURCES "win7_chrome_shell.cpp" "kotv_win_chrome.cpp")
+  list(APPEND KOTV_RUNNER_SOURCES "win7_chrome_canvas.cpp" "win7_chrome_paint.cpp" "win7_chrome_shell.cpp" "kotv_win_chrome.cpp")
 endif()
 
 # Define the application target. To change its name, change BINARY_NAME in the

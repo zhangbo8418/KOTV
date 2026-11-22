@@ -601,246 +601,152 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       if (KotvWinChrome.isNeeded) {
         _winChromeToken = KotvWinChrome.bind(_onWinChromeEvent);
         _danmakuItems.addListener(_syncWinChrome);
-        _playback.addListener(_syncWinChrome);
         _syncWinChrome();
       }
     });
   }
 
   int _winChromeToken = 0;
+  /// Win7：直播画面区（横屏整页 / 竖屏 16:9 框）锚点，原生壳按它摆面板与手势层。
+  final GlobalKey _winLiveSurfaceKey = GlobalKey(debugLabel: 'kotv_live_surface');
+  bool _winSyncQueued = false;
+  /// 后端切换会换 [_playback] 实例；监听跟着当前实例走。
+  KotvPlayback? _winListened;
+  String? _lastWinLiveSnap;
+  /// 竖屏画面单击延迟（等双击判定）与按下点。
+  Timer? _winPortraitTapTimer;
+  Offset? _winPortraitDownAt;
 
-  /// 与 Flutter 右栏药丸同序；原生列表点选按 index → id。
-  List<({String id, String label})> _winLiveRightActions() {
-    final vol = _playback.volume.clamp(1, 100).round();
-    final out = <({String id, String label})>[
-      (id: 'prevCh', label: '上一频道'),
-      (id: 'nextCh', label: '下一频道'),
-      (id: 'line', label: '换线路 (${_line + 1}/$_lines)'),
-      (id: 'epg', label: '刷新 EPG'),
-      (id: 'cast', label: '投屏'),
-      (id: 'scale', label: '画面比例 · ${_liveScaleLabel(_liveScale)}'),
-      (id: 'across', label: '跨组换台 · ${_liveAcross ? '开' : '关'}'),
-      (id: 'invert', label: '反转换台 · ${_liveInvert ? '开' : '关'}'),
-      (id: 'failSwitch', label: '失败换线 · ${_liveAutoChange ? '开' : '关'}'),
-      (id: 'mini', label: '迷你桌面播放'),
-      (id: 'fullscreen', label: _immersive ? '退出全屏' : '全屏观看'),
-    ];
-    if (kotvCanSwitchPlayer(live: true)) {
-      out.add((id: 'player', label: '播放器 · ${flutterPlayerLabel(_playerVal)}'));
+  @override
+  void setState(VoidCallback fn) {
+    super.setState(fn);
+    _syncWinChrome();
+  }
+
+  bool get _winPortrait =>
+      !_immersive && (KotvLayout.useBottomNav(context) || KotvLayout.isCompact(context));
+
+  Rect? _winLiveSurface() {
+    final box = _winLiveSurfaceKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize || !box.attached) return null;
+    try {
+      return box.localToGlobal(Offset.zero) & box.size;
+    } catch (_) {
+      return null;
     }
-    out.add((id: 'decode', label: '解码 · $_decodeLabel'));
-    if (_showDirectOutput) {
-      out.add((
-        id: 'direct',
-        label: '硬解直出 · ${_playback.directOutput ? '开' : '关'}',
-      ));
+  }
+
+  /// 底栏 / 右栏按钮操作后：同 [LiveCatchupChrome] onBump 重排隐藏计时。
+  void _winBump() {
+    if (_winPortrait) {
+      _pulsePortraitChrome();
+    } else {
+      _bumpLiveChrome();
     }
-    if (kotvPlayerRenderApplies(_playerVal)) {
-      out.add((
-        id: 'render',
-        label: '渲染 · ${kotvPlayerRenderLabel(_renderMode)}',
-      ));
-    }
-    out.add((id: 'volume', label: '音量 · $vol'));
-    out.add((id: 'settings', label: '打开设置页'));
-    for (var i = 0; i < _sources.length; i++) {
-      final name = _sources.length == 1
-          ? '刷新'
-          : '${_sources[i]['name'] ?? _sources[i]['url']}';
-      final cur = _sources.length > 1 && (_sources[i]['current'] == true || i == _srcIdx);
-      out.add((id: 'source:$i', label: cur ? '$name（当前）' : name));
-    }
-    out.add((id: 'configureSources', label: '配置直播源'));
-    out.add((id: 'close', label: '关闭面板'));
-    return out;
   }
 
   void _onWinChromeEvent(Map<String, dynamic> e) {
     if (!mounted) return;
     switch (e['type'] as String? ?? '') {
+      case 'pointer':
+        _onWinLivePointer(e);
+        break;
       case 'pointerHold':
         final on = e['on'] == true;
-        setState(() {
-          _pointerInLeftPanel = on && _leftOpen;
-          _pointerInRightPanel = on && _rightOpen;
-          _pointerAtBottom = on && _channelInfoVisible;
-        });
+        _pointerInLeftPanel = on && _leftOpen;
+        _pointerInRightPanel = on && _rightOpen;
+        if (_catchup && _catchupChrome) _pointerAtBottom = on;
         if (on) {
           _cancelHideOverlays();
+          _catchupHideTimer?.cancel();
+          _keepMouseVisible();
+        } else if (_catchup) {
+          _pulseCatchupChrome();
         } else {
           _scheduleHideOverlays();
         }
         break;
-      case 'epgToggle':
-        final open = e['open'] == true;
-        setState(() {
-          _epgOpen = open;
-          if (open) _leftOpen = true;
-        });
-        _syncWinChrome();
-        _scheduleHideOverlays();
-        if (open && _programs.isEmpty && _chIdx >= 0) unawaited(_loadEpg());
-        break;
-      case 'tap':
-        // 对齐 Flutter：单击显隐左右栏/频道条
-        if (_leftOpen || _rightOpen || _channelInfoVisible) {
-          setState(() {
-            _leftOpen = false;
-            _rightOpen = false;
-            _epgOpen = false;
-            _channelInfoVisible = false;
-          });
-          _syncWinChrome();
-        } else {
-          _openLeft();
-        }
-        break;
-      case 'liveFling':
-        final sign = (e['sign'] as num?)?.toInt() ?? 0;
-        if (sign != 0) {
-          unawaited(_stepChannel(delta: _liveInvert ? -sign : sign));
-        }
-        break;
       case 'key':
         final ke = KotvWinChrome.keyEventFromMap(e);
-        if (ke != null) {
-          _onKey(FocusManager.instance.primaryFocus ?? _focus, ke);
-        }
-        break;
-      case 'liveLeft':
-      case 'channel':
-        final idx = (e['index'] as num?)?.toInt() ?? -1;
-        if (idx >= 0 && idx < _channels.length) {
-          _selectChannelFromList(idx);
-        }
+        if (ke != null) _onKey(FocusManager.instance.primaryFocus ?? _focus, ke);
         break;
       case 'group':
         final idx = (e['index'] as num?)?.toInt() ?? -1;
         if (idx >= 0 && idx < _groups.length) {
+          _cancelHideOverlays();
           unawaited(_selectGroup(idx));
-          _syncWinChrome();
         }
+        break;
+      case 'channel':
+        final idx = (e['index'] as num?)?.toInt() ?? -1;
+        if (idx >= 0 && idx < _channels.length) _selectChannelFromList(idx);
+        break;
+      case 'channelFav':
+        final idx = (e['index'] as num?)?.toInt() ?? -1;
+        if (idx >= 0 && idx < _channels.length) unawaited(_toggleChannelFav(idx));
         break;
       case 'epgDay':
         final idx = (e['index'] as num?)?.toInt() ?? -1;
-        if (idx >= 0 && idx < _epgDays.length) {
-          _selectEpgDay(idx);
-          _syncWinChrome();
-        }
+        if (idx >= 0 && idx < _epgDays.length) _selectEpgDay(idx, resetHide: true);
         break;
       case 'epg':
         final idx = (e['index'] as num?)?.toInt() ?? -1;
         if (idx >= 0 && idx < _programs.length) {
-          final prog = _programs[idx];
-          if (prog['catchup'] == true) unawaited(_playCatchup(idx));
+          _cancelHideOverlays();
+          if (_programs[idx]['catchup'] == true) unawaited(_playCatchup(idx));
         }
         break;
-      case 'collapseLiveLeft':
-        setState(() {
-          _leftOpen = false;
-          _epgOpen = false;
-        });
-        _syncWinChrome();
+      case 'epgToggle':
+        _cancelHideOverlays();
+        final open = e['open'] == true;
+        setState(() => _epgOpen = open);
+        if (open && _programs.isEmpty && _chIdx >= 0) unawaited(_loadEpg());
+        if (open) _scheduleScrollEpgToHighlight();
         break;
       case 'liveRight':
-        final idx = (e['index'] as num?)?.toInt() ?? -1;
-        final acts = _winLiveRightActions();
-        if (idx < 0 || idx >= acts.length) return;
-        switch (acts[idx].id) {
-          case 'prevCh':
-            unawaited(_stepChannel(delta: _liveInvert ? 1 : -1));
-            break;
-          case 'nextCh':
-            unawaited(_stepChannel(delta: _liveInvert ? -1 : 1));
-            break;
-          case 'line':
-            if (_chIdx >= 0 && _lines > 1) {
-              unawaited(_playChannel(_chIdx, line: (_line + 1) % _lines));
-            }
-            break;
-          case 'epg':
-            unawaited(_loadEpg());
-            break;
-          case 'cast':
-            unawaited(_cast());
-            break;
-          case 'scale':
-            unawaited(_cycleLiveScale());
-            break;
-          case 'across':
-            _onLiveAcross();
-            break;
-          case 'invert':
-            _onLiveInvert();
-            break;
-          case 'failSwitch':
-            _onLiveFailSwitch();
-            break;
-          case 'mini':
-            unawaited(_enterMini());
-            break;
-          case 'fullscreen':
-            unawaited(_toggleLiveFullscreen());
-            break;
-          case 'player':
-            unawaited(_pickPlayer());
-            break;
-          case 'decode':
-            unawaited(_pickDecode());
-            break;
-          case 'direct':
-            unawaited(_toggleDirectOutput());
-            break;
-          case 'render':
-            unawaited(_pickRender());
-            break;
-          case 'volume':
-            unawaited(_winShowVolumeSheet());
-            break;
-          case 'settings':
-            goKotvPage(ref, KotvPage.settings);
-            break;
-          case 'configureSources':
-            unawaited(() async {
-              await showLivePicker(context, ref);
-              await _bootstrap(forceLoad: true);
-            }());
-            break;
-          case 'close':
-            setState(() => _rightOpen = false);
-            _syncWinChrome();
-            break;
-          default:
-            if (acts[idx].id.startsWith('source:')) {
-              final i = int.tryParse(acts[idx].id.substring(7)) ?? -1;
-              if (i >= 0 && i < _sources.length) {
-                unawaited(_loadSource(
-                  i,
-                  autoPlay: true,
-                  force: _sources.length == 1 || i == _srcIdx,
-                ));
-              }
-            }
-            break;
+        _onWinLiveRight(e['id'] as String? ?? '');
+        break;
+      case 'slider':
+        if (e['id'] != 'volume') break;
+        final v = ((e['value'] as num?)?.toDouble() ?? 50).round().clamp(1, 100);
+        unawaited(_playback.setVolume(v.toDouble()));
+        if (e['commit'] == true) {
+          _winBump();
+          unawaited(_persistLiveSetting('playerVolume', '$v').catchError((_) {}));
         }
         break;
-      case 'pickPlayer':
-        unawaited(_winApplyPickedPlayer(e['id'] as String? ?? ''));
+      case 'seekFraction':
+        if (e['commit'] != true) break;
+        final dur = _playback.duration;
+        if (dur > Duration.zero) {
+          final frac = ((e['value'] as num?)?.toDouble() ?? 0).clamp(0.0, 1.0);
+          unawaited(_playback.seek(Duration(milliseconds: (dur.inMilliseconds * frac).round())));
+        }
+        _winBump();
+        break;
+      case 'toggle':
+        _winBump();
+        unawaited(_playback.playOrPause());
+        break;
+      case 'cast':
+        _winBump();
+        unawaited(_cast());
+        break;
+      case 'mini':
+        unawaited(_miniDesktop ? _exitMini() : _enterMini());
+        break;
+      case 'pill':
+        if (_catchup && _catchupChrome && !_immersive) {
+          unawaited(_exitCatchup());
+        } else {
+          unawaited(_exitImmersive());
+        }
         break;
       case 'sheet':
         unawaited(_onWinLiveSheet(e['id'] as String? ?? '', e['kind'] as String? ?? ''));
         break;
-      case 'slider':
-        if (e['id'] == 'volume' && e['commit'] == true) {
-          final v = ((e['value'] as num?)?.toDouble() ?? 50).round().clamp(1, 100);
-          unawaited(_playback.setVolume(v.toDouble()));
-          unawaited(_persistLiveSetting('playerVolume', '$v'));
-          _syncWinChrome();
-        }
-        break;
-      case 'toggle':
-      case 'togglePlay':
-        unawaited(_playback.playOrPause());
+      case 'pickPlayer':
+        unawaited(_winApplyPickedPlayer(e['id'] as String? ?? ''));
         break;
       case 'exit':
       case 'back':
@@ -849,8 +755,156 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     }
   }
 
-  Future<void> _winShowVolumeSheet() async {
-    await KotvWinChrome.showVolumeSheet(_playback.volume.clamp(1, 100).toDouble());
+  /// 原生手势层指针 → 与 Flutter 画面 Listener / MouseRegion 相同的处理。
+  void _onWinLivePointer(Map<String, dynamic> e) {
+    final rect = _winLiveSurface();
+    if (rect == null) return;
+    final phase = e['phase'] as String? ?? '';
+    final c = BoxConstraints.tight(rect.size);
+    if (phase == 'scroll') {
+      if (_winPortrait) return;
+      final pos = Offset((e['x'] as num?)?.toDouble() ?? 0, (e['y'] as num?)?.toDouble() ?? 0);
+      final dpr = MediaQuery.devicePixelRatioOf(context);
+      _onLiveFsPointerSignal(PointerScrollEvent(
+        kind: PointerDeviceKind.mouse,
+        position: pos,
+        scrollDelta: Offset(
+          ((e['dx'] as num?)?.toDouble() ?? 0) / dpr,
+          ((e['dy'] as num?)?.toDouble() ?? 0) / dpr,
+        ),
+      ));
+      return;
+    }
+    final ev = KotvWinChrome.pointerEvent(e, origin: rect.topLeft);
+    if (ev == null) return;
+    if (ev is PointerHoverEvent) {
+      _onLivePointerMove(ev, c, sides: !_winPortrait, portrait: _winPortrait);
+      return;
+    }
+    if (ev is PointerExitEvent) {
+      _onLivePointerExit();
+      return;
+    }
+    if (_winPortrait) {
+      _onWinPortraitPointer(ev);
+      return;
+    }
+    if (ev is PointerDownEvent) {
+      _onLiveFsPointerDown(ev);
+    } else if (ev is PointerMoveEvent) {
+      _onLiveFsPointerMove(ev);
+    } else if (ev is PointerUpEvent) {
+      _onLiveFsPointerUp(ev);
+    } else if (ev is PointerCancelEvent) {
+      _onLiveFsPointerCancel(ev);
+    }
+  }
+
+  /// 竖屏画面 GestureDetector：单击显隐回看底栏，双击全屏。
+  void _onWinPortraitPointer(PointerEvent ev) {
+    if (ev is PointerDownEvent) {
+      _winPortraitDownAt = ev.position;
+      return;
+    }
+    if (ev is PointerCancelEvent) {
+      _winPortraitDownAt = null;
+      return;
+    }
+    if (ev is! PointerUpEvent) return;
+    final down = _winPortraitDownAt;
+    _winPortraitDownAt = null;
+    if (down == null || (ev.position - down).distance > kTouchSlop) return;
+    if (_winPortraitTapTimer?.isActive ?? false) {
+      _winPortraitTapTimer!.cancel();
+      _winPortraitTapTimer = null;
+      _onLiveDoubleTap();
+      return;
+    }
+    _winPortraitTapTimer = Timer(kDoubleTapTimeout, () {
+      _winPortraitTapTimer = null;
+      if (mounted) _togglePortraitChrome();
+    });
+  }
+
+  /// 右栏药丸 / 回看底栏文字钮（与 Flutter 右栏 onTap 同序同义）。
+  void _onWinLiveRight(String id) {
+    switch (id) {
+      case 'prevCh':
+        if (_channels.isEmpty) return;
+        unawaited(_stepChannel(delta: _liveInvert ? 1 : -1));
+        break;
+      case 'nextCh':
+        if (_channels.isEmpty) return;
+        unawaited(_stepChannel(delta: _liveInvert ? -1 : 1));
+        break;
+      case 'line':
+        if (_chIdx < 0 || _lines <= 1) return;
+        _playChannel(_chIdx, line: (_line + 1) % _lines);
+        break;
+      case 'epg':
+        unawaited(_loadEpg());
+        break;
+      case 'cast':
+        unawaited(_cast());
+        break;
+      case 'scale':
+        _winBump();
+        unawaited(_cycleLiveScale());
+        break;
+      case 'across':
+        _winBump();
+        _onLiveAcross();
+        break;
+      case 'invert':
+        _winBump();
+        _onLiveInvert();
+        break;
+      case 'failSwitch':
+        _winBump();
+        _onLiveFailSwitch();
+        break;
+      case 'mini':
+        unawaited(_enterMini());
+        break;
+      case 'fullscreen':
+        _winBump();
+        unawaited(_toggleLiveFullscreen());
+        break;
+      case 'player':
+        _winBump();
+        unawaited(_pickPlayer());
+        break;
+      case 'decode':
+        _winBump();
+        unawaited(_pickDecode());
+        break;
+      case 'direct':
+        _winBump();
+        unawaited(_toggleDirectOutput());
+        break;
+      case 'render':
+        unawaited(_pickRender());
+        break;
+      case 'settings':
+        goKotvPage(ref, KotvPage.settings);
+        break;
+      case 'configureSources':
+        unawaited(() async {
+          await showLivePicker(context, ref);
+          await _bootstrap(forceLoad: true);
+        }());
+        break;
+      case 'close':
+        setState(() => _rightOpen = false);
+        break;
+      default:
+        if (id.startsWith('source:')) {
+          final i = int.tryParse(id.substring(7)) ?? -1;
+          if (i >= 0 && i < _sources.length) {
+            _loadSource(i, autoPlay: true, force: _sources.length == 1 || i == _srcIdx);
+          }
+        }
+    }
   }
 
   Future<void> _onWinLiveSheet(String id, String kind) async {
@@ -860,162 +914,238 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         await _winApplyPickedPlayer(id);
         break;
       case 'decode':
-        final prev = _decodeMode;
-        final pos = _playUrl.isNotEmpty ? _playback.position : Duration.zero;
-        setState(() {
-          _decodeMode = id;
-          _prefDecodeMode = id;
-        });
-        if (_backend == KotvEmbedBackend.mpv &&
-            kotvMpvNeedsNewPlayer(
-              _mpvOpts.copyWith(decodeMode: prev),
-              _mpvOpts.copyWith(decodeMode: id),
-            )) {
-          await _releaseMpv();
-        } else {
-          await _playback.setDecodeMode(id);
-        }
-        try {
-          await _persistLiveSetting('playerDecode', id);
-        } catch (_) {}
-        await _reopenCurrent(pos);
+        await _applyDecode(id);
         break;
       case 'render':
-        setState(() => _renderMode = id);
-        try {
-          await _persistLiveSetting('playerRender', id);
-        } catch (_) {}
+        await _applyRender(id);
         break;
     }
-    _syncWinChrome();
   }
 
   Future<void> _winApplyPickedPlayer(String id) async {
     if (id.isEmpty) return;
-    final v = kotvClampPlayerVal(id, live: true);
-    final prev = _prefPlayerVal;
-    if (v != prev && flutterIsEmbedPlayer(v)) {
-      await _stopInactiveBackends(kotvEmbedBackend(v));
-      if (!mounted) return;
-    }
-    setState(() {
-      _playerVal = v;
-      _prefPlayerVal = v;
-    });
-    try {
-      await _persistLiveSetting('playerLive', v);
-    } catch (_) {}
-    if (kotvIsExternalPlayer(v) && _playUrl.isNotEmpty) {
-      try {
-        await _playback.pause();
-        if (!mounted) return;
-        final result = await kotvLaunchExternalPlayer(
-          player: v,
-          url: _playUrl,
-          headers: _playHeaders,
-          title: _title,
-          vod: false,
-          context: context,
-        );
-        if (!mounted) return;
-        if (!result.opened) {
-          await _playback.play();
-          return;
-        }
-      } catch (_) {}
-      return;
-    }
-    if (v != prev && _playUrl.isNotEmpty && flutterIsEmbedPlayer(v)) {
-      final pos = _playback.position;
-      final serial = ++_playSerial;
-      await _openLiveUrl(
-        _playUrl,
-        serial: serial,
-        directUrl: _playDirect,
-        headers: _playHeaders,
-        drm: _playDrm,
-        live: true,
-        startAt: pos > Duration.zero ? pos : Duration.zero,
-      );
-    }
-    _syncWinChrome();
+    await _applyPickedPlayer(kotvClampPlayerVal(id, live: true));
   }
 
-  void _syncWinChrome() {
-    if (!KotvWinChrome.isNeeded || !mounted) return;
-    final chs = _channels;
-    final left = [
-      for (var i = 0; i < chs.length; i++)
-        '${_channelNumberLabel(chs[i], i)}  ${chs[i]['name'] ?? ''}',
+  /// 直播设置右栏条目（[_buildLiveRightPanel] 同序：标题、药丸、音量、直播源）。
+  List<Map<String, dynamic>> _winLiveRightItems(bool land, double ui) {
+    Map<String, dynamic> pill(String id, String label, {String sub = '', bool selected = false}) =>
+        KotvWinChrome.row(id: id, label: label, kind: 'pill', sub: sub, selected: selected);
+    Map<String, dynamic> gap(double v) => KotvWinChrome.row(kind: 'gap', label: '', value: v);
+    return [
+      KotvWinChrome.row(kind: 'title', label: '直播设置'),
+      gap(land ? 8 : 12),
+      pill('prevCh', '上一频道'),
+      gap(8),
+      pill('nextCh', '下一频道'),
+      gap(8),
+      pill('line', '换线路 (${_line + 1}/$_lines)'),
+      gap(8),
+      pill('epg', '刷新 EPG'),
+      gap(8),
+      pill('cast', '投屏'),
+      gap(8),
+      pill('scale', '画面比例 · ${_liveScaleLabel(_liveScale)}'),
+      gap(8),
+      pill('across', '跨组换台 · ${_liveAcross ? '开' : '关'}'),
+      gap(8),
+      pill('invert', '反转换台 · ${_liveInvert ? '开' : '关'}'),
+      gap(8),
+      pill('failSwitch', '失败换线 · ${_liveAutoChange ? '开' : '关'}'),
+      gap(8),
+      pill('mini', '迷你桌面播放'),
+      gap(8),
+      pill('fullscreen', _immersive ? '退出全屏' : '全屏观看'),
+      gap(8),
+      if (kotvCanSwitchPlayer(live: true)) ...[
+        pill('player', '播放器 · ${flutterPlayerLabel(_playerVal)}'),
+        gap(8),
+      ],
+      pill('decode', '解码 · $_decodeLabel'),
+      if (_showDirectOutput) ...[
+        gap(8),
+        pill('direct', '硬解直出 · ${_playback.directOutput ? '开' : '关'}'),
+      ],
+      if (kotvPlayerRenderApplies(_playerVal)) ...[
+        gap(8),
+        pill('render', '渲染 · ${kotvPlayerRenderLabel(_renderMode)}'),
+      ],
+      gap(8),
+      KotvWinChrome.row(id: 'volume', kind: 'slider', label: '音量', min: 1, max: 100, divisions: 99),
+      gap(8),
+      pill('settings', '打开设置页'),
+      gap(16),
+      KotvWinChrome.row(kind: 'label', label: '直播源'),
+      gap(8),
+      for (var i = 0; i < _sources.length; i++) ...[
+        pill(
+          'source:$i',
+          _sources.length == 1 ? '刷新' : '${_sources[i]['name'] ?? _sources[i]['url']}',
+          sub: _sources.length > 1 && (_sources[i]['current'] == true || i == _srcIdx) ? '（当前）' : '',
+          selected: i == _srcIdx,
+        ),
+        gap(6),
+      ],
+      gap(12),
+      pill('configureSources', '配置直播源'),
+      gap(8),
+      pill('close', '关闭面板'),
     ];
-    final acts = _winLiveRightActions();
-    final rightItems = [
-      for (final a in acts)
-        KotvWinChrome.lineItem(id: a.id, label: a.label, chevron: false),
-    ];
-    final groups = [for (final g in _groups) '${g['name'] ?? ''}'];
-    final epgDays = [
-      for (final d in _epgDays)
-        () {
-          final s = '${d['date'] ?? ''}';
-          return s.length >= 10 ? s.substring(5, 10) : (s.isEmpty ? '日' : s);
-        }(),
-    ];
-    final epgPrograms = [
-      for (final p in _programs)
-        [
-          if ('${p['start'] ?? ''}'.trim().isNotEmpty) '${p['start']}'.trim(),
-          if ('${p['title'] ?? p['label'] ?? ''}'.trim().isNotEmpty)
-            '${p['title'] ?? p['label']}'.trim(),
-        ].join('  '),
-    ];
-    final chName = _playChName.isEmpty ? _title : _playChName;
-    final playing = _playingChannel;
-    final channelNo = playing == null ? (_chIdx >= 0 ? '${_chIdx + 1}' : '') : _channelNumberLabel(playing, _playChIdx);
-    var progTitle = '';
-    var progTime = '';
-    for (final p in _programs) {
-      if (p['now'] == true) {
-        progTitle = '${p['title'] ?? p['label'] ?? ''}'.trim();
-        final start = '${p['start'] ?? ''}'.trim();
-        final end = '${p['end'] ?? ''}'.trim();
-        if (start.isNotEmpty || end.isNotEmpty) {
-          progTime = end.isEmpty ? start : '$start~$end';
-        }
-        break;
-      }
+  }
+
+  /// 直播 HUD：亮度/音量拖动、回看快进退预览（与 Flutter 画面中心浮层同文案）。
+  Map<String, dynamic> _winLiveHud() {
+    final side = _liveSideGesture;
+    if (side != null) {
+      return KotvWinChrome.hud(
+        kind: 'side',
+        text: '${side.percent.round()}%',
+        icon: side.kind == 'bright' ? 'bright' : 'volume',
+        ui: false,
+      );
     }
-    final channelText = [
-      if (channelNo.isNotEmpty) '#$channelNo',
-      chName,
-      if (_lineName.isNotEmpty) _lineName,
-      if (_status.isNotEmpty) _status,
-    ].join(' · ');
-    unawaited(KotvWinChrome.pushLive(
-      playback: _playback,
-      title: _title,
-      channelText: channelText,
-      liveLeft: left,
-      liveLeftSelected: _chIdx,
-      liveRightItems: rightItems,
-      leftOpen: _leftOpen,
-      rightOpen: _rightOpen,
-      channelVisible: _channelInfoVisible,
-      groups: groups,
-      groupSelected: _groupIdx,
-      channels: left,
-      channelSelected: _chIdx,
-      epgDays: epgDays,
-      epgDaySelected: _dayIdx,
-      epgPrograms: epgPrograms,
-      epgProgramSelected: _epgHighlightIndex(),
-      epgOpen: _epgOpen,
-      channelNo: channelNo,
-      channelName: chName,
-      channelProgram: progTime.isEmpty ? progTitle : '$progTime  $progTitle',
-      channelTicker: _lineLabel.isNotEmpty ? _lineLabel : (_lineName.isNotEmpty ? _lineName : _status),
-      danmakuItems: _danmakuItems.value,
-    ));
+    if (_liveSeekPreviewBase != null) {
+      return KotvWinChrome.hud(
+        kind: 'seek',
+        text: '${fmtBoundedPlayerTime(_liveSeekPreviewTarget)} / ${fmtBoundedPlayerTime(_playback.duration)}',
+        icon: _liveSeekPreviewDelta >= Duration.zero ? 'ff' : 'rew',
+        ui: false,
+      );
+    }
+    return KotvWinChrome.hud();
+  }
+
+  /// 下一微任务合并推送（setState / 播放态频繁变化）。
+  void _syncWinChrome() {
+    if (!KotvWinChrome.isNeeded || _winSyncQueued) return;
+    _winSyncQueued = true;
+    scheduleMicrotask(() {
+      _winSyncQueued = false;
+      _pushWinChrome();
+    });
+  }
+
+  void _pushWinChrome() {
+    if (!KotvWinChrome.isNeeded || !mounted || _winChromeToken == 0) return;
+    final surface = _winLiveSurface();
+    final p = _playback;
+    if (!identical(p, _winListened)) {
+      try {
+        _winListened?.removeListener(_syncWinChrome);
+      } catch (_) {}
+      _winListened = p;
+      p.addListener(_syncWinChrome);
+    }
+    final busy = _loading || _status.contains('解析') || _status.contains('加载') || _status.contains('缓冲');
+    final Map<String, dynamic> fields;
+    if (_miniDesktop) {
+      fields = {'mode': 'mini', 'miniKind': 'live', 'catchupSeek': _catchup};
+    } else if (surface == null) {
+      fields = {'mode': ''};
+    } else {
+      final portrait = _winPortrait;
+      final land = KotvLayout.isLandscapeCompact(context);
+      final ui = LayoutScale.grow(context);
+      final sideOpen = !portrait && (_leftOpen || _rightOpen);
+      final catchupBar = portrait ? _catchup && (_portraitChrome || _catchupChrome) : _catchup && _catchupChrome;
+      var pill = '';
+      if (!portrait && !sideOpen) {
+        if (_catchup && _catchupChrome) {
+          pill = _immersive ? '退出全屏' : '返回直播';
+        } else if (!_catchup && _immersive && _channelInfoVisible) {
+          pill = '退出全屏';
+        }
+      }
+      final highlight = _epgHighlightIndex();
+      fields = {
+        'mode': 'live',
+        'surfaceScreen': {
+          'left': surface.left,
+          'top': surface.top,
+          'width': surface.width,
+          'height': surface.height,
+        },
+        'immersive': _immersive,
+        'liveLeftVisible': !portrait && _leftOpen,
+        'liveRightVisible': !portrait && _rightOpen,
+        'channelVisible': !portrait && _channelInfoVisible && (!_catchup || !_catchupChrome),
+        'catchupBar': catchupBar,
+        'catchupSeek': _catchup,
+        'pillLabel': pill,
+        'centerVisible': _catchup && _playUrl.isNotEmpty && !sideOpen && !busy && !p.playing && !p.stalling,
+        'zapDigits': portrait ? '' : _zapDigits,
+        'liveError': _error ?? '',
+        'groups': [
+          for (var i = 0; i < _groups.length; i++)
+            KotvWinChrome.row(label: '${_groupLocked(i) ? '🔒 ' : ''}${_groups[i]['name'] ?? ''}'),
+        ],
+        'groupSelected': _groupIdx,
+        'channels': [
+          for (var i = 0; i < _channels.length; i++)
+            KotvWinChrome.row(label: '${_channels[i]['name'] ?? ''}', trailing: _channelNumberLabel(_channels[i], i)),
+        ],
+        'channelSelected': _chIdx,
+        'channelDigits': _channelNumDigitsFor(_channels),
+        'epgDays': [
+          for (var i = 0; i < _epgDays.length; i++)
+            () {
+              final d = '${_epgDays[i]['date'] ?? 'D$i'}';
+              return d.length >= 10 ? d.substring(5, 10) : d;
+            }(),
+        ],
+        'epgDaySelected': _dayIdx,
+        'programs': [
+          for (var i = 0; i < _programs.length; i++)
+            () {
+              final prog = _programs[i];
+              final playing = _catchup && i == _catchupProgIdx;
+              final canCatchup = prog['catchup'] == true;
+              final title = '${prog['title'] ?? ''}'.trim();
+              final label = title.isNotEmpty ? title : '${prog['label'] ?? ''}'.trim();
+              return KotvWinChrome.row(
+                label: '$label${playing ? ' · 回看中' : (canCatchup ? ' · 回看' : '')}',
+                trailing: '${prog['start'] ?? ''}'.trim(),
+                selected: playing || (!_catchup && prog['now'] == true),
+                on: playing,
+              );
+            }(),
+        ],
+        'programSelected': highlight,
+        'epgOpen': _epgOpen,
+        'liveRightItems': _winLiveRightItems(land, ui),
+        'channelNo': _channelNum,
+        'channelName': _title,
+        'programTime': _programTimeLabel,
+        'programTitle': _programTitleLabel.isNotEmpty ? _programTitleLabel : _status,
+        'lineLabel': _lineLabel,
+        ..._winLiveHud(),
+      };
+    }
+    final all = <String, dynamic>{
+      ...KotvWinChrome.metrics(context),
+      ...KotvWinChrome.playbackFields(p, forceBuffering: busy),
+      ...fields,
+      'gestures': _livePlayerGestures,
+      'hasCast': true,
+      'hasMini': true,
+      'catchupScale': _liveScaleLabel(_liveScale).trim().isEmpty ? '比例' : _liveScaleLabel(_liveScale),
+      'catchupPlayer': kotvCanSwitchPlayer(live: true)
+          ? flutterPlayerLabel(_playerVal.trim().isEmpty ? kotvDefaultLivePlayer() : _playerVal)
+          : '',
+      'catchupDecode': _decodeLabel,
+      'catchupDirect': _showDirectOutput ? (_playback.directOutput ? '直出开' : '直出关') : '',
+      'catchupAcross': _liveAcross ? '跨组开' : '跨组关',
+      'catchupInvert': _liveInvert ? '反转开' : '反转关',
+      'catchupFail': _liveAutoChange ? '换线开' : '换线关',
+    };
+    all['positionSec'] = ((all['positionSec'] as double) * 4).roundToDouble() / 4;
+    all['bufferedSec'] = ((all['bufferedSec'] as double) * 4).roundToDouble() / 4;
+    final items = _danmakuItems.value;
+    unawaited(KotvWinChrome.setDanmaku(enabled: items.isNotEmpty, items: items));
+    final snap = all.toString();
+    if (snap == _lastWinLiveSnap) return;
+    _lastWinLiveSnap = snap;
+    unawaited(KotvWinChrome.update(all));
   }
 
   @override
@@ -1052,7 +1182,11 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     liveScreenHandleBack = null;
     if (KotvWinChrome.isNeeded) {
       _danmakuItems.removeListener(_syncWinChrome);
-      _playback.removeListener(_syncWinChrome);
+      try {
+        _winListened?.removeListener(_syncWinChrome);
+      } catch (_) {}
+      _winListened = null;
+      _winPortraitTapTimer?.cancel();
       KotvWinChrome.unbind(_winChromeToken);
       _winChromeToken = 0;
     }
@@ -3138,7 +3272,12 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
 
   Future<void> _pickDecode() async {
     if (KotvWinChrome.isNeeded) {
-      await KotvWinChrome.showDecodeSheet(_decodeMode);
+      await KotvWinChrome.showChoiceSheet(
+        kind: 'decode',
+        title: '解码方式',
+        options: KotvWinChrome.decodeModes,
+        selectedId: _decodeMode,
+      );
       return;
     }
     final v = await pickChoice(context, title: '解码方式', current: _decodeMode, options: const [
@@ -3147,6 +3286,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       ('硬解码', 'hard'),
     ]);
     if (v == null) return;
+    await _applyDecode(v);
+  }
+
+  Future<void> _applyDecode(String v) async {
     final prev = _decodeMode;
     final pos = _playUrl.isNotEmpty ? _playback.position : Duration.zero;
     setState(() {
@@ -3186,7 +3329,12 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
 
   Future<void> _pickRender() async {
     if (KotvWinChrome.isNeeded) {
-      await KotvWinChrome.showRenderSheet(_renderMode);
+      await KotvWinChrome.showChoiceSheet(
+        kind: 'render',
+        title: '渲染方式',
+        options: KotvWinChrome.renderModes,
+        selectedId: _renderMode,
+      );
       return;
     }
     final v = await pickChoice(context, title: '渲染方式', current: _renderMode, options: const [
@@ -3194,6 +3342,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       ('Texture', 'texture'),
     ]);
     if (v == null) return;
+    await _applyRender(v);
+  }
+
+  Future<void> _applyRender(String v) async {
     setState(() => _renderMode = kotvNormalizePlayerRender(v));
     await _playback.setRenderMode(_renderMode);
     try {
@@ -3216,69 +3368,73 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       );
       if (!navCtx.mounted || !mounted) return;
       if (KotvWinChrome.isNeeded) {
-        await KotvWinChrome.showPlayerPickerSheet(
+        await KotvWinChrome.showChoiceSheet(
+          kind: 'player',
           title: '直播播放器',
-          currentId: _prefPlayerVal,
-          options: options,
-          subtitle: '当前：${flutterPlayerLabel(_prefPlayerVal)}',
+          options: [for (final o in options) (o.$2, o.$1)],
+          selectedId: _prefPlayerVal,
         );
         return;
       }
       final v = await pickChoice(navCtx, title: '直播播放器', current: _prefPlayerVal, options: options);
       if (v == null || !mounted) return;
-      final prev = _prefPlayerVal;
-      // 内置后端切换：先停旧画面，再改 _playerVal。
-      if (v != prev && flutterIsEmbedPlayer(v)) {
-        await _stopInactiveBackends(kotvEmbedBackend(v));
-        if (!mounted) return;
-      }
-      setState(() {
-        _playerVal = v;
-        _prefPlayerVal = v;
-      });
-      try {
-        await _persistLiveSetting('playerLive', v);
-      } catch (_) {}
-      if (kotvIsExternalPlayer(v) && _playUrl.isNotEmpty) {
-        try {
-          await _playback.pause();
-          if (!mounted) return;
-          final result = await kotvLaunchExternalPlayer(
-            player: v,
-            url: _playUrl,
-            headers: _playHeaders,
-            title: _title,
-            vod: false,
-            context: context,
-          );
-          if (!mounted) return;
-          if (!result.opened) {
-            await _playback.play();
-            return;
-          }
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已用${flutterPlayerLabel(v)}打开')));
-        } catch (e) {
-          if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
-        }
-        return;
-      }
-      if (v != prev && _playUrl.isNotEmpty && flutterIsEmbedPlayer(v)) {
-        final pos = _playback.position;
-        final serial = ++_playSerial;
-        await _openLiveUrl(
-          _playUrl,
-          serial: serial,
-          directUrl: _playDirect,
-          headers: _playHeaders,
-          drm: _playDrm,
-          live: true,
-          startAt: pos > Duration.zero ? pos : Duration.zero,
-        );
-        if (!mounted || serial != _playSerial) return;
-        setState(() {});
-      }
+      await _applyPickedPlayer(v);
     } finally {
       _pickingPlayer = false;
+    }
+  }
+
+  Future<void> _applyPickedPlayer(String v) async {
+    final prev = _prefPlayerVal;
+    // 内置后端切换：先停旧画面，再改 _playerVal。
+    if (v != prev && flutterIsEmbedPlayer(v)) {
+      await _stopInactiveBackends(kotvEmbedBackend(v));
+      if (!mounted) return;
+    }
+    setState(() {
+      _playerVal = v;
+      _prefPlayerVal = v;
+    });
+    try {
+      await _persistLiveSetting('playerLive', v);
+    } catch (_) {}
+    if (kotvIsExternalPlayer(v) && _playUrl.isNotEmpty) {
+      try {
+        await _playback.pause();
+        if (!mounted) return;
+        final result = await kotvLaunchExternalPlayer(
+          player: v,
+          url: _playUrl,
+          headers: _playHeaders,
+          title: _title,
+          vod: false,
+          context: context,
+        );
+        if (!mounted) return;
+        if (!result.opened) {
+          await _playback.play();
+          return;
+        }
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已用${flutterPlayerLabel(v)}打开')));
+      } catch (e) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      }
+      return;
+    }
+    if (v != prev && _playUrl.isNotEmpty && flutterIsEmbedPlayer(v)) {
+      final pos = _playback.position;
+      final serial = ++_playSerial;
+      await _openLiveUrl(
+        _playUrl,
+        serial: serial,
+        directUrl: _playDirect,
+        headers: _playHeaders,
+        drm: _playDrm,
+        live: true,
+        startAt: pos > Duration.zero ? pos : Duration.zero,
+      );
+      if (!mounted || serial != _playSerial) return;
+      setState(() {});
     }
   }
 
@@ -4499,6 +4655,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       autofocus: true,
       onKeyEvent: _onKey,
       child: ColoredBox(
+        key: _winLiveSurfaceKey,
         color: Colors.black,
         child: LayoutBuilder(
           builder: (context, c) {
@@ -5331,6 +5488,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
           AspectRatio(
           aspectRatio: 16 / 9,
           child: ColoredBox(
+            key: _winLiveSurfaceKey,
             color: Colors.black,
             child: LayoutBuilder(
               builder: (context, c) {

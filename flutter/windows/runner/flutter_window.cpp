@@ -43,6 +43,16 @@ bool FlutterWindow::OnCreate() {
 #endif
   RegisterHostChannel();
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
+#if defined(KOTV_WIN7_CHROME)
+  // 视频与播控是 Flutter 视图的子窗口：父窗口重绘时必须裁掉它们，否则 Win7 上每帧都会盖住播控。
+  {
+    HWND view = flutter_controller_->view()->GetNativeWindow();
+    HWND top = GetHandle();
+    const LONG_PTR clip = WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
+    SetWindowLongPtrW(view, GWL_STYLE, GetWindowLongPtrW(view, GWL_STYLE) | clip);
+    SetWindowLongPtrW(top, GWL_STYLE, GetWindowLongPtrW(top, GWL_STYLE) | clip);
+  }
+#endif
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     this->Show();

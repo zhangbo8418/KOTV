@@ -13,6 +13,22 @@
 
 namespace {
 
+// 行模型里的分隔符：'|' 换成 '¦'，换行编码为 \x1F（原生侧还原）。
+std::string Sanitize(const std::string& s, bool keep_newline) {
+  std::string out;
+  out.reserve(s.size());
+  for (char ch : s) {
+    if (ch == '|') {
+      out += "\xC2\xA6";
+    } else if (ch == '\n') {
+      out += keep_newline ? '\x1F' : ' ';
+    } else if (ch != '\r') {
+      out += ch;
+    }
+  }
+  return out;
+}
+
 std::string JoinUtf8List(const flutter::EncodableList& list) {
   std::ostringstream oss;
   bool first = true;
@@ -20,51 +36,45 @@ std::string JoinUtf8List(const flutter::EncodableList& list) {
     if (!std::holds_alternative<std::string>(v)) continue;
     if (!first) oss << '\n';
     first = false;
-    oss << std::get<std::string>(v);
+    oss << Sanitize(std::get<std::string>(v), false);
   }
   return oss.str();
 }
 
+double NumOf(const flutter::EncodableValue& v, double def) {
+  if (std::holds_alternative<double>(v)) return std::get<double>(v);
+  if (std::holds_alternative<int32_t>(v)) return std::get<int32_t>(v);
+  if (std::holds_alternative<int64_t>(v)) return static_cast<double>(std::get<int64_t>(v));
+  return def;
+}
+
+// id|label|trailing|toggle|on|chevron|slider|min|max|value|icon|kind|selected|sub|divisions
 std::string JoinLineItems(const flutter::EncodableList& list) {
   std::ostringstream oss;
   bool first = true;
   for (const auto& v : list) {
-    if (!std::holds_alternative<flutter::EncodableMap>(v)) {
-      if (std::holds_alternative<std::string>(v)) {
-        if (!first) oss << '\n';
-        first = false;
-        // id|label|...
-        oss << std::get<std::string>(v) << '|' << std::get<std::string>(v)
-            << "||||||0|100|0";
-      }
-      continue;
-    }
+    if (!std::holds_alternative<flutter::EncodableMap>(v)) continue;
     const auto& row = std::get<flutter::EncodableMap>(v);
     auto get_s = [&](const char* k) -> std::string {
       const auto it = row.find(flutter::EncodableValue(k));
       if (it == row.end() || !std::holds_alternative<std::string>(it->second)) return {};
-      return std::get<std::string>(it->second);
+      return Sanitize(std::get<std::string>(it->second), true);
     };
-    auto get_b = [&](const char* k) -> bool {
+    auto get_b = [&](const char* k) -> char {
       const auto it = row.find(flutter::EncodableValue(k));
-      return it != row.end() && std::holds_alternative<bool>(it->second) &&
-             std::get<bool>(it->second);
+      return it != row.end() && std::holds_alternative<bool>(it->second) && std::get<bool>(it->second) ? '1'
+                                                                                                         : '0';
     };
     auto get_d = [&](const char* k, double def) -> double {
       const auto it = row.find(flutter::EncodableValue(k));
-      if (it == row.end()) return def;
-      if (std::holds_alternative<double>(it->second)) return std::get<double>(it->second);
-      if (std::holds_alternative<int32_t>(it->second)) return std::get<int32_t>(it->second);
-      if (std::holds_alternative<int64_t>(it->second))
-        return static_cast<double>(std::get<int64_t>(it->second));
-      return def;
+      return it == row.end() ? def : NumOf(it->second, def);
     };
     if (!first) oss << '\n';
     first = false;
-    oss << get_s("id") << '|' << get_s("label") << '|' << get_s("trailing") << '|'
-        << (get_b("toggle") ? '1' : '0') << '|' << (get_b("on") ? '1' : '0') << '|'
-        << (get_b("chevron") ? '1' : '0') << '|' << (get_b("slider") ? '1' : '0') << '|'
-        << get_d("min", 0) << '|' << get_d("max", 100) << '|' << get_d("value", 0);
+    oss << get_s("id") << '|' << get_s("label") << '|' << get_s("trailing") << '|' << get_b("toggle") << '|'
+        << get_b("on") << '|' << get_b("chevron") << '|' << get_b("slider") << '|' << get_d("min", 0) << '|'
+        << get_d("max", 100) << '|' << get_d("value", 0) << '|' << get_s("icon") << '|' << get_s("kind") << '|'
+        << get_b("selected") << '|' << get_s("sub") << '|' << static_cast<int>(get_d("divisions", 0));
   }
   return oss.str();
 }
@@ -127,7 +137,7 @@ std::string JoinDanmakuItems(const flutter::EncodableList& list) {
     if (c.empty()) continue;
     if (!first) oss << '\n';
     first = false;
-    oss << t << '|' << c << '|' << mode << '|' << color << '|' << size;
+    oss << t << '|' << Sanitize(c, false) << '|' << mode << '|' << color << '|' << size;
   }
   return oss.str();
 }
@@ -184,33 +194,20 @@ Win7ChromeShell::ChromeMap KotvWinChrome::ToChromeMap(const EncodableMap& src) c
       out[key] = std::get<std::string>(v);
     } else if (std::holds_alternative<flutter::EncodableList>(v)) {
       const auto& list = std::get<flutter::EncodableList>(v);
-      if (key == "items" || key == "moreItems" || key == "liveRightItems" || key == "liveRight") {
-        // sheet / more / liveRight：结构化行
-        bool as_line_items = false;
-        for (const auto& e : list) {
-          if (std::holds_alternative<flutter::EncodableMap>(e)) {
-            as_line_items = true;
-            break;
-          }
-        }
-        if (as_line_items && key != "items") {
-          out[key] = JoinLineItems(list);
-        } else if (as_line_items && key == "items") {
-          // showSheet items 或 danmaku items：看首行是否有 "c"/"content"
-          bool danmaku = false;
-          if (!list.empty() && std::holds_alternative<flutter::EncodableMap>(list.front())) {
-            const auto& row = std::get<flutter::EncodableMap>(list.front());
-            danmaku = row.count(flutter::EncodableValue("c")) ||
-                      row.count(flutter::EncodableValue("content")) ||
-                      row.count(flutter::EncodableValue("t"));
-          }
-          out[key] = danmaku ? JoinDanmakuItems(list) : JoinLineItems(list);
-        } else {
-          out[key] = JoinUtf8List(list);
-        }
-      } else {
-        out[key] = JoinUtf8List(list);
+      bool maps = false;
+      bool danmaku = false;
+      for (const auto& e : list) {
+        if (!std::holds_alternative<flutter::EncodableMap>(e)) continue;
+        maps = true;
+        const auto& row = std::get<flutter::EncodableMap>(e);
+        danmaku = key == "items" && (row.count(flutter::EncodableValue("c")) ||
+                                     row.count(flutter::EncodableValue("content")) ||
+                                     row.count(flutter::EncodableValue("t")));
+        break;
       }
+      if (danmaku) out[key] = JoinDanmakuItems(list);
+      else if (maps) out[key] = JoinLineItems(list);
+      else out[key] = JoinUtf8List(list);
     } else if (std::holds_alternative<flutter::EncodableMap>(v)) {
       const auto& nested = std::get<flutter::EncodableMap>(v);
       if (key == "anchorScreen") {

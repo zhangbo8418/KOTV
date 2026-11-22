@@ -1,19 +1,23 @@
-import 'dart:async' show Completer, unawaited;
+import 'dart:async' show unawaited;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../theme/kotv_palette.dart';
+import '../theme/layout_scale.dart';
 import 'danmaku_layer.dart';
-import 'fullscreen_mode.dart';
 import 'kotv_platform.dart';
 import 'kotv_playback.dart';
 
-/// Win7 原生播控套壳：推送 / 弹层 / 事件的唯一收拢入口。
+/// Win7 原生播控通道：推送 / 弹层 / 事件的唯一收拢入口。
 ///
-/// 库存引擎下 mpv 子 HWND 盖住 Flutter；本通道驱动 **进程内 GDI+ 子窗**
-///（与 `kotv.exe` 同进程）承接播控栏、EPG、弹层与弹幕。
-/// 样式与事件契约对齐本应用 Flutter 播控（[VodInlineControls] /
-/// [VodFullscreenChrome] / 直播栏）。**Win8+ DComp 不启用本通道**（与 macOS 同为 Flutter chrome）。
+/// mpv 子 HWND 盖住 Flutter；由进程内分层窗口（`win7_chrome_*.cpp`）绘制播控、
+/// 直播面板、弹层、HUD 与弹幕。样式与操作逻辑以 Flutter 播控为准
+///（[VodInlineControls] / [VodFullscreenChrome] / 直播面板 / LiveCatchupChrome / MiniHoverShell）。
+/// 画面区指针事件经 [pointerEvent] 还原成 Flutter [PointerEvent]，页面复用自己的手势处理。
+/// **仅 Win7 启用**；其它平台仍用 Flutter 播控。
 class KotvWinChrome {
   KotvWinChrome._();
 
@@ -23,13 +27,40 @@ class KotvWinChrome {
   static int _lastDanmakuSig = 0;
   static int _ownerToken = 0;
 
-  /// 与原生壳 / 全屏 HWND inset 同源（逻辑像素）。
-  static const double topH = 56;
-  static const double bottomH = 128;
-  static const double inlineBottomH = 72;
-  static const double episodeW = 280;
+  static bool get isNeeded => kotvUsesWindowsNativeChrome();
+
+  /// 详情内嵌底栏高度（与原生 VodInlineControls 同式：上下内边距 + 按钮 + 进度条）。
+  static double inlineBarHeight(BuildContext context, double width) {
+    final ui = LayoutScale.grow(context);
+    final narrow = width < 480;
+    return ((narrow ? 2.0 : 6.0) * 2 + (narrow ? 32.0 : 40.0) + 24) * ui;
+  }
+
+  // ---------------------------------------------------------------------------
+  // 与 Flutter 播控同源的选项表
+  // ---------------------------------------------------------------------------
 
   static const vodSpeeds = <double>[0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 5.0];
+
+  /// key / 标签 / 角标（[VodFullscreenChrome] `_aspects` / `_aspectBadge`）。
+  static const aspects = <(String key, String label, String badge)>[
+    ('default', '适应', '适'),
+    ('fill', '拉伸', '拉'),
+    ('zoom', 'Zoom', 'Z'),
+    ('16:9', '16:9', '16'),
+    ('4:3', '4:3', '4'),
+  ];
+
+  static const decodeModes = <(String key, String label)>[
+    ('auto', '自动'),
+    ('soft', '软解码'),
+    ('hard', '硬解码'),
+  ];
+
+  static const renderModes = <(String key, String label)>[
+    ('surface', 'Surface（推荐，HDR）'),
+    ('texture', 'Texture'),
+  ];
 
   static const videoEqPresets = <(String id, String label)>[
     ('off', '关闭'),
@@ -43,7 +74,6 @@ class KotvWinChrome {
     ('custom', '自定义'),
   ];
 
-  /// 与 Flutter `_showAudioFxSheet` / settings 一致（勿用 music/movie）。
   static const audioEqPresets = <(String id, String label)>[
     ('off', '关闭'),
     ('natural', '自然'),
@@ -59,289 +89,162 @@ class KotvWinChrome {
     ('30', '30 分钟'),
     ('45', '45 分钟'),
     ('60', '60 分钟'),
-    ('90', '90 分钟'),
   ];
 
-  static const decodeOptions = <(String id, String label)>[
-    ('auto', '自动'),
-    ('soft', '软解码'),
-    ('hard', '硬解码'),
-  ];
+  static String rateBadge(double r) => 'x${r.toStringAsFixed(r == r.roundToDouble() ? 0 : 1)}';
 
-  static const renderOptions = <(String id, String label)>[
-    ('surface', 'Surface（推荐，HDR）'),
-    ('texture', 'Texture'),
-  ];
+  static String aspectBadge(String key) =>
+      aspects.firstWhere((a) => a.$1 == key, orElse: () => aspects.first).$3;
 
-  /// 桌面全屏两项：铺满窗口 / 占满屏幕。
-  static const fullscreenKindOptions = <(String id, String label)>[
-    ('window', '铺满当前窗口'),
-    ('display', '占满整块屏幕'),
-  ];
+  static String decodeBadge(String mode) =>
+      decodeModes.firstWhere((d) => d.$1 == mode, orElse: () => decodeModes.first).$2.substring(0, 1);
 
-  static bool get isNeeded => kotvUsesWindowsNativeChrome();
+  static double nextSpeed(double cur) {
+    var i = vodSpeeds.indexWhere((s) => (s - cur).abs() < 0.01);
+    if (i < 0) i = 1;
+    return vodSpeeds[(i + 1) % vodSpeeds.length];
+  }
 
-  static Future<void> showFullscreenKindSheet() => showChoiceSheet(
-        kind: 'fullscreenKind',
-        title: '全屏',
-        options: fullscreenKindOptions,
-      );
+  static String nextAspect(String key) {
+    final i = aspects.indexWhere((a) => a.$1 == key);
+    return aspects[(i + 1) % aspects.length].$1;
+  }
 
-  /// 弹出原生「铺满窗口 / 占满屏幕」并返回选择；取消或超时返回 null。
-  /// 会短暂拦截 [onEvent]，其它事件仍转发给原 handler。
-  static Future<KotvDesktopFullscreenKind?> pickFullscreenKind() async {
-    if (!isNeeded) return null;
-    final c = Completer<KotvDesktopFullscreenKind?>();
-    final prev = onEvent;
-    late void Function(Map<String, dynamic>) intercept;
-    void restore() {
-      if (onEvent == intercept) onEvent = prev;
-    }
-
-    intercept = (e) {
-      final type = e['type'] as String? ?? '';
-      final kind = e['kind'] as String? ?? e['sheet'] as String? ?? '';
-      if (type == 'sheet' && kind == 'fullscreenKind') {
-        final id = e['id'] as String? ?? '';
-        if (!c.isCompleted) {
-          c.complete(
-            id == 'display'
-                ? KotvDesktopFullscreenKind.display
-                : KotvDesktopFullscreenKind.window,
-          );
-        }
-        restore();
-        return;
-      }
-      if (type == 'sheetClose' && kind == 'fullscreenKind') {
-        if (!c.isCompleted) c.complete(null);
-        restore();
-        prev?.call(e);
-        return;
-      }
-      prev?.call(e);
-    };
-    onEvent = intercept;
-    await showFullscreenKindSheet();
-    try {
-      return await c.future.timeout(
-        const Duration(minutes: 2),
-        onTimeout: () {
-          restore();
-          return null;
-        },
-      );
-    } finally {
-      restore();
-    }
+  static String nextDecode(String mode) {
+    final i = decodeModes.indexWhere((d) => d.$1 == mode);
+    return decodeModes[(i + 1) % decodeModes.length].$1;
   }
 
   // ---------------------------------------------------------------------------
-  // 行模型
+  // 行模型（原生 `LineItem`）
   // ---------------------------------------------------------------------------
 
-  static Map<String, dynamic> lineItem({
-    required String id,
+  /// [kind]：select（默认，选中打勾）/ link / cycle / toggle / switch / header / info / text /
+  /// chip / action / big / slider / sliderInline / hold / button；直播：title / pill / label / gap。
+  static Map<String, dynamic> row({
+    String id = '',
     required String label,
+    String kind = 'select',
     String trailing = '',
-    bool toggle = false,
+    String icon = '',
+    String sub = '',
+    bool selected = false,
     bool on = false,
-    bool chevron = true,
+    bool chevron = false,
+    double? value,
+    double min = 0,
+    double max = 100,
+    int divisions = 0,
   }) =>
       {
         'id': id,
         'label': label,
-        'trailing': trailing,
-        'toggle': toggle,
+        'kind': kind,
+        if (trailing.isNotEmpty) 'trailing': trailing,
+        if (icon.isNotEmpty) 'icon': icon,
+        if (sub.isNotEmpty) 'sub': sub,
+        'selected': selected,
         'on': on,
-        'chevron': !toggle && chevron,
-        'slider': false,
+        'chevron': chevron,
+        if (value != null) 'value': value,
+        'min': min,
+        'max': max,
+        if (divisions > 0) 'divisions': divisions,
       };
 
-  static Map<String, dynamic> sliderItem({
+  /// [KotvStepSlider] 行；[format] 为 printf（%f 系）格式，原生拖动时就地刷新数值。
+  static Map<String, dynamic> slider({
     required String id,
     required String label,
     required double value,
     required double min,
     required double max,
-    String trailing = '',
-  }) =>
-      {
-        'id': id,
-        'label': label,
-        'trailing': trailing.isEmpty ? '${value.round()}' : trailing,
-        'toggle': false,
-        'on': false,
-        'chevron': false,
-        'slider': true,
-        'value': value,
-        'min': min,
-        'max': max,
-      };
-
-  static List<Map<String, dynamic>> choiceItems(
-    List<(String id, String label)> options, {
-    String selectedId = '',
-  }) =>
-      [
-        for (final o in options)
-          lineItem(
-            id: o.$1,
-            label: o.$2,
-            chevron: false,
-            trailing: o.$1 == selectedId ? '✓' : '',
-          ),
-      ];
-
-  /// 点播「更多」主路径行（含可原生弹层承接的子项入口）。
-  static List<Map<String, dynamic>> vodMoreItems({
-    required double rate,
-    required bool danmakuOn,
-    required bool ambientOn,
-    required bool repeatOne,
-    required bool stableVolume,
-    required bool supportsStableVolume,
-    required bool loopSkip,
-    required int sleepMinutes,
-    required String keepLabel,
-    required String renderLabel,
-    required bool supportsRenderMode,
-    required bool canSwitchPlayer,
-    required int danmakuSourceCount,
-    required String danmakuSourceName,
-    bool hasDanmakuSearch = false,
-    bool hasCast = false,
-    bool hasMini = false,
-    bool hasParse = false,
-    bool hasKeep = false,
+    required int divisions,
+    String format = '%.0f',
+    bool inline = false,
   }) {
-    final rateLabel =
-        'x${rate.toStringAsFixed(rate == rate.roundToDouble() ? 0 : 1)}';
-    final sleepLabel = sleepMinutes <= 0 ? '关闭' : '$sleepMinutes 分钟';
-    return [
-      lineItem(id: 'videoEq', label: '画面调色'),
-      lineItem(id: 'audioFx', label: '音频效果'),
-      lineItem(id: 'repeat', label: '循环播放视频', toggle: true, on: repeatOne),
-      lineItem(id: 'ambient', label: '氛围模式', toggle: true, on: ambientOn),
-      if (supportsStableVolume)
-        lineItem(id: 'stableVolume', label: '稳定音量', toggle: true, on: stableVolume),
-      lineItem(id: 'loopSkip', label: '跳过片头片尾', toggle: true, on: loopSkip),
-      lineItem(id: 'danmakuSettings', label: '弹幕设置'),
-      if (danmakuSourceCount > 1)
-        lineItem(id: 'danmakuSource', label: '弹幕源', trailing: danmakuSourceName),
-      if (hasDanmakuSearch) lineItem(id: 'danmakuSearch', label: '搜索弹幕'),
-      lineItem(id: 'sleep', label: '休眠定时器', trailing: sleepLabel),
-      if (hasCast) lineItem(id: 'cast', label: '投屏'),
-      if (hasMini) lineItem(id: 'mini', label: '迷你桌面播放'),
-      if (hasParse) lineItem(id: 'parse', label: '解析'),
-      lineItem(id: 'replay', label: '刷新', chevron: false),
-      if (hasKeep) lineItem(id: 'keep', label: keepLabel),
-      if (supportsRenderMode) lineItem(id: 'render', label: '渲染方式', trailing: renderLabel),
-      lineItem(id: 'speed', label: '倍速', trailing: rateLabel),
-      if (canSwitchPlayer) lineItem(id: 'player', label: '选播放器'),
-      lineItem(id: 'danmaku', label: '弹幕', toggle: true, on: danmakuOn),
-      lineItem(id: 'episodes', label: '选集'),
-      lineItem(id: 'playInfo', label: '播放信息'),
-      lineItem(id: 'exit', label: '退出全屏', chevron: false),
-    ];
+    final v = value.clamp(min, max).toDouble();
+    return row(
+      id: id,
+      label: label,
+      kind: inline ? 'sliderInline' : 'slider',
+      value: v,
+      min: min,
+      max: max,
+      divisions: divisions,
+      sub: format,
+      trailing: _cFormat(format, v),
+    );
   }
 
-  /// 详情内嵌「更多」子集（弹幕 + 全屏两项）。
-  static List<Map<String, dynamic>> vodInlineMoreItems({
-    required bool danmakuOn,
-    required int danmakuSourceCount,
-    required String danmakuSourceName,
-    bool hasDanmakuSearch = true,
+  static String _cFormat(String fmt, double v) {
+    final m = RegExp(r'%(\+?)\.(\d)f').firstMatch(fmt);
+    if (m == null) return fmt.replaceAll('%%', '%');
+    var num = v.toStringAsFixed(int.parse(m.group(2)!));
+    if (m.group(1) == '+' && v >= 0) num = '+$num';
+    return fmt.replaceRange(m.start, m.end, num).replaceAll('%%', '%');
+  }
+
+  static List<Map<String, dynamic>> choiceRows(
+    List<(String id, String label)> options, {
+    String selectedId = '',
+    String icon = '',
   }) =>
       [
-        lineItem(id: 'danmaku', label: '弹幕', toggle: true, on: danmakuOn),
-        lineItem(id: 'danmakuSettings', label: '弹幕设置'),
-        if (danmakuSourceCount > 1)
-          lineItem(id: 'danmakuSource', label: '弹幕源', trailing: danmakuSourceName),
-        if (hasDanmakuSearch) lineItem(id: 'danmakuSearch', label: '搜索弹幕'),
-        lineItem(id: 'expandWindow', label: '铺满当前窗口', chevron: false),
-        lineItem(id: 'expandDisplay', label: '占满整块屏幕', chevron: false),
+        for (final o in options) row(id: o.$1, label: o.$2, icon: icon, selected: o.$1 == selectedId),
       ];
 
-  /// 弹幕设置：开关 + 主滑条（与 Flutter `danmaku_settings_sheet` 主路径字段对应）。
-  static List<Map<String, dynamic>> danmakuSheetItems({
-    required bool danmakuOn,
-    required bool showScroll,
-    required bool showTop,
-    required bool showBottom,
-    required bool showReverse,
-    required bool showPositioned,
-    required bool showSpecial,
-    required bool bold,
-    required double fontSize,
-    required double opacity,
-    required int rows,
-    required int maxOnScreen,
-    required double scrollArea,
-    required int durationMs,
-    required int fixedDurationMs,
+  // ---------------------------------------------------------------------------
+  // 公共推送字段
+  // ---------------------------------------------------------------------------
+
+  // ignore: deprecated_member_use
+  static int _argb(Color c) => c.value;
+
+  /// DPI、LayoutScale、文字缩放与调色板（原生尺寸/颜色同 Flutter）。
+  static Map<String, dynamic> metrics(BuildContext context) {
+    final p = KotvPalette.of(context);
+    return {
+      'dpr': MediaQuery.devicePixelRatioOf(context),
+      'uiScale': LayoutScale.of(context),
+      'textScale': MediaQuery.textScalerOf(context).scale(1.0),
+      'palPrimary': _argb(p.primary),
+      'palFg': _argb(p.fg),
+      'palMuted': _argb(p.muted),
+      'palPillBg': _argb(p.pillBg),
+      'palPillBorder': _argb(p.pillBorder),
+      'palDialogBg': _argb(p.dialogBg),
+      'palSelected': _argb(p.selected),
+    };
+  }
+
+  /// 播放态（原生按 positionSec + 本地时钟插值弹幕）。
+  static Map<String, dynamic> playbackFields(KotvPlayback p, {bool forceBuffering = false}) {
+    final dur = p.duration;
+    final bounded = boundedMediaDurationUs(dur.inMicroseconds);
+    return {
+      'playing': p.playing,
+      'buffering': forceBuffering || p.buffering || p.stalling,
+      'positionSec': p.position.inMilliseconds / 1000.0,
+      'durationSec': bounded ? dur.inMilliseconds / 1000.0 : 0.0,
+      'bufferedSec': p.buffered.inMilliseconds / 1000.0,
+      'bounded': bounded,
+      'rate': p.rate,
+      'volume': p.volume.clamp(0, 100).toDouble(),
+    };
+  }
+
+  static bool boundedMediaDurationUs(int us) => us > 0 && us <= 9007199254740991;
+
+  /// 手势 HUD：text（倍速 / 切集提示）、side（亮度音量）、seek（快进快退预览）。
+  static Map<String, dynamic> hud({
+    String kind = '',
+    String text = '',
+    String icon = '',
+    double size = 18,
+    bool ui = true,
   }) =>
-      [
-        lineItem(id: 'danmaku', label: '开启弹幕', toggle: true, on: danmakuOn),
-        lineItem(id: 'danmakuShowScroll', label: '滚动弹幕', toggle: true, on: showScroll),
-        lineItem(id: 'danmakuShowTop', label: '顶部弹幕', toggle: true, on: showTop),
-        lineItem(id: 'danmakuShowBottom', label: '底部弹幕', toggle: true, on: showBottom),
-        lineItem(id: 'danmakuShowReverse', label: '逆向弹幕', toggle: true, on: showReverse),
-        lineItem(id: 'danmakuShowPositioned', label: '定位弹幕', toggle: true, on: showPositioned),
-        lineItem(id: 'danmakuShowSpecial', label: '特殊弹幕', toggle: true, on: showSpecial),
-        lineItem(id: 'danmakuBold', label: '粗体', toggle: true, on: bold),
-        sliderItem(
-          id: 'danmakuSize',
-          label: '字号',
-          value: fontSize.clamp(12, 48),
-          min: 12,
-          max: 48,
-        ),
-        sliderItem(
-          id: 'danmakuOpacity',
-          label: '透明度',
-          value: (opacity * 100).clamp(15, 100),
-          min: 15,
-          max: 100,
-          trailing: '${(opacity * 100).round()}%',
-        ),
-        sliderItem(
-          id: 'danmakuRows',
-          label: '行数',
-          value: rows.clamp(1, 16).toDouble(),
-          min: 1,
-          max: 16,
-        ),
-        sliderItem(
-          id: 'danmakuMaxOnScreen',
-          label: '同屏上限',
-          value: maxOnScreen.clamp(10, 500).toDouble(),
-          min: 10,
-          max: 500,
-        ),
-        sliderItem(
-          id: 'danmakuScrollArea',
-          label: '滚动区域',
-          value: (scrollArea * 100).clamp(10, 100),
-          min: 10,
-          max: 100,
-          trailing: '${(scrollArea * 100).round()}%',
-        ),
-        sliderItem(
-          id: 'danmakuDurationMs',
-          label: '滚动时长(秒)',
-          value: (durationMs / 1000).clamp(3, 15),
-          min: 3,
-          max: 15,
-        ),
-        sliderItem(
-          id: 'danmakuFixedDurationMs',
-          label: '固定时长(秒)',
-          value: (fixedDurationMs / 1000).clamp(2, 10),
-          min: 2,
-          max: 10,
-        ),
-      ];
+      {'hudKind': kind, 'hudText': text, 'hudIcon': icon, 'hudSize': size, 'hudUi': ui};
 
   // ---------------------------------------------------------------------------
   // 通道
@@ -353,9 +256,7 @@ class KotvWinChrome {
     _ch.setMethodCallHandler((call) async {
       if (call.method == 'event') {
         final args = call.arguments;
-        if (args is Map) {
-          onEvent?.call(Map<String, dynamic>.from(args));
-        }
+        if (args is Map) onEvent?.call(Map<String, dynamic>.from(args));
       }
       return null;
     });
@@ -375,7 +276,9 @@ class KotvWinChrome {
     if (token != 0 && token != _ownerToken) return;
     onEvent = null;
     _lastDanmakuSig = 0;
+    _lastItemsSig = null;
     unawaited(hideSheet());
+    unawaited(update({'mode': ''}));
     unawaited(setEnabled(false));
   }
 
@@ -384,7 +287,10 @@ class KotvWinChrome {
     _ensureHandler();
     try {
       await _ch.invokeMethod('setEnabled', {'enabled': enabled});
-      if (!enabled) _lastDanmakuSig = 0;
+      if (!enabled) {
+        _lastDanmakuSig = 0;
+        _lastItemsSig = null;
+      }
     } catch (_) {}
   }
 
@@ -396,20 +302,11 @@ class KotvWinChrome {
     } catch (_) {}
   }
 
-  /// 手势/遥控 HUD（倍速、音量、seek 预览等）；空串清除。
-  static Future<void> showHud(String text, {bool autoHide = false}) => update({
-        'gestureHud': text,
-        'gestureHudAutoHide': autoHide,
-      });
-
-  static Future<void> clearHud() => update({'gestureHud': ''});
-
   static Future<void> showSheet({
     required String kind,
     String title = '',
     String subtitle = '',
     required List<Map<String, dynamic>> items,
-    int selected = 0,
   }) async {
     if (!isNeeded) return;
     _ensureHandler();
@@ -419,7 +316,6 @@ class KotvWinChrome {
         'title': title,
         'subtitle': subtitle,
         'items': items,
-        'selected': selected < 0 ? 0 : selected,
       });
     } catch (_) {}
   }
@@ -437,279 +333,333 @@ class KotvWinChrome {
     required List<(String id, String label)> options,
     String selectedId = '',
     String subtitle = '',
-  }) {
-    final idx = options.indexWhere((o) => o.$1 == selectedId);
+    String icon = '',
+  }) =>
+      showSheet(
+        kind: kind,
+        title: title,
+        subtitle: subtitle,
+        items: choiceRows(options, selectedId: selectedId, icon: icon),
+      );
+
+  // ---------------------------------------------------------------------------
+  // 弹层内容（与 Flutter 弹层逐项对应）
+  // ---------------------------------------------------------------------------
+
+  /// [VodFullscreenChrome] `_showMore`。
+  static List<Map<String, dynamic>> vodMoreItems({
+    required bool repeatOne,
+    required bool ambientOn,
+    required bool supportsStableVolume,
+    required bool stableVolume,
+    required bool loopSkip,
+    required int danmakuSourceCount,
+    required String danmakuSourceName,
+    required bool hasDanmakuSearch,
+    required int sleepMinutes,
+    required bool hasCast,
+    required bool hasMini,
+    required bool hasParse,
+    required bool hasKeep,
+    required String keepLabel,
+    required bool supportsRenderMode,
+    required String renderLabel,
+  }) =>
+      [
+        row(id: 'videoEq', label: '画面调色', kind: 'link', icon: 'tune', chevron: true),
+        row(id: 'audioFx', label: '音频效果', kind: 'link', icon: 'equalizer', chevron: true),
+        row(id: 'repeat', label: '循环播放视频', kind: 'toggle', icon: 'repeat', on: repeatOne),
+        row(id: 'ambient', label: '氛围模式', kind: 'toggle', icon: 'wb_sunny_outlined', on: ambientOn),
+        if (supportsStableVolume)
+          row(id: 'stableVolume', label: '稳定音量', kind: 'toggle', icon: 'graphic_eq', on: stableVolume),
+        row(id: 'loopSkip', label: '跳过片头片尾', kind: 'toggle', icon: 'skip_next_outlined', on: loopSkip),
+        row(id: 'danmakuSettings', label: '弹幕设置', kind: 'link', icon: 'tune', chevron: true),
+        if (danmakuSourceCount > 1)
+          row(
+            id: 'danmakuSource',
+            label: '弹幕源',
+            kind: 'link',
+            icon: 'playlist_play',
+            trailing: danmakuSourceName,
+            chevron: true,
+          ),
+        if (hasDanmakuSearch) row(id: 'danmakuSearch', label: '搜索弹幕', kind: 'link', icon: 'manage_search', chevron: true),
+        row(
+          id: 'sleep',
+          label: '休眠定时器',
+          kind: 'link',
+          icon: 'bedtime_outlined',
+          trailing: sleepMinutes <= 0 ? '关闭' : '$sleepMinutes 分钟',
+          chevron: true,
+        ),
+        if (hasCast) row(id: 'cast', label: '投屏', kind: 'link', icon: 'cast', chevron: true),
+        if (hasMini) row(id: 'mini', label: '迷你桌面播放', kind: 'link', icon: 'picture_in_picture_alt', chevron: true),
+        if (hasParse) row(id: 'parse', label: '解析', kind: 'link', icon: 'auto_awesome', chevron: true),
+        row(id: 'replay', label: '刷新', kind: 'link', icon: 'refresh', chevron: true),
+        if (hasKeep) row(id: 'keep', label: keepLabel, kind: 'link', icon: 'favorite_border', chevron: true),
+        if (supportsRenderMode)
+          row(id: 'render', label: '渲染方式', kind: 'link', icon: 'layers_outlined', trailing: renderLabel, chevron: true),
+        row(id: 'playInfo', label: '播放信息', kind: 'link', icon: 'info_outline', chevron: true),
+        row(id: 'exit', label: '退出全屏', kind: 'link', icon: 'fullscreen_exit', chevron: true),
+      ];
+
+  /// [VodFullscreenChrome] `_showSpeedSheet`：大字 + 0.1–5.0 滑条 + 常用倍速。
+  static Future<void> showSpeedSheet(double rate) => showSheet(
+        kind: 'speed',
+        title: '播放倍速',
+        items: [
+          row(id: 'rate', label: '×${rate.toStringAsFixed(1)}', kind: 'big'),
+          slider(
+            id: 'rate',
+            label: '',
+            value: rate,
+            min: 0.1,
+            max: 5.0,
+            divisions: 49,
+            format: '×%.1f',
+            inline: true,
+          ),
+          for (final s in vodSpeeds)
+            row(id: '$s', label: '×${s == s.roundToDouble() ? s.toStringAsFixed(0) : s}', kind: 'action'),
+        ],
+      );
+
+  /// [VodFullscreenChrome] `_showVideoEqSheet`。
+  static Future<void> showVideoEqSheet(Map<String, String> s) {
+    var preset = (s['videoEq'] ?? 'off').trim().toLowerCase();
+    if (preset == 'on') preset = 'custom';
+    double numOf(String k) => double.tryParse(s[k] ?? '0') ?? 0;
+    bool sel(String id) => preset == id || (id == 'off' && (preset.isEmpty || preset == 'off'));
     return showSheet(
-      kind: kind,
-      title: title,
-      subtitle: subtitle,
-      items: choiceItems(options, selectedId: selectedId),
-      selected: idx < 0 ? 0 : idx,
-    );
-  }
-
-  static String formatClock(Duration d) {
-    if (d.inMilliseconds <= 0) return '--:--';
-    final s = d.inSeconds;
-    final m = s ~/ 60;
-    final r = s % 60;
-    final h = m ~/ 60;
-    if (h > 0) {
-      return '$h:${(m % 60).toString().padLeft(2, '0')}:${r.toString().padLeft(2, '0')}';
-    }
-    return '${m.toString().padLeft(2, '0')}:${r.toString().padLeft(2, '0')}';
-  }
-
-  static String wallClock() {
-    final n = DateTime.now();
-    return '${n.hour.toString().padLeft(2, '0')}:${n.minute.toString().padLeft(2, '0')}';
-  }
-
-  static String endsAtLabel(Duration pos, Duration dur) {
-    if (dur.inMilliseconds <= 0) return '';
-    final left = dur - pos;
-    if (left.inSeconds <= 0) return '';
-    final end = DateTime.now().add(left);
-    return 'Ends at ${end.hour.toString().padLeft(2, '0')}:${end.minute.toString().padLeft(2, '0')}';
-  }
-
-  static double nextSpeed(double cur) {
-    var i = vodSpeeds.indexWhere((s) => (s - cur).abs() < 0.01);
-    if (i < 0) i = 2;
-    return vodSpeeds[(i + 1) % vodSpeeds.length];
-  }
-
-  /// 详情非全屏内嵌底栏（契约同 [VodInlineControls]）。
-  /// [anchorScreen] / [surfaceScreen]：Flutter 视图逻辑坐标（localToGlobal）。
-  static Future<void> pushVodInline({
-    required KotvPlayback playback,
-    required Map<String, double> anchorScreen,
-    Map<String, double>? surfaceScreen,
-    required bool chromeVisible,
-    bool showDirect = false,
-    bool directOn = false,
-    bool miniActive = false,
-    bool danmakuOn = false,
-    /// 解析地址/换集等尚无 player.buffering 时，强制原生壳显示加载态。
-    bool forceBuffering = false,
-    List<DanmakuItem> danmakuItems = const [],
-    List<Map<String, dynamic>>? moreItems,
-  }) async {
-    if (!isNeeded) return;
-    final pos = playback.position;
-    final dur = playback.duration;
-    final progress = dur.inMilliseconds > 0
-        ? (pos.inMilliseconds / dur.inMilliseconds).clamp(0.0, 1.0)
-        : 0.0;
-    final buffered = dur.inMilliseconds > 0
-        ? (playback.buffered.inMilliseconds / dur.inMilliseconds).clamp(0.0, 1.0)
-        : 0.0;
-    await update({
-      'mode': 'vod_inline',
-      'anchorScreen': anchorScreen,
-      if (surfaceScreen != null) 'surfaceScreen': surfaceScreen,
-      'positionLabel': formatClock(pos),
-      'durationLabel': formatClock(dur),
-      'progress': progress,
-      'buffered': buffered,
-      'positionSec': pos.inMilliseconds / 1000.0,
-      'rate': playback.rate,
-      'playing': playback.playing,
-      'buffering': forceBuffering || playback.buffering || playback.stalling,
-      'volume': playback.volume.clamp(0, 100),
-      'showDirect': showDirect,
-      'directOn': directOn,
-      'miniActive': miniActive,
-      'top': false,
-      'bottom': chromeVisible,
-      'episodesVisible': false,
-      'centerVisible': false,
-      'liveLeftVisible': false,
-      'liveRightVisible': false,
-      'channelVisible': false,
-      'actions': const ['toggle', 'stop', 'cast', 'mini', 'expand'],
-      if (moreItems != null) 'moreItems': moreItems,
-    });
-    await setDanmaku(enabled: danmakuOn, items: danmakuItems);
-  }
-
-  /// 点播全屏快照。
-  static Future<void> pushVod({
-    required KotvPlayback playback,
-    required String title,
-    required String subtitle,
-    required List<String> episodes,
-    required int episodeSelected,
-    required bool chromeVisible,
-    required bool episodesVisible,
-    required bool danmakuOn,
-    required List<DanmakuItem> danmakuItems,
-    String resolution = '',
-    List<Map<String, dynamic>>? moreItems,
-    double danmakuFontSize = 18,
-    double danmakuOpacity = 0.85,
-    int danmakuDurationMs = 8000,
-    int danmakuFixedDurationMs = 5000,
-    int danmakuRows = 6,
-    bool danmakuShowScroll = true,
-    bool danmakuShowTop = true,
-    bool danmakuShowBottom = true,
-    bool danmakuShowReverse = true,
-    int openingSec = 0,
-    int endingSec = 0,
-    String aspect = 'default',
-    String decodeMode = 'auto',
-    bool showDirect = false,
-    bool directOn = false,
-    bool forceBuffering = false,
-    double holdSpeed = 2.0,
-  }) async {
-    if (!isNeeded) return;
-    final pos = playback.position;
-    final dur = playback.duration;
-    final progress = dur.inMilliseconds > 0
-        ? (pos.inMilliseconds / dur.inMilliseconds).clamp(0.0, 1.0)
-        : 0.0;
-    final w = playback.width;
-    final h = playback.height;
-    final res = resolution.isNotEmpty
-        ? resolution
-        : (w > 0 && h > 0 ? '$w x $h' : '');
-    await update({
-      'mode': 'vod',
-      'title': title,
-      'subtitle': subtitle,
-      if (res.isNotEmpty) 'resolution': res,
-      'clock': wallClock(),
-      'endsAt': endsAtLabel(pos, dur),
-      'positionLabel': formatClock(pos),
-      'durationLabel': formatClock(dur),
-      'episodes': episodes,
-      'episodeSelected': episodeSelected,
-      'progress': progress,
-      'positionSec': pos.inMilliseconds / 1000.0,
-      'rate': playback.rate,
-      'playing': playback.playing,
-      'buffering': forceBuffering || playback.buffering || playback.stalling,
-      'volume': playback.volume.clamp(0, 100),
-      'holdSpeed': holdSpeed.clamp(2.0, 5.0),
-      'openingSec': openingSec,
-      'endingSec': endingSec,
-      'aspect': aspect,
-      'decode': decodeMode,
-      'showDirect': showDirect,
-      'directOn': directOn,
-      'top': chromeVisible,
-      'bottom': chromeVisible,
-      'episodesVisible': episodesVisible,
-      'centerVisible': chromeVisible && !episodesVisible,
-      'liveLeftVisible': false,
-      'liveRightVisible': false,
-      'channelVisible': false,
-      'actions': const [
-        'prev',
-        'toggle',
-        'next',
-        'speed',
-        'replay',
-        'aspect',
-        'decode',
-        'subtitle',
-        'audio',
-        'video',
-        'player',
-        'more',
-        'episodes',
+      kind: 'videoEq',
+      title: '画面调色',
+      items: [
+        for (final e in videoEqPresets) row(id: e.$1, label: e.$2, kind: 'chip', selected: sel(e.$1)),
+        if (preset == 'custom') ...[
+          slider(id: 'videoBrightness', label: '亮度', value: numOf('videoBrightness'), min: -100, max: 100, divisions: 40, inline: true),
+          slider(id: 'videoContrast', label: '对比度', value: numOf('videoContrast'), min: -100, max: 100, divisions: 40, inline: true),
+          slider(id: 'videoSaturation', label: '饱和度', value: numOf('videoSaturation'), min: -100, max: 100, divisions: 40, inline: true),
+          slider(id: 'videoSharpness', label: '锐度', value: numOf('videoSharpness'), min: 0, max: 100, divisions: 20, inline: true),
+          slider(id: 'videoTemperature', label: '色温', value: numOf('videoTemperature'), min: -100, max: 100, divisions: 40, inline: true),
+          row(id: 'preview', label: '按住看原画', kind: 'hold'),
+          row(id: 'reset', label: '复位', kind: 'button'),
+        ],
       ],
-      if (moreItems != null) 'moreItems': moreItems,
-    });
-    await setDanmaku(
-      enabled: danmakuOn,
-      items: danmakuItems,
-      fontSize: danmakuFontSize,
-      opacity: danmakuOpacity,
-      durationMs: danmakuDurationMs,
-      fixedDurationMs: danmakuFixedDurationMs,
-      rows: danmakuRows,
-      showScroll: danmakuShowScroll,
-      showTop: danmakuShowTop,
-      showBottom: danmakuShowBottom,
-      showReverse: danmakuShowReverse,
     );
   }
 
-  /// 直播快照。
-  static Future<void> pushLive({
-    required KotvPlayback playback,
-    required String title,
-    required String channelText,
-    required List<String> liveLeft,
-    required int liveLeftSelected,
-    required List<Map<String, dynamic>> liveRightItems,
-    required bool leftOpen,
-    required bool rightOpen,
-    required bool channelVisible,
-    required List<DanmakuItem> danmakuItems,
-    List<String>? groups,
-    int groupSelected = -1,
-    List<String>? channels,
-    int channelSelected = -1,
-    List<String>? epgDays,
-    int epgDaySelected = 0,
-    List<String>? epgPrograms,
-    int epgProgramSelected = -1,
-    bool epgOpen = true,
-    String channelNo = '',
-    String channelName = '',
-    String channelProgram = '',
-    String channelTicker = '',
-    bool danmakuEnabled = true,
-  }) async {
-    if (!isNeeded) return;
-    final pos = playback.position;
-    final dur = playback.duration;
-    final rightLabels = [
-      for (final a in liveRightItems) '${a['label'] ?? ''}',
-    ];
-    await update({
-      'mode': 'live',
-      'title': title,
-      'channelText': channelText,
-      if (channelNo.isNotEmpty) 'channelNo': channelNo,
-      if (channelName.isNotEmpty) 'channelName': channelName,
-      if (channelProgram.isNotEmpty) 'channelProgram': channelProgram,
-      if (channelTicker.isNotEmpty) 'channelTicker': channelTicker,
-      'liveLeft': liveLeft,
-      'liveLeftSelected': liveLeftSelected,
-      'liveRight': rightLabels,
-      'liveRightItems': liveRightItems,
-      if (groups != null) 'groups': groups,
-      'groupSelected': groupSelected,
-      if (channels != null) 'channels': channels,
-      'channelSelected': channelSelected >= 0 ? channelSelected : liveLeftSelected,
-      if (epgDays != null) 'epgDays': epgDays,
-      'epgDaySelected': epgDaySelected,
-      if (epgPrograms != null) 'epgPrograms': epgPrograms,
-      'epgProgramSelected': epgProgramSelected,
-      'epgOpen': epgOpen,
-      'playing': playback.playing,
-      'buffering': playback.buffering || playback.stalling,
-      'positionSec': pos.inMilliseconds / 1000.0,
-      'progress': dur.inMilliseconds > 0
-          ? (pos.inMilliseconds / dur.inMilliseconds).clamp(0.0, 1.0)
-          : 0.0,
-      'rate': playback.rate,
-      'top': false,
-      'bottom': false,
-      'episodesVisible': false,
-      'centerVisible': false,
-      'liveLeftVisible': leftOpen,
-      'liveRightVisible': rightOpen,
-      'channelVisible': channelVisible,
-      'actions': const <String>[],
-    });
-    await setDanmaku(enabled: danmakuEnabled, items: danmakuItems);
+  /// [VodFullscreenChrome] `_showAudioFxSheet`。
+  static Future<void> showAudioFxSheet(Map<String, String> s) {
+    final eq = (s['audioEq'] ?? 'off').trim().toLowerCase();
+    var dialogue = double.tryParse(s['audioDialogue'] ?? '0') ?? 0;
+    if ((s['audioDialogue'] ?? '').toLowerCase() == 'true') dialogue = 100;
+    final balance = (double.tryParse(s['audioBalance'] ?? '0') ?? 0).clamp(-100.0, 100.0);
+    final offset = (double.tryParse(s['audioOffsetMs'] ?? '0') ?? 0).clamp(-5000.0, 5000.0);
+    return showSheet(
+      kind: 'audioFx',
+      title: '音频效果',
+      items: [
+        for (final e in audioEqPresets) row(id: e.$1, label: e.$2, kind: 'chip', selected: eq == e.$1),
+        if (eq == 'custom') ...[
+          slider(id: 'audioDialogue', label: '对白', value: dialogue, min: 0, max: 100, divisions: 20, inline: true),
+          slider(id: 'audioBalance', label: '平衡', value: balance, min: -100, max: 100, divisions: 40, inline: true),
+          slider(
+            id: 'audioOffsetMs',
+            label: '音画',
+            value: offset,
+            min: -5000,
+            max: 5000,
+            divisions: 100,
+            format: '%.0f ms',
+            inline: true,
+          ),
+          row(id: 'preview', label: '按住试听原音', kind: 'hold'),
+        ],
+      ],
+    );
   }
+
+  /// `showKotvDanmakuSettingsSheet` 的原生版（时长以秒为单位滑动，提交时换回毫秒）。
+  static Future<void> showDanmakuSettingsSheet(Map<String, String> s) {
+    String g(String k, [String d = '']) => (s[k] ?? '').trim().isEmpty ? d : s[k]!.trim();
+    bool flag(String k, [bool d = true]) => g(k, d ? 'true' : 'false').toLowerCase() == 'true';
+    double n(String k, double d) => double.tryParse(g(k, '$d')) ?? d;
+    final stroke = g('danmakuStrokeMode', 'outline').toLowerCase();
+    final color = g('danmakuColorMode', 'original').toLowerCase();
+    final font = g('danmakuFont', 'default').toLowerCase();
+    return showSheet(
+      kind: 'danmaku',
+      title: '弹幕设置',
+      items: [
+        row(id: 'danmaku', label: '开启弹幕', kind: 'switch', on: flag('danmaku')),
+        row(id: 'danmakuLoad', label: '加载弹幕', kind: 'switch', on: flag('danmakuLoad')),
+        row(id: 'danmakuAuto', label: '自动搜索弹幕', kind: 'switch', on: flag('danmakuAuto')),
+        row(id: 'danmakuSpiderFirst', label: '片源弹幕优先', kind: 'switch', on: flag('danmakuSpiderFirst')),
+        slider(id: 'danmakuSize', label: '字号', value: n('danmakuSize', 18), min: 12, max: 48, divisions: 36),
+        slider(id: 'danmakuOpacity', label: '透明度', value: n('danmakuOpacity', 85), min: 15, max: 100, divisions: 17, format: '%.0f%%'),
+        slider(id: 'danmakuRows', label: '行数', value: n('danmakuRows', 6), min: 1, max: 16, divisions: 15),
+        slider(id: 'danmakuMaxOnScreen', label: '同屏上限', value: n('danmakuMaxOnScreen', 150), min: 10, max: 500, divisions: 49),
+        slider(id: 'danmakuScrollArea', label: '滚动区域', value: n('danmakuScrollArea', 50), min: 10, max: 100, divisions: 18, format: '%.0f%%'),
+        slider(id: 'danmakuScrollGap', label: '水平间距', value: n('danmakuScrollGap', 8), min: 0, max: 20, divisions: 20, format: '%.0f%%'),
+        slider(
+          id: 'danmakuOffsetS',
+          label: '时轴偏移',
+          value: n('danmakuOffsetMs', 0) / 1000,
+          min: -300,
+          max: 300,
+          divisions: 120,
+          format: '%+.0f s',
+        ),
+        row(id: 'danmakuShowScroll', label: '滚动弹幕', kind: 'switch', on: flag('danmakuShowScroll')),
+        row(id: 'danmakuShowTop', label: '顶部弹幕', kind: 'switch', on: flag('danmakuShowTop')),
+        row(id: 'danmakuShowBottom', label: '底部弹幕', kind: 'switch', on: flag('danmakuShowBottom')),
+        row(id: 'danmakuShowReverse', label: '逆向弹幕', kind: 'switch', on: flag('danmakuShowReverse')),
+        row(id: 'danmakuShowPositioned', label: '定位弹幕', kind: 'switch', on: flag('danmakuShowPositioned')),
+        row(id: 'danmakuShowSpecial', label: '特殊弹幕', kind: 'switch', on: flag('danmakuShowSpecial')),
+        row(id: 'danmakuBold', label: '粗体', kind: 'switch', on: flag('danmakuBold', false)),
+        row(
+          id: 'danmakuStrokeMode',
+          label: '描边样式',
+          kind: 'link',
+          chevron: true,
+          trailing: switch (stroke) {
+            'none' => '无',
+            'outline' => '描边',
+            'projection' => '投影',
+            _ => '阴影',
+          },
+        ),
+        row(
+          id: 'danmakuColorMode',
+          label: '颜色策略',
+          kind: 'link',
+          chevron: true,
+          trailing: switch (color) {
+            'white' => '白色',
+            'yellow' => '黄色',
+            _ => '原色',
+          },
+        ),
+        row(
+          id: 'danmakuFont',
+          label: '弹幕字体',
+          kind: 'link',
+          chevron: true,
+          trailing: switch (font) {
+            'sans' || 'sans-serif' => '无衬线',
+            'serif' => '衬线',
+            'mono' || 'monospace' => '等宽',
+            _ => '默认',
+          },
+        ),
+        slider(id: 'danmakuRowsTop', label: '顶部行数', value: n('danmakuRowsTop', 3), min: 1, max: 8, divisions: 7),
+        slider(id: 'danmakuRowsBottom', label: '底部行数', value: n('danmakuRowsBottom', 3), min: 1, max: 8, divisions: 7),
+        slider(
+          id: 'danmakuDurationS',
+          label: '滚动时长',
+          value: n('danmakuDurationMs', 8000) / 1000,
+          min: 3,
+          max: 15,
+          divisions: 24,
+          format: '%.1f s',
+        ),
+        slider(
+          id: 'danmakuFixedDurationS',
+          label: '固定时长',
+          value: n('danmakuFixedDurationMs', 5000) / 1000,
+          min: 2,
+          max: 10,
+          divisions: 16,
+          format: '%.1f s',
+        ),
+        slider(id: 'danmakuLineSpacing', label: '行距', value: n('danmakuLineSpacing', 1.4), min: 1, max: 2, divisions: 10, format: '%.1f'),
+      ],
+    );
+  }
+
+  /// 弹幕设置里三个「选一项」子弹层。
+  static Future<void> showDanmakuChoice(String id, Map<String, String> s) {
+    final cur = (s[id] ?? '').trim().toLowerCase();
+    switch (id) {
+      case 'danmakuStrokeMode':
+        return showChoiceSheet(
+          kind: 'danmakuChoice:$id',
+          title: '弹幕描边',
+          selectedId: cur.isEmpty ? 'outline' : cur,
+          options: const [('none', '无'), ('outline', '描边'), ('shadow', '阴影'), ('projection', '投影')],
+        );
+      case 'danmakuColorMode':
+        return showChoiceSheet(
+          kind: 'danmakuChoice:$id',
+          title: '弹幕颜色',
+          selectedId: cur.isEmpty ? 'original' : cur,
+          options: const [('original', '保留原色'), ('white', '白色'), ('yellow', '黄色')],
+        );
+      default:
+        return showChoiceSheet(
+          kind: 'danmakuChoice:danmakuFont',
+          title: '弹幕字体',
+          selectedId: cur == 'sans-serif' ? 'sans' : (cur == 'monospace' ? 'mono' : (cur.isEmpty ? 'default' : cur)),
+          options: const [('default', '默认'), ('sans', '无衬线'), ('serif', '衬线'), ('mono', '等宽')],
+        );
+    }
+  }
+
+  /// 弹幕设置项落盘：开关。返回是否已处理。
+  static Future<bool> persistDanmakuToggle({
+    required String id,
+    required bool on,
+    required Future<void> Function(String key, String value) persist,
+  }) async {
+    if (id != 'danmaku' && !id.startsWith('danmaku')) return false;
+    await persist(id, on ? 'true' : 'false');
+    return true;
+  }
+
+  /// 弹幕设置项落盘：滑条（秒制滑条换回毫秒）。返回是否已处理。
+  static Future<bool> persistDanmakuSlider({
+    required String id,
+    required double value,
+    required Future<void> Function(String key, String value) persist,
+  }) async {
+    switch (id) {
+      case 'danmakuOffsetS':
+        await persist('danmakuOffsetMs', '${(value * 1000).round()}');
+        return true;
+      case 'danmakuDurationS':
+        await persist('danmakuDurationMs', '${(value * 1000).round()}');
+        return true;
+      case 'danmakuFixedDurationS':
+        await persist('danmakuFixedDurationMs', '${(value * 1000).round()}');
+        return true;
+      case 'danmakuLineSpacing':
+        await persist(id, value.toStringAsFixed(1));
+        return true;
+      default:
+        if (!id.startsWith('danmaku')) return false;
+        await persist(id, '${value.round()}');
+        return true;
+    }
+  }
+
+  /// [VodFullscreenChrome] `_showPlayerDialog`。
+  static Future<void> showPlayerPickerSheet({
+    required String currentId,
+    required String currentLabel,
+    required List<(String label, String id)> options,
+  }) =>
+      showSheet(
+        kind: 'player',
+        title: '请选择播放器',
+        subtitle: '当前：$currentLabel',
+        items: [
+          for (final o in options) row(id: o.$2, label: o.$1, icon: 'smart_display_outlined', selected: o.$2 == currentId),
+        ],
+      );
+
+  // ---------------------------------------------------------------------------
+  // 弹幕
+  // ---------------------------------------------------------------------------
 
   static Future<void> setDanmaku({
     required bool enabled,
@@ -719,28 +669,44 @@ class KotvWinChrome {
     int durationMs = 8000,
     int fixedDurationMs = 5000,
     int rows = 6,
+    int maxOnScreen = 150,
+    double scrollArea = 1.0,
+    bool bold = false,
     bool showScroll = true,
     bool showTop = true,
     bool showBottom = true,
     bool showReverse = true,
+    bool showPositioned = true,
+    bool showSpecial = true,
   }) async {
     if (!isNeeded) return;
     _ensureHandler();
-    final sig = Object.hash(
+    final sig = Object.hashAll([
       items.length,
       items.isEmpty ? 0 : items.first.time,
       items.isEmpty ? 0 : items.last.time,
       items.isEmpty ? 0 : items.first.content.hashCode,
       enabled,
       fontSize,
+      opacity,
+      durationMs,
+      fixedDurationMs,
       rows,
+      maxOnScreen,
+      scrollArea,
+      bold,
       showScroll,
       showTop,
       showBottom,
       showReverse,
-    );
-    final itemsChanged = sig != _lastDanmakuSig;
+      showPositioned,
+      showSpecial,
+    ]);
+    if (sig == _lastDanmakuSig) return;
+    final itemsSig = Object.hash(items.length, items.isEmpty ? 0 : items.first.time, items.isEmpty ? 0 : items.last.time);
+    final sendItems = itemsSig != (_lastItemsSig ?? -1);
     _lastDanmakuSig = sig;
+    _lastItemsSig = itemsSig;
     try {
       final map = <String, dynamic>{
         'enabled': enabled,
@@ -749,176 +715,71 @@ class KotvWinChrome {
         'durationMs': durationMs,
         'fixedDurationMs': fixedDurationMs,
         'rows': rows,
+        'maxOnScreen': maxOnScreen,
+        'scrollArea': scrollArea,
+        'bold': bold,
         'showScroll': showScroll,
         'showTop': showTop,
         'showBottom': showBottom,
         'showReverse': showReverse,
+        'showPositioned': showPositioned,
+        'showSpecial': showSpecial,
       };
-      if (itemsChanged) {
+      if (sendItems) {
         const maxItems = 4000;
-        final src = items.length > maxItems
-            ? items.sublist(items.length - maxItems)
-            : items;
+        final src = items.length > maxItems ? items.sublist(items.length - maxItems) : items;
         map['items'] = [
-          for (final it in src)
-            {
-              't': it.time,
-              'c': it.content,
-              'm': it.mode,
-              'color': it.color,
-              'size': it.size,
-            },
+          for (final it in src) {'t': it.time, 'c': it.content, 'm': it.mode, 'color': it.color, 'size': it.size},
         ];
       }
       await _ch.invokeMethod('setDanmaku', map);
     } catch (_) {}
   }
 
+  static int? _lastItemsSig;
+
   // ---------------------------------------------------------------------------
-  // 弹层收拢（屏幕层只调这些，勿再手搓 showSheet 参数表）
+  // 指针 / 按键
   // ---------------------------------------------------------------------------
 
-  static Future<void> showDanmakuSettingsSheet({
-    required bool danmakuOn,
-    required bool showScroll,
-    required bool showTop,
-    required bool showBottom,
-    required bool showReverse,
-    required bool showPositioned,
-    required bool showSpecial,
-    required bool bold,
-    required double fontSize,
-    required double opacity,
-    required int rows,
-    required int maxOnScreen,
-    required double scrollArea,
-    required int durationMs,
-    required int fixedDurationMs,
-  }) =>
-      showSheet(
-        kind: 'danmaku',
-        title: '弹幕设置',
-        items: danmakuSheetItems(
-          danmakuOn: danmakuOn,
-          showScroll: showScroll,
-          showTop: showTop,
-          showBottom: showBottom,
-          showReverse: showReverse,
-          showPositioned: showPositioned,
-          showSpecial: showSpecial,
-          bold: bold,
-          fontSize: fontSize,
-          opacity: opacity,
-          rows: rows,
-          maxOnScreen: maxOnScreen,
-          scrollArea: scrollArea,
-          durationMs: durationMs,
-          fixedDurationMs: fixedDurationMs,
-        ),
-      );
+  static int _pointerId = 0x4B000;
+  static Offset _lastPointer = Offset.zero;
 
-  static Future<void> showPlayerPickerSheet({
-    required String currentId,
-    required List<(String label, String id)> options,
-    String title = '请选择播放器',
-    String? subtitle,
-  }) {
-    final cur = currentId;
-    final idx = options.indexWhere((o) => o.$2 == cur);
-    return showSheet(
-      kind: 'player',
-      title: title,
-      subtitle: subtitle ?? (cur.isEmpty ? '' : '当前：$cur'),
-      items: [
-        for (final o in options)
-          lineItem(
-            id: o.$2,
-            label: o.$1,
-            chevron: false,
-            trailing: o.$2 == cur ? '✓' : '',
-          ),
-      ],
-      selected: idx < 0 ? 0 : idx,
-    );
-  }
-
-  static Future<void> showVolumeSheet(double volume) => showSheet(
-        kind: 'volume',
-        title: '音量',
-        items: [
-          sliderItem(
-            id: 'volume',
-            label: '音量',
-            value: volume.clamp(1, 100),
-            min: 1,
-            max: 100,
-          ),
-        ],
-      );
-
-  static Future<void> showRenderSheet(String selectedId) => showChoiceSheet(
-        kind: 'render',
-        title: '渲染方式',
-        options: renderOptions,
-        selectedId: selectedId,
-      );
-
-  static Future<void> showDecodeSheet(String selectedId) => showChoiceSheet(
-        kind: 'decode',
-        title: '解码方式',
-        options: decodeOptions,
-        selectedId: selectedId,
-      );
-
-  /// 弹幕设置项 persist：返回是否已处理。屏幕层在 true 时再 notify / sync。
-  static Future<bool> persistDanmakuToggle({
-    required String id,
-    required bool on,
-    required Future<void> Function(String key, String value) persist,
-  }) async {
-    switch (id) {
-      case 'danmaku':
-      case 'danmakuShowScroll':
-      case 'danmakuShowTop':
-      case 'danmakuShowBottom':
-      case 'danmakuShowReverse':
-      case 'danmakuShowPositioned':
-      case 'danmakuShowSpecial':
-      case 'danmakuBold':
-        await persist(id == 'danmaku' ? 'danmaku' : id, on ? 'true' : 'false');
-        return true;
+  /// 原生手势层的指针事件 → Flutter [PointerEvent]（全局逻辑坐标；[origin] 为监听区左上角）。
+  /// `scroll` 返回 null，由调用方按 dx/dy/shift 走滚轮逻辑。
+  static PointerEvent? pointerEvent(Map<String, dynamic> e, {Offset origin = Offset.zero}) {
+    final pos = Offset((e['x'] as num?)?.toDouble() ?? 0, (e['y'] as num?)?.toDouble() ?? 0);
+    final ts = Duration(microseconds: DateTime.now().microsecondsSinceEpoch);
+    final delta = pos - _lastPointer;
+    _lastPointer = pos;
+    final transform = origin == Offset.zero ? null : Matrix4.translationValues(-origin.dx, -origin.dy, 0);
+    const kind = PointerDeviceKind.mouse;
+    final PointerEvent ev;
+    switch (e['phase'] as String? ?? '') {
+      case 'down':
+        _pointerId++;
+        ev = PointerDownEvent(pointer: _pointerId, kind: kind, position: pos, buttons: kPrimaryButton, timeStamp: ts);
+      case 'move':
+        ev = PointerMoveEvent(
+          pointer: _pointerId,
+          kind: kind,
+          position: pos,
+          delta: delta,
+          buttons: kPrimaryButton,
+          timeStamp: ts,
+        );
+      case 'up':
+        ev = PointerUpEvent(pointer: _pointerId, kind: kind, position: pos, timeStamp: ts);
+      case 'cancel':
+        ev = PointerCancelEvent(pointer: _pointerId, kind: kind, position: pos, timeStamp: ts);
+      case 'hover':
+        ev = PointerHoverEvent(kind: kind, position: pos, delta: delta, timeStamp: ts);
+      case 'exit':
+        ev = PointerExitEvent(kind: kind, position: pos, timeStamp: ts);
       default:
-        return false;
+        return null;
     }
-  }
-
-  /// 弹幕滑条 commit persist：返回是否已处理。
-  static Future<bool> persistDanmakuSlider({
-    required String id,
-    required double value,
-    required Future<void> Function(String key, String value) persist,
-  }) async {
-    switch (id) {
-      case 'danmakuSize':
-        await persist(id, '${value.round()}');
-        return true;
-      case 'danmakuOpacity':
-        await persist(id, (value / 100).toStringAsFixed(2));
-        return true;
-      case 'danmakuRows':
-      case 'danmakuMaxOnScreen':
-        await persist(id, '${value.round()}');
-        return true;
-      case 'danmakuScrollArea':
-        await persist(id, (value / 100).toStringAsFixed(2));
-        return true;
-      case 'danmakuDurationMs':
-      case 'danmakuFixedDurationMs':
-        await persist(id, '${(value * 1000).round()}');
-        return true;
-      default:
-        return false;
-    }
+    return transform == null ? ev : ev.transformed(transform);
   }
 
   /// 原生壳 `key.logical` 名称 → Flutter [LogicalKeyboardKey]。
@@ -942,6 +803,8 @@ class KotvWinChrome {
         return LogicalKeyboardKey.pageUp;
       case 'PageDown':
         return LogicalKeyboardKey.pageDown;
+      case 'Backspace':
+        return LogicalKeyboardKey.backspace;
       case 'ContextMenu':
         return LogicalKeyboardKey.contextMenu;
       case 'GoBack':
@@ -970,37 +833,21 @@ class KotvWinChrome {
         return LogicalKeyboardKey.keyS;
       default:
         if (name.startsWith('Digit') && name.length == 6) {
-          const digits = <LogicalKeyboardKey>[
-            LogicalKeyboardKey.digit0,
-            LogicalKeyboardKey.digit1,
-            LogicalKeyboardKey.digit2,
-            LogicalKeyboardKey.digit3,
-            LogicalKeyboardKey.digit4,
-            LogicalKeyboardKey.digit5,
-            LogicalKeyboardKey.digit6,
-            LogicalKeyboardKey.digit7,
-            LogicalKeyboardKey.digit8,
-            LogicalKeyboardKey.digit9,
-          ];
           final d = int.tryParse(name.substring(5));
-          if (d != null && d >= 0 && d <= 9) return digits[d];
+          if (d != null && d >= 0 && d <= 9) return LogicalKeyboardKey(LogicalKeyboardKey.digit0.keyId + d);
         }
         return null;
     }
   }
 
-  /// 由原生壳 key 事件构造 Flutter [KeyEvent]（供复用 `_onKey`）。
+  /// 由原生壳 key 事件构造 Flutter [KeyEvent]（供页面复用自己的 `_onKey`）。
   static KeyEvent? keyEventFromMap(Map<String, dynamic> e) {
     final logical = logicalKeyFromName(e['logical'] as String? ?? '');
     if (logical == null) return null;
-    final time = Duration.zero;
+    const time = Duration.zero;
     final physical = PhysicalKeyboardKey(logical.keyId & 0xFFFFFFFF);
-    if (e['up'] == true) {
-      return KeyUpEvent(physicalKey: physical, logicalKey: logical, timeStamp: time);
-    }
-    if (e['repeat'] == true) {
-      return KeyRepeatEvent(physicalKey: physical, logicalKey: logical, timeStamp: time);
-    }
+    if (e['up'] == true) return KeyUpEvent(physicalKey: physical, logicalKey: logical, timeStamp: time);
+    if (e['repeat'] == true) return KeyRepeatEvent(physicalKey: physical, logicalKey: logical, timeStamp: time);
     return KeyDownEvent(physicalKey: physical, logicalKey: logical, timeStamp: time);
   }
 }

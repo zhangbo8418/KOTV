@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart' show kDoubleTapTimeout, kTouchSlop;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -252,10 +253,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   /// Win7 画面区（含底栏 Stack）锚点，弹幕只盖此矩形。
   final GlobalKey _inlineSurfaceKey = GlobalKey(debugLabel: 'kotv_inline_surface');
   int _winChromeToken = 0;
-  /// Win7 pushVodInline 去抖快照（几何/播态/量化进度）。
+  /// Win7 内嵌 / 迷你推送去抖快照（几何/播态/量化进度）。
   String? _lastWinInlineChromeSnap;
   /// Win7 视频 HWND 几何去抖，避免进度 notify 反复 updateFrame/RaiseChrome。
   String? _lastWinVideoFrameSig;
+  /// Win7 原生手势层单击延迟（等双击判定）与按下点。
+  Timer? _winInlineTapTimer;
+  Offset? _winInlineDownAt;
   int _epPage = 0;
   /// 焦点停留后切换线路 / 分集区间。
   final KotvFocusArm _detailFocusArm = KotvFocusArm();
@@ -3622,7 +3626,18 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       setState: setState,
       onPip: (inPip) => _miniDesktop = inPip,
       onEntered: () => _miniDesktop = true,
-    );
+    ).then((_) => _resyncWinAfterMini());
+  }
+
+  /// Win7：迷你窗切换后布局整体换掉，等一帧再按新模式推原生壳。
+  void _resyncWinAfterMini() {
+    if (!KotvWinChrome.isNeeded || !mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _lastWinInlineChromeSnap = null;
+      _lastWinVideoFrameSig = null;
+      _syncWinInlineChrome();
+    });
   }
 
   Future<void> _exitMini() {
@@ -3631,7 +3646,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       playback: _playback,
       setState: setState,
       onExited: () => _miniDesktop = false,
-    );
+    ).then((_) => _resyncWinAfterMini());
   }
 
   Widget _videoStage({required bool interactive}) {
@@ -3746,10 +3761,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   Widget _inlineChrome() {
     // Win7：HWND 盖住 Flutter 内嵌栏 → 占位量锚，原生 kotv_win_chrome 承接。
     if (KotvWinChrome.isNeeded) {
-      return SizedBox(
-        key: _inlineChromeAnchorKey,
-        height: KotvWinChrome.inlineBottomH,
-        width: double.infinity,
+      return LayoutBuilder(
+        builder: (context, c) => SizedBox(
+          key: _inlineChromeAnchorKey,
+          height: KotvWinChrome.inlineBarHeight(context, c.maxWidth),
+          width: double.infinity,
+        ),
       );
     }
     return VodInlineControls(
@@ -3788,6 +3805,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
 
   void _unbindWinInlineChrome() {
     if (!KotvWinChrome.isNeeded) return;
+    _winInlineTapTimer?.cancel();
+    _winInlineTapTimer = null;
     if (_winChromeToken == 0) return;
     KotvWinChrome.unbind(_winChromeToken);
     _winChromeToken = 0;
@@ -3813,10 +3832,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     }
   }
 
-  /// Win7 详情：视频 HWND 高度扣掉内嵌底栏，避免盖住原生播控（只剩进度条闪残）。
+  /// Win7 详情：视频 HWND 高度扣掉内嵌底栏，避免盖住原生播控。迷你窗底栏半透明叠在画面上。
   Map<String, double> _winVideoFrameAvoidInlineChrome(Map<String, double> video) {
-    if (!KotvWinChrome.isNeeded || _immersiveFullscreen) return video;
-    final ch = KotvWinChrome.inlineBottomH;
+    if (!KotvWinChrome.isNeeded || _immersiveFullscreen || _miniDesktop) return video;
+    final ch = KotvWinChrome.inlineBarHeight(context, video['width']!);
     final h = video['height']!;
     if (h <= ch + 8) return video;
     return {
@@ -3859,37 +3878,16 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     for (var i = 0; i < 10; i++) {
       if (!mounted) return;
       await WidgetsBinding.instance.endOfFrame;
-      final anchor = _winRectOf(_inlineChromeAnchorKey);
-      if (anchor == null) continue;
+      if (!mounted) return;
+      if (!_miniDesktop && _winRectOf(_inlineChromeAnchorKey) == null) continue;
       if (_winChromeToken == 0) {
         _winChromeToken = KotvWinChrome.bind(_onWinInlineChromeEvent);
       }
-      final surface = _winRectOf(_inlineSurfaceKey);
-      final srcName = _danmakuSources.isEmpty
-          ? ''
-          : _danmakuSources[_danmakuSourceIdx.clamp(0, _danmakuSources.length - 1)].name;
-      await KotvWinChrome.pushVodInline(
-        playback: _playback,
-        anchorScreen: anchor,
-        surfaceScreen: surface,
-        chromeVisible: true,
-        showDirect: kotvShowDirectOutput(_playback, _decodeMode),
-        directOn: _playback.directOutput,
-        miniActive: _miniDesktop,
-        danmakuOn: _danmakuOn,
-        forceBuffering: _winChromeForceBuffering,
-        danmakuItems: _danmakuItems.value,
-        moreItems: KotvWinChrome.vodInlineMoreItems(
-          danmakuOn: _danmakuOn,
-          danmakuSourceCount: _danmakuSources.length,
-          danmakuSourceName: srcName,
-        ),
-      );
-      _lastWinInlineChromeSnap = _winInlineChromeSnapshot(
-        anchor: anchor,
-        surface: surface,
-        srcName: srcName,
-      );
+      _lastWinInlineChromeSnap = null;
+      final fields = _winInlineFields();
+      if (fields == null) continue;
+      _lastWinInlineChromeSnap = fields.toString();
+      await KotvWinChrome.update(fields);
       return;
     }
   }
@@ -3899,6 +3897,38 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       _status.contains('嗅探') ||
       _status.contains('换集中') ||
       _status.contains('加载中');
+
+  /// 内嵌底栏 / 迷你窗推给原生的整份状态；锚点未就绪返回 null。
+  Map<String, dynamic>? _winInlineFields() {
+    final p = _playback;
+    final base = <String, dynamic>{
+      ...KotvWinChrome.metrics(context),
+      ...KotvWinChrome.playbackFields(p, forceBuffering: _winChromeForceBuffering),
+      'showDirect': kotvShowDirectOutput(p, _decodeMode),
+      'directOn': p.directOutput,
+      'hasCast': true,
+      'hasMini': true,
+      'gestures': true,
+    };
+    // 进度量化到 0.25s，减少 listener 刷屏；几何/播态变化仍立即推。
+    base['positionSec'] = ((base['positionSec'] as double) * 4).roundToDouble() / 4;
+    base['bufferedSec'] = ((base['bufferedSec'] as double) * 4).roundToDouble() / 4;
+    if (_miniDesktop) {
+      return {...base, 'mode': 'mini', 'miniKind': 'vod', 'bottom': true, 'centerVisible': false};
+    }
+    final anchor = _winRectOf(_inlineChromeAnchorKey);
+    if (anchor == null) return null;
+    final parsing = _winChromeForceBuffering;
+    return {
+      ...base,
+      'mode': 'vod_inline',
+      'anchorScreen': anchor,
+      'surfaceScreen': _winRectOf(_inlineSurfaceKey),
+      'bottom': true,
+      // 同 CenterPlayPauseButton(hideWhenBuffering)：暂停且未缓冲才显示。
+      'centerVisible': !parsing && !p.playing && !p.stalling,
+    };
+  }
 
   void _syncWinInlineChrome() {
     if (!KotvWinChrome.isNeeded || !mounted) return;
@@ -3927,8 +3957,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         ));
       }
     }
-    final anchor = _winRectOf(_inlineChromeAnchorKey);
-    if (anchor == null) {
+    final fields = _winInlineFields();
+    if (fields == null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _syncWinInlineChrome();
       });
@@ -3937,79 +3967,69 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     if (_winChromeToken == 0) {
       _winChromeToken = KotvWinChrome.bind(_onWinInlineChromeEvent);
     }
-    final srcName = _danmakuSources.isEmpty
-        ? ''
-        : _danmakuSources[_danmakuSourceIdx.clamp(0, _danmakuSources.length - 1)].name;
-    final snap = _winInlineChromeSnapshot(
-      anchor: anchor,
-      surface: surface,
-      srcName: srcName,
-    );
+    unawaited(KotvWinChrome.setDanmaku(
+      enabled: _danmakuOn,
+      items: _danmakuItems.value,
+      fontSize: _danmakuSize,
+      opacity: _danmakuOpacity,
+      durationMs: _danmakuDurationMs,
+      fixedDurationMs: _danmakuFixedDurationMs,
+      rows: _danmakuRows,
+      maxOnScreen: _danmakuMaxOnScreen,
+      scrollArea: _danmakuScrollArea,
+      bold: _danmakuBold,
+      showScroll: _danmakuShowScroll,
+      showTop: _danmakuShowTop,
+      showBottom: _danmakuShowBottom,
+      showReverse: _danmakuShowReverse,
+      showPositioned: _danmakuShowPositioned,
+      showSpecial: _danmakuShowSpecial,
+    ));
+    final snap = fields.toString();
     if (snap == _lastWinInlineChromeSnap) return;
     _lastWinInlineChromeSnap = snap;
-    unawaited(KotvWinChrome.pushVodInline(
-      playback: _playback,
-      anchorScreen: anchor,
-      surfaceScreen: surface,
-      chromeVisible: true,
-      showDirect: kotvShowDirectOutput(_playback, _decodeMode),
-      directOn: _playback.directOutput,
-      miniActive: _miniDesktop,
-      danmakuOn: _danmakuOn,
-      forceBuffering: _winChromeForceBuffering,
-      danmakuItems: _danmakuItems.value,
-      moreItems: KotvWinChrome.vodInlineMoreItems(
-        danmakuOn: _danmakuOn,
-        danmakuSourceCount: _danmakuSources.length,
-        danmakuSourceName: srcName,
-      ),
-    ));
+    unawaited(KotvWinChrome.update(fields));
   }
 
-  String _winInlineChromeSnapshot({
-    required Map<String, double> anchor,
-    required Map<String, double>? surface,
-    required String srcName,
-  }) {
-    final p = _playback;
-    final dur = p.duration.inMilliseconds;
-    final pos = p.position.inMilliseconds;
-    final buf = p.buffered.inMilliseconds;
-    final progress = dur > 0 ? (pos / dur).clamp(0.0, 1.0) : 0.0;
-    final buffered = dur > 0 ? (buf / dur).clamp(0.0, 1.0) : 0.0;
-    // 进度量化到 1%，减少 listener 刷屏；几何/播态变化仍立即推。
-    final progQ = (progress * 100).round();
-    final bufQ = (buffered * 100).round();
-    return [
-      anchor['left']?.toStringAsFixed(1),
-      anchor['top']?.toStringAsFixed(1),
-      anchor['width']?.toStringAsFixed(1),
-      anchor['height']?.toStringAsFixed(1),
-      surface?['left']?.toStringAsFixed(1),
-      surface?['top']?.toStringAsFixed(1),
-      surface?['width']?.toStringAsFixed(1),
-      surface?['height']?.toStringAsFixed(1),
-      p.playing,
-      p.buffering || p.stalling || _winChromeForceBuffering,
-      progQ,
-      bufQ,
-      p.volume.round(),
-      p.directOutput,
-      _miniDesktop,
-      _danmakuOn,
-      srcName,
-      kotvShowDirectOutput(p, _decodeMode),
-    ].join('|');
+  /// 原生手势层的单击 / 双击：同内嵌画面 GestureDetector（单击播停，双击进全屏，忙时不响应）。
+  void _onWinInlinePointer(Map<String, dynamic> e) {
+    final phase = e['phase'] as String? ?? '';
+    final pos = Offset((e['x'] as num?)?.toDouble() ?? 0, (e['y'] as num?)?.toDouble() ?? 0);
+    if (phase == 'down') {
+      _winInlineDownAt = pos;
+      return;
+    }
+    if (phase == 'cancel') {
+      _winInlineDownAt = null;
+      return;
+    }
+    if (phase != 'up') return;
+    final down = _winInlineDownAt;
+    _winInlineDownAt = null;
+    if (down == null || (pos - down).distance > kTouchSlop) return;
+    if (_winInlineTapTimer?.isActive ?? false) {
+      _winInlineTapTimer!.cancel();
+      _winInlineTapTimer = null;
+      unawaited(_cycleImmersiveByDoubleTap());
+      return;
+    }
+    _winInlineTapTimer = Timer(kDoubleTapTimeout, () {
+      _winInlineTapTimer = null;
+      if (!mounted || _playUrl.isEmpty || _immersiveFullscreen) return;
+      if (_winChromeForceBuffering) return;
+      unawaited(_playback.playOrPause());
+      setState(() {});
+    });
   }
 
   void _onWinInlineChromeEvent(Map<String, dynamic> e) {
     if (!mounted || _immersiveFullscreen) return;
     switch (e['type'] as String? ?? '') {
-      case 'pointerHold':
-        // 内嵌无自动藏栏计时；保留契约以免壳侧双发
+      case 'pointer':
+        if (!_miniDesktop) _onWinInlinePointer(e);
         break;
-      case 'tap':
-      case 'doubleTap':
+      case 'back':
+        kotvHandleAppBack?.call();
         break;
       case 'key':
         final ke = KotvWinChrome.keyEventFromMap(e);
@@ -4019,7 +4039,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         }
         break;
       case 'toggle':
-      case 'togglePlay':
         unawaited(_playback.playOrPause());
         break;
       case 'stop':
@@ -4031,7 +4050,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         }());
         break;
       case 'seekFraction':
-        if (e['commit'] == false) break;
+        if (e['commit'] != true) break;
         final frac = (e['value'] as num?)?.toDouble() ?? 0;
         final dur = _playback.duration;
         if (dur.inMilliseconds > 0) {
@@ -4040,35 +4059,17 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           )));
         }
         break;
+      case 'slider':
+        if (e['id'] != 'volume') break;
+        final v = ((e['value'] as num?)?.toDouble() ?? 0).round().clamp(0, 100);
+        unawaited(_playback.setVolume(v.toDouble()));
+        if (e['commit'] == true) unawaited(_persistPlayerSetting('playerVolume', '$v'));
+        break;
       case 'cast':
         unawaited(_cast());
         break;
       case 'mini':
         unawaited(_miniDesktop ? _exitMini() : _enterMini());
-        break;
-      case 'expand':
-        // 原生选「铺满窗口 / 占满屏幕」
-        unawaited(() async {
-          final kind = await KotvWinChrome.pickFullscreenKind();
-          if (kind != null && mounted && !_immersiveFullscreen) {
-            await _enterFullscreen(kind);
-          }
-        }());
-        break;
-      case 'danmakuToggle':
-        setState(() => _danmakuOn = !_danmakuOn);
-        unawaited(_persistPlayerSetting('danmaku', _danmakuOn ? 'true' : 'false'));
-        _syncWinInlineChrome();
-        break;
-      case 'more':
-        if (e['nativeSheet'] == true) break;
-        final moreId = e['id'] as String? ?? '';
-        if (moreId.isEmpty || moreId == 'open') {
-          // 原生 OpenMoreSheet 已展示；勿再弹一层
-          break;
-        } else {
-          unawaited(_onWinInlineMoreId(moreId));
-        }
         break;
       case 'direct':
         unawaited(_persistPlayerSetting(
@@ -4077,192 +4078,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         ));
         break;
       case 'sheet':
-        if (e['nativeSheet'] == true) break;
-        unawaited(_onWinInlineSheet(e['id'] as String? ?? '', e['kind'] as String? ?? ''));
-        break;
-      case 'toggleItem':
-        unawaited(_onWinInlineToggleItem(e['id'] as String? ?? '', e['on'] == true));
-        break;
-      case 'slider':
-        unawaited(_onWinInlineSlider(
-          e['id'] as String? ?? '',
-          (e['value'] as num?)?.toDouble() ?? 0,
-          commit: e['commit'] == true,
-        ));
+        if (e['kind'] != 'fullscreenKind') break;
+        unawaited(_enterFullscreen(e['id'] == 'display'
+            ? KotvDesktopFullscreenKind.display
+            : KotvDesktopFullscreenKind.window));
         break;
     }
-  }
-
-  Future<void> _winOpenInlineDanmakuSettings() async {
-    await KotvWinChrome.showDanmakuSettingsSheet(
-      danmakuOn: _danmakuOn,
-      showScroll: _danmakuShowScroll,
-      showTop: _danmakuShowTop,
-      showBottom: _danmakuShowBottom,
-      showReverse: _danmakuShowReverse,
-      showPositioned: _danmakuShowPositioned,
-      showSpecial: _danmakuShowSpecial,
-      bold: _danmakuBold,
-      fontSize: _danmakuSize,
-      opacity: _danmakuOpacity,
-      rows: _danmakuRows,
-      maxOnScreen: _danmakuMaxOnScreen,
-      scrollArea: _danmakuScrollArea,
-      durationMs: _danmakuDurationMs,
-      fixedDurationMs: _danmakuFixedDurationMs,
-    );
-  }
-
-  Future<void> _onWinInlineSheet(String id, String kind) async {
-    if (id.isEmpty) return;
-    // 底栏「全屏」原生 sheet：直接进入对应全屏；pickFullscreenKind Completer 另路也会收到
-    if (kind == 'fullscreenKind') {
-      if (id == 'window') {
-        await _enterFullscreen(KotvDesktopFullscreenKind.window);
-      } else if (id == 'display') {
-        await _enterFullscreen(KotvDesktopFullscreenKind.display);
-      }
-      return;
-    }
-    if (kind == 'danmakuSource') {
-      final i = int.tryParse(id);
-      if (i != null) unawaited(_loadDanmakuSource(i, notify: true));
-      return;
-    }
-    // kind == more 的子项由 type=more 处理；此处兼容仅发 sheet 的路径
-    if (kind == 'more' || kind.isEmpty) {
-      await _onWinInlineMoreId(id);
-    }
-  }
-
-  Future<void> _onWinInlineMoreId(String id) async {
-    switch (id) {
-      case 'danmakuSettings':
-        await _winOpenInlineDanmakuSettings();
-        break;
-      case 'danmakuSource':
-        await KotvWinChrome.showChoiceSheet(
-          kind: 'danmakuSource',
-          title: '选择弹幕源',
-          options: [
-            for (var i = 0; i < _danmakuSources.length; i++)
-              ('$i', _danmakuSources[i].name),
-          ],
-          selectedId: '$_danmakuSourceIdx',
-        );
-        break;
-      case 'danmakuSearch':
-        // 搜索需输入框；HWND 会挡住 Flutter 对话框，先经原生提示再短暂藏壳。
-        await KotvWinChrome.showSheet(
-          kind: 'more',
-          title: '搜索弹幕',
-          items: [
-            KotvWinChrome.lineItem(
-              id: 'danmakuSearchGo',
-              label: '打开搜索（将暂时隐藏播控）',
-              chevron: false,
-            ),
-          ],
-        );
-        break;
-      case 'danmakuSearchGo':
-        // 藏原生壳再弹搜索，避免被 HWND/壳挡住
-        _unbindWinInlineChrome();
-        try {
-          await _searchDanmaku();
-        } finally {
-          if (mounted && !_immersiveFullscreen && _playUrl.isNotEmpty) {
-            _bindWinInlineChrome();
-          }
-        }
-        break;
-      case 'expandWindow':
-        await _enterFullscreen(KotvDesktopFullscreenKind.window);
-        break;
-      case 'expandDisplay':
-        await _enterFullscreen(KotvDesktopFullscreenKind.display);
-        break;
-    }
-  }
-
-  Future<void> _onWinInlineToggleItem(String id, bool on) async {
-    switch (id) {
-      case 'danmaku':
-        setState(() => _danmakuOn = on);
-        await _persistPlayerSetting('danmaku', on ? 'true' : 'false');
-        break;
-      case 'danmakuShowScroll':
-        setState(() => _danmakuShowScroll = on);
-        await _persistPlayerSetting(id, on ? 'true' : 'false');
-        break;
-      case 'danmakuShowTop':
-        setState(() => _danmakuShowTop = on);
-        await _persistPlayerSetting(id, on ? 'true' : 'false');
-        break;
-      case 'danmakuShowBottom':
-        setState(() => _danmakuShowBottom = on);
-        await _persistPlayerSetting(id, on ? 'true' : 'false');
-        break;
-      case 'danmakuShowReverse':
-        setState(() => _danmakuShowReverse = on);
-        await _persistPlayerSetting(id, on ? 'true' : 'false');
-        break;
-      case 'danmakuShowPositioned':
-        setState(() => _danmakuShowPositioned = on);
-        await _persistPlayerSetting(id, on ? 'true' : 'false');
-        break;
-      case 'danmakuShowSpecial':
-        setState(() => _danmakuShowSpecial = on);
-        await _persistPlayerSetting(id, on ? 'true' : 'false');
-        break;
-      case 'danmakuBold':
-        setState(() => _danmakuBold = on);
-        await _persistPlayerSetting(id, on ? 'true' : 'false');
-        break;
-    }
-    _syncWinInlineChrome();
-  }
-
-  Future<void> _onWinInlineSlider(String id, double value, {required bool commit}) async {
-    if (!commit) return;
-    switch (id) {
-      case 'volume':
-        final v = value.round().clamp(1, 100);
-        await _playback.setVolume(v.toDouble());
-        await _persistPlayerSetting('playerVolume', '$v');
-        break;
-      case 'danmakuSize':
-        setState(() => _danmakuSize = value);
-        await _persistPlayerSetting(id, '${value.round()}');
-        break;
-      case 'danmakuOpacity':
-        setState(() => _danmakuOpacity = (value / 100).clamp(0.15, 1.0));
-        await _persistPlayerSetting(id, _danmakuOpacity.toStringAsFixed(2));
-        break;
-      case 'danmakuRows':
-        setState(() => _danmakuRows = value.round().clamp(1, 16));
-        await _persistPlayerSetting(id, '$_danmakuRows');
-        break;
-      case 'danmakuMaxOnScreen':
-        setState(() => _danmakuMaxOnScreen = value.round().clamp(10, 500));
-        await _persistPlayerSetting(id, '$_danmakuMaxOnScreen');
-        break;
-      case 'danmakuScrollArea':
-        setState(() => _danmakuScrollArea = (value / 100).clamp(0.1, 1.0));
-        await _persistPlayerSetting(id, _danmakuScrollArea.toStringAsFixed(2));
-        break;
-      case 'danmakuDurationMs':
-        setState(() => _danmakuDurationMs = (value * 1000).round());
-        await _persistPlayerSetting(id, '$_danmakuDurationMs');
-        break;
-      case 'danmakuFixedDurationMs':
-        setState(() => _danmakuFixedDurationMs = (value * 1000).round());
-        await _persistPlayerSetting(id, '$_danmakuFixedDurationMs');
-        break;
-      default:
-        return;
-    }
-    _syncWinInlineChrome();
   }
 
   /// 播控（内嵌、迷你、全屏）设置落盘后按键名同步本页状态与当前播放器。
