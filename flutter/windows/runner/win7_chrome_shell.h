@@ -95,9 +95,16 @@ class Win7ChromeShell {
   HWND RootHwnd() const;
   void EnsureClasses();
   void DestroyAll();
+  enum class HudKind { None, HoldSpeed, Volume, Seek, Ep };
+
   void LayoutDanmaku();
   void LayoutModal();
   void LayoutGesture();
+  void LayoutHud();
+  void SetGestureHud(HudKind kind, const std::wstring& text, bool auto_hide = false);
+  void ClearGestureHud();
+  double EstimatedTotalSec() const;
+  static std::wstring FormatHudClock(double sec);
   void ShowPanel(Panel& p, bool show, int x, int y, int w, int h);
   HWND CreateChildPanel(const wchar_t* title);
   HWND CreateLayeredPopup(const wchar_t* class_name);
@@ -130,6 +137,7 @@ class Win7ChromeShell {
   void PaintLiveRight(HDC hdc, const RECT& rc);
   void PaintChannelInfo(HDC hdc, const RECT& rc);
   void PaintCenter(HDC hdc, const RECT& rc);
+  void PaintGestureHud(HDC hdc, const RECT& rc);
   void PaintModal(HDC hdc, const RECT& rc);
   void PaintEqSheet(HDC hdc, const RECT& card);
   void PaintListSheet(HDC hdc, const RECT& card, bool light);
@@ -189,11 +197,13 @@ class Win7ChromeShell {
   Panel channel_info_;
   Panel center_play_;
   Panel gesture_;
+  Panel hud_;
   HWND danmaku_hwnd_ = nullptr;
   HWND modal_hwnd_ = nullptr;
   UINT_PTR danmaku_timer_ = 0;
   UINT_PTR hold_speed_timer_ = 0;
   UINT_PTR episodes_close_timer_ = 0;
+  UINT_PTR hud_hide_timer_ = 0;
 
   std::string mode_;
   std::wstring title_;
@@ -293,12 +303,15 @@ class Win7ChromeShell {
 
   enum class GestureMode { None, Pending, Seek, Volume, HoldSpeed, Ep };
   GestureMode ges_mode_ = GestureMode::None;
+  HudKind hud_kind_ = HudKind::None;
+  std::wstring hud_text_;
   POINT ges_down_{};
   DWORD ges_down_tick_ = 0;
   bool ges_moved_ = false;
   double ges_origin_progress_ = 0;
   double ges_origin_volume_ = 0;
   int ges_client_w_ = 0;
+  double hold_speed_rate_ = 2.0;
 
   bool danmaku_enabled_ = false;
   std::vector<DanmakuItem> danmaku_items_;

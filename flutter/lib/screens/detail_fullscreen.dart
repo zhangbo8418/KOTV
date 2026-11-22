@@ -442,10 +442,11 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
         }
         break;
       case 'holdSpeed':
+        // HUD 由原生壳绘制；此处只改倍速。
         if (e['on'] == true) {
-          _startHoldSpeed();
+          _startHoldSpeed(showHint: false);
         } else {
-          _stopHoldSpeed();
+          _stopHoldSpeed(showHint: false);
         }
         break;
       case 'fxPreview':
@@ -472,17 +473,9 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
         if (dur.inMilliseconds <= 0) break;
         final target = Duration(
             milliseconds: (dur.inMilliseconds * frac.clamp(0.0, 1.0)).round());
-        if (e['commit'] == false) {
-          setState(() {
-            _seekPreviewBase ??= widget.playback.position;
-            _seekPreviewDelta = target - _seekPreviewBase!;
-          });
-          break;
-        }
-        _seekPreviewBase = null;
-        _seekPreviewDelta = Duration.zero;
+        // 预览 HUD 原生绘制；commit 前不刷 Flutter。
+        if (e['commit'] == false) break;
         unawaited(widget.playback.seek(target));
-        if (mounted) setState(() {});
         break;
       case 'prev':
         widget.onPrev?.call();
@@ -953,6 +946,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       decodeMode: _decodeMode,
       showDirect: kotvShowDirectOutput(widget.playback, _decodeMode),
       directOn: widget.playback.directOutput,
+      holdSpeed: widget.holdSpeed,
     ));
   }
 
@@ -1067,7 +1061,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   /// 换集入口（详情 [_advanceToNextEpisode] / 无缝 queuedStart / 手势切集）：挡住 pause→亮栏。
   void beginEpisodeSwitchQuiet() => _stayChromeImmersive(untilPlay: true);
 
-  void _startHoldSpeed() {
+  void _startHoldSpeed({bool showHint = true}) {
     if (_gestureLocked || _holdingSpeed) return;
     if (!widget.playback.playing) return;
     final cur = widget.playback.rate;
@@ -1077,16 +1071,19 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     _holdingSpeed = true;
     _suppressTapAfterHold = true;
     unawaited(widget.playback.setRate(target));
-    setState(() => _holdSpeedHint = '×${target.toStringAsFixed(target == target.roundToDouble() ? 0 : 1)}');
+    if (showHint && mounted) {
+      setState(() => _holdSpeedHint =
+          '×${target.toStringAsFixed(target == target.roundToDouble() ? 0 : 1)}');
+    }
   }
 
-  void _stopHoldSpeed() {
+  void _stopHoldSpeed({bool showHint = true}) {
     if (!_holdingSpeed) return;
     final restore = _rateBeforeHold ?? 1.0;
     _holdingSpeed = false;
     _rateBeforeHold = null;
     unawaited(widget.playback.setRate(restore));
-    if (mounted) setState(() => _holdSpeedHint = null);
+    if (showHint && mounted) setState(() => _holdSpeedHint = null);
   }
 
   /// 亮顶底栏。非 [intentional]：栏隐不 reveal，仅栏已显续命；尊重沉浸锁。

@@ -554,6 +554,7 @@ class KotvWinChrome {
     bool showDirect = false,
     bool directOn = false,
     bool forceBuffering = false,
+    double holdSpeed = 2.0,
   }) async {
     if (!isNeeded) return;
     final pos = playback.position;
@@ -583,6 +584,7 @@ class KotvWinChrome {
       'playing': playback.playing,
       'buffering': forceBuffering || playback.buffering || playback.stalling,
       'volume': playback.volume.clamp(0, 100),
+      'holdSpeed': holdSpeed.clamp(2.0, 5.0),
       'openingSec': openingSec,
       'endingSec': endingSec,
       'aspect': aspect,

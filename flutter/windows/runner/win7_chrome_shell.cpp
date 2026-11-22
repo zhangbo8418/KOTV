@@ -59,8 +59,13 @@ constexpr UINT_PTR kSubclassIdHost = 0x4B4F5456;  // 'KOTV'
 constexpr UINT_PTR kSubclassIdRoot = 0x4B4F5457;
 constexpr UINT_PTR kHoldSpeedTimerId = 42;
 constexpr UINT_PTR kEpisodesCloseTimerId = 43;
+constexpr UINT_PTR kHudHideTimerId = 44;
 constexpr DWORD kHoldSpeedMs = 450;
 constexpr DWORD kEpisodesCloseMs = 5000;  // kotvPlayerOverlayHide
+constexpr DWORD kHudHideMs = 900;
+constexpr int kHudW = 240;
+constexpr int kHudH = 52;
+constexpr BYTE kHudAlpha = 200;
 constexpr int kGestureSlop = 8;
 constexpr int kDesktopEdgeHover = 16;
 constexpr int kEdgeIgnore = 24;
@@ -812,6 +817,10 @@ void Win7ChromeShell::DestroyAll() {
     KillTimer(gesture_.hwnd, hold_speed_timer_);
     hold_speed_timer_ = 0;
   }
+  if (hud_hide_timer_ && hud_.hwnd) {
+    KillTimer(hud_.hwnd, hud_hide_timer_);
+    hud_hide_timer_ = 0;
+  }
   if (episodes_close_timer_ && host_hwnd_) {
     KillTimer(host_hwnd_, episodes_close_timer_);
     episodes_close_timer_ = 0;
@@ -824,6 +833,7 @@ void Win7ChromeShell::DestroyAll() {
   destroy(channel_info_.hwnd);
   destroy(center_play_.hwnd);
   destroy(gesture_.hwnd);
+  destroy(hud_.hwnd);
   destroy(danmaku_hwnd_);
   destroy(modal_hwnd_);
 }
@@ -963,9 +973,112 @@ void Win7ChromeShell::Layout() {
     }
   }
   LayoutGesture();
+  LayoutHud();
   LayoutDanmaku();
   LayoutModal();
   RaiseChromeZ();
+}
+
+std::wstring Win7ChromeShell::FormatHudClock(double sec) {
+  if (!std::isfinite(sec) || sec < 0) sec = 0;
+  const int t = static_cast<int>(std::lround(sec));
+  const int h = t / 3600;
+  const int m = (t % 3600) / 60;
+  const int s = t % 60;
+  wchar_t buf[32];
+  if (h > 0) {
+    swprintf_s(buf, L"%d:%02d:%02d", h, m, s);
+  } else {
+    swprintf_s(buf, L"%d:%02d", m, s);
+  }
+  return buf;
+}
+
+double Win7ChromeShell::EstimatedTotalSec() const {
+  if (progress_ > 1e-6 && position_sec_ > 0) {
+    return (std::max)(1.0, position_sec_ / progress_);
+  }
+  return 1800.0;
+}
+
+void Win7ChromeShell::ClearGestureHud() {
+  hud_kind_ = HudKind::None;
+  hud_text_.clear();
+  if (hud_hide_timer_ && hud_.hwnd) {
+    KillTimer(hud_.hwnd, hud_hide_timer_);
+    hud_hide_timer_ = 0;
+  }
+  ShowPanel(hud_, false, 0, 0, 0, 0);
+}
+
+void Win7ChromeShell::SetGestureHud(HudKind kind, const std::wstring& text, bool auto_hide) {
+  if (!enabled_ || kind == HudKind::None || text.empty()) {
+    ClearGestureHud();
+    return;
+  }
+  HWND parent = HostHwnd();
+  if (!parent) return;
+  if (!hud_.hwnd) {
+    EnsureClasses();
+    hud_.hwnd = CreateWindowExW(
+        WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE, kClass, L"kotv_hud",
+        WS_CHILD | WS_CLIPSIBLINGS, 0, 0, 0, 0, parent, nullptr, GetModuleHandleW(nullptr),
+        this);
+    if (hud_.hwnd) {
+      SetWindowLongPtrW(hud_.hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
+      SetLayeredWindowAttributes(hud_.hwnd, 0, kHudAlpha, LWA_ALPHA);
+    }
+  }
+  if (!hud_.hwnd) return;
+  hud_kind_ = kind;
+  hud_text_ = text;
+  LayoutHud();
+  if (hud_hide_timer_) {
+    KillTimer(hud_.hwnd, hud_hide_timer_);
+    hud_hide_timer_ = 0;
+  }
+  if (auto_hide) {
+    hud_hide_timer_ = SetTimer(hud_.hwnd, kHudHideTimerId, kHudHideMs, nullptr);
+  }
+  InvalidateRect(hud_.hwnd, nullptr, FALSE);
+  SetWindowPos(hud_.hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+}
+
+void Win7ChromeShell::LayoutHud() {
+  if (!hud_.hwnd || hud_kind_ == HudKind::None) {
+    ShowPanel(hud_, false, 0, 0, 0, 0);
+    return;
+  }
+  HWND parent = HostHwnd();
+  if (!parent) return;
+  int x = 0, y = 0, w = 0, h = 0;
+  bool ok = false;
+  if (mode_ == "vod_inline") {
+    ok = ResolveSurface(&x, &y, &w, &h);
+  } else {
+    RECT rc{};
+    GetClientRect(parent, &rc);
+    x = 0;
+    y = 0;
+    w = rc.right - rc.left;
+    h = rc.bottom - rc.top;
+    ok = w > 8 && h > 8;
+  }
+  if (!ok) {
+    ShowPanel(hud_, false, 0, 0, 0, 0);
+    return;
+  }
+  const int hx = x + (w - kHudW) / 2;
+  const int hy = y + (h - kHudH) / 2;
+  ShowPanel(hud_, true, hx, hy, kHudW, kHudH);
+  SetLayeredWindowAttributes(hud_.hwnd, 0, kHudAlpha, LWA_ALPHA);
+}
+
+void Win7ChromeShell::PaintGestureHud(HDC hdc, const RECT& rc) {
+  FillRectColor(hdc, rc, RGB(17, 17, 17));
+  FillRoundRect(hdc, rc, 16, RGB(28, 28, 32));
+  DrawTextLine(hdc, rc, hud_text_, RGB(255, 255, 255), 18, true,
+               DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 }
 
 void Win7ChromeShell::LayoutGesture() {
@@ -1496,6 +1609,7 @@ void Win7ChromeShell::RaiseChromeZ() {
   if (episodes_.hwnd && episodes_visible_) raise(episodes_.hwnd);
   if (channel_info_.hwnd && channel_visible_) raise(channel_info_.hwnd);
   if (center_play_.hwnd && center_visible_) raise(center_play_.hwnd);
+  if (hud_.hwnd && hud_kind_ != HudKind::None) raise(hud_.hwnd);
   if (danmaku_hwnd_ && danmaku_enabled_) raise(danmaku_hwnd_);
 }
 
@@ -2277,6 +2391,7 @@ void Win7ChromeShell::PaintPanel(HWND hwnd, HDC hdc, const RECT& rc) {
   else if (hwnd == live_right_.hwnd) PaintLiveRight(hdc, rc);
   else if (hwnd == channel_info_.hwnd) PaintChannelInfo(hdc, rc);
   else if (hwnd == center_play_.hwnd) PaintCenter(hdc, rc);
+  else if (hwnd == hud_.hwnd) PaintGestureHud(hdc, rc);
 }
 
 void Win7ChromeShell::PaintDanmaku(HWND hwnd) {
@@ -2661,6 +2776,14 @@ LRESULT Win7ChromeShell::OnMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
     case WM_ERASEBKGND:
       // 避免类刷 BLACK_BRUSH 先抹方黑底（中心钮圆形窗外也会闪黑框）。
       return 1;
+    case WM_TIMER:
+      if (hwnd == hud_.hwnd && wParam == kHudHideTimerId) {
+        KillTimer(hwnd, kHudHideTimerId);
+        hud_hide_timer_ = 0;
+        ClearGestureHud();
+        return 0;
+      }
+      return DefWindowProcW(hwnd, msg, wParam, lParam);
     case WM_PAINT: {
       PAINTSTRUCT ps;
       HDC hdc = BeginPaint(hwnd, &ps);
@@ -3080,6 +3203,9 @@ bool Win7ChromeShell::ApplyUpdate(const ChromeMap& args_ref) {
   }
   playing_ = GetBool(*args, "playing", playing_);
   buffering_ = GetBool(*args, "buffering", buffering_);
+  if (HasKey(*args, "holdSpeed")) {
+    hold_speed_rate_ = std::clamp(GetDouble(*args, "holdSpeed", hold_speed_rate_), 2.0, 5.0);
+  }
   progress_ = GetDouble(*args, "progress", progress_);
   if (HasKey(*args, "buffered")) buffered_ = GetDouble(*args, "buffered", buffered_);
   if (HasKey(*args, "positionSec"))
@@ -3472,8 +3598,18 @@ LRESULT Win7ChromeShell::OnGestureMessage(HWND hwnd, UINT msg, WPARAM wParam, LP
         KillTimer(hwnd, kHoldSpeedTimerId);
         hold_speed_timer_ = 0;
         ges_mode_ = GestureMode::HoldSpeed;
+        {
+          wchar_t buf[24];
+          if (std::fabs(hold_speed_rate_ - std::round(hold_speed_rate_)) < 0.05) {
+            swprintf_s(buf, L"×%.0f", hold_speed_rate_);
+          } else {
+            swprintf_s(buf, L"×%.1f", hold_speed_rate_);
+          }
+          SetGestureHud(HudKind::HoldSpeed, buf);
+        }
         Emit({{"type", ChromeValue(std::string("holdSpeed"))},
-              {"on", ChromeValue(true)}});
+              {"on", ChromeValue(true)},
+              {"rate", ChromeValue(hold_speed_rate_)}});
       }
       return 0;
     case WM_LBUTTONDOWN: {
@@ -3552,13 +3688,16 @@ LRESULT Win7ChromeShell::OnGestureMessage(HWND hwnd, UINT msg, WPARAM wParam, LP
         }
       }
       if (ges_mode_ == GestureMode::Seek) {
-        double total_sec = 1800.0;
-        if (progress_ > 1e-6 && position_sec_ > 0) {
-          total_sec = (std::max)(1.0, position_sec_ / progress_);
-        }
+        const double total_sec = EstimatedTotalSec();
         const double delta_frac = (dx * kSeekMsPerPx) / (total_sec * 1000.0);
         const double next = std::clamp(ges_origin_progress_ + delta_frac, 0.0, 1.0);
         progress_ = next;
+        {
+          const double pos = next * total_sec;
+          const wchar_t* arrow = dx >= 0 ? L"»  " : L"«  ";
+          SetGestureHud(HudKind::Seek, std::wstring(arrow) + FormatHudClock(pos) + L" / " +
+                                           FormatHudClock(total_sec));
+        }
         Emit({{"type", ChromeValue(std::string("seekFraction"))},
               {"value", ChromeValue(next)},
               {"commit", ChromeValue(false)}});
@@ -3566,12 +3705,17 @@ LRESULT Win7ChromeShell::OnGestureMessage(HWND hwnd, UINT msg, WPARAM wParam, LP
       } else if (ges_mode_ == GestureMode::Volume) {
         const double next = std::clamp(ges_origin_volume_ - dy * 0.35, 0.0, 100.0);
         volume_ = next;
+        {
+          wchar_t buf[32];
+          swprintf_s(buf, L"音量  %d%%", static_cast<int>(std::lround(volume_)));
+          SetGestureHud(HudKind::Volume, buf);
+        }
         Emit({{"type", "slider"},
               {"id", ChromeValue(std::string("volume"))},
               {"value", ChromeValue(volume_)},
               {"commit", ChromeValue(false)}});
       } else if (ges_mode_ == GestureMode::Ep) {
-        // 跟手预览由 Dart 处理；此处仅标记
+        SetGestureHud(HudKind::Ep, dy < 0 ? L"下一集" : L"上一集");
       }
       return 0;
     }
@@ -3590,12 +3734,14 @@ LRESULT Win7ChromeShell::OnGestureMessage(HWND hwnd, UINT msg, WPARAM wParam, LP
       const GestureMode mode = ges_mode_;
       ges_mode_ = GestureMode::None;
       if (mode == GestureMode::HoldSpeed) {
+        ClearGestureHud();
         Emit({{"type", ChromeValue(std::string("holdSpeed"))},
               {"on", ChromeValue(false)}});
         EmitPointerHold(false);
         return 0;
       }
       if (mode == GestureMode::Seek) {
+        ClearGestureHud();
         Emit({{"type", ChromeValue(std::string("seekFraction"))},
               {"value", ChromeValue(progress_)},
               {"commit", ChromeValue(true)}});
@@ -3603,6 +3749,13 @@ LRESULT Win7ChromeShell::OnGestureMessage(HWND hwnd, UINT msg, WPARAM wParam, LP
         return 0;
       }
       if (mode == GestureMode::Volume) {
+        SetGestureHud(HudKind::Volume,
+                      [&] {
+                        wchar_t buf[32];
+                        swprintf_s(buf, L"音量  %d%%", static_cast<int>(std::lround(volume_)));
+                        return std::wstring(buf);
+                      }(),
+                      true);
         Emit({{"type", "slider"},
               {"id", ChromeValue(std::string("volume"))},
               {"value", ChromeValue(volume_)},
@@ -3612,11 +3765,15 @@ LRESULT Win7ChromeShell::OnGestureMessage(HWND hwnd, UINT msg, WPARAM wParam, LP
       }
       if (mode == GestureMode::Ep && ges_moved_) {
         if (std::abs(dy) >= 48) {
+          SetGestureHud(HudKind::Ep, dy < 0 ? L"下一集" : L"上一集", true);
           Emit({{"type", ChromeValue(std::string(dy < 0 ? "next" : "prev"))}});
+        } else {
+          ClearGestureHud();
         }
         EmitPointerHold(false);
         return 0;
       }
+      ClearGestureHud();
       // 单击：右缘开选集，否则 tap（显隐栏）
       RECT rc{};
       GetClientRect(hwnd, &rc);
@@ -3650,12 +3807,16 @@ LRESULT Win7ChromeShell::OnGestureMessage(HWND hwnd, UINT msg, WPARAM wParam, LP
       if (shift) {
         const double steps = std::clamp(std::abs(delta) / 120.0, 1.0, 4.0);
         const double sign = delta > 0 ? -1.0 : 1.0;  // 上滚后退
-        double total_sec = 1800.0;
-        if (progress_ > 1e-6 && position_sec_ > 0) {
-          total_sec = (std::max)(1.0, position_sec_ / progress_);
-        }
+        const double total_sec = EstimatedTotalSec();
         const double delta_frac = (sign * steps * 5.0) / total_sec;
         progress_ = std::clamp(progress_ + delta_frac, 0.0, 1.0);
+        {
+          const double pos = progress_ * total_sec;
+          const wchar_t* arrow = sign >= 0 ? L"»  " : L"«  ";
+          SetGestureHud(HudKind::Seek,
+                        std::wstring(arrow) + FormatHudClock(pos) + L" / " + FormatHudClock(total_sec),
+                        true);
+        }
         Emit({{"type", ChromeValue(std::string("seekFraction"))},
               {"value", ChromeValue(progress_)},
               {"commit", ChromeValue(true)}});
@@ -3664,6 +3825,11 @@ LRESULT Win7ChromeShell::OnGestureMessage(HWND hwnd, UINT msg, WPARAM wParam, LP
         const double steps = std::clamp(std::abs(delta) / 120.0, 1.0, 4.0);
         const double dv = (delta > 0 ? 1.0 : -1.0) * 4.0 * steps;
         volume_ = std::clamp(volume_ + dv, 0.0, 100.0);
+        {
+          wchar_t buf[32];
+          swprintf_s(buf, L"音量  %d%%", static_cast<int>(std::lround(volume_)));
+          SetGestureHud(HudKind::Volume, buf, true);
+        }
         Emit({{"type", "slider"},
               {"id", ChromeValue(std::string("volume"))},
               {"value", ChromeValue(volume_)},
