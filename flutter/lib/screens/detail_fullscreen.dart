@@ -2157,6 +2157,15 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
 
   @override
   Widget build(BuildContext context) {
+    // Win7 全屏 / 铺满窗口：视频与播控、手势、弹幕全在原生 HWND；
+    // Flutter 页整页挖空，只留 Focus 收键盘/返回（事件亦经 kotv_win_chrome）。
+    if (KotvWinChrome.isNeeded) {
+      return Focus(
+        autofocus: true,
+        onKeyEvent: _onKey,
+        child: const IgnorePointer(child: SizedBox.expand()),
+      );
+    }
     return Focus(
       autofocus: true,
       onKeyEvent: _onKey,

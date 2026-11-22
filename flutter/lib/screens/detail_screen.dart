@@ -2988,7 +2988,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       var r = Offset.zero & s;
       // Win7 全屏/铺满：视频 HWND 铺满，顶底栏半透明叠上（同 VodFullscreenChrome），勿 inset 挤出黑边。
       // 氛围模式：画面略内缩，四周透出壳层壁纸（默认适应仍是黑边）。
-      if (_ambientOn && r.width > 80 && r.height > 96) {
+      // Win7 原生铺满：勿内缩，整窗交给视频 HWND。
+      if (!KotvWinChrome.isNeeded &&
+          _ambientOn &&
+          r.width > 80 &&
+          r.height > 96) {
         return Rect.fromLTRB(r.left + 28, r.top + 36, r.right - 28, r.bottom - 36);
       }
       return r;
@@ -3104,7 +3108,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           child: layer,
         );
       },
-      child: GestureDetector(
+      // Win7 全屏/铺满：命中交给原生 gesture HWND，Flutter 视频层不抢点。
+      child: IgnorePointer(
+        ignoring: KotvWinChrome.isNeeded && holdFullscreen,
+        child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: () {
           if (_playUrl.isEmpty || _immersiveFullscreen) return;
