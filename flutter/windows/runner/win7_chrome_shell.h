@@ -15,8 +15,8 @@
 
 // Win7 进程内原生播控壳。样式、数值和交互以 Flutter 播控为准
 // （VodInlineControls / VodFullscreenChrome / 直播面板 / LiveCatchupChrome / MiniHoverShell）。
-// 各面板是宿主根窗的 owned 分层 popup（逐像素 alpha），手势层是视频 HWND 之下的子窗，
-// 画面区指针事件原样转给 Dart，由 Flutter 页面复用自己的手势逻辑。
+// 各面板是宿主根窗的 owned 分层 popup（逐像素 alpha），手势层是压在它们之下、近乎全透明的同类 popup，
+// 画面（mpv 子窗或 FVP 纹理）从下面透出；画面区指针事件原样转给 Dart，由 Flutter 页面复用自己的手势逻辑。
 class Win7ChromeShell {
  public:
   using ChromeValue = std::variant<std::monostate, bool, int64_t, double, std::string>;

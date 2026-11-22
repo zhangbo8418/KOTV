@@ -336,11 +336,14 @@ void Win7ChromeShell::EnsureWindows() {
   if (!msg_hwnd_) {
     msg_hwnd_ = CreateWindowExW(0, kMsgClass, L"", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, inst, this);
   }
-  if (!gesture_hwnd_) {
-    gesture_hwnd_ = CreateWindowExW(0, kGestureClass, L"", WS_CHILD | WS_CLIPSIBLINGS, 0, 0, 1, 1, host_hwnd_,
-                                    nullptr, inst, this);
-  }
   HWND root = RootHwnd();
+  // 手势层是近乎全透明的分层弹出窗（不是子窗口）：照样收鼠标，但不挡下面的 mpv 子窗或 FVP 的 Flutter 纹理。
+  // 先于弹幕和面板创建，同属根窗的弹出窗里它排在最下。
+  if (!gesture_hwnd_) {
+    gesture_hwnd_ = CreateWindowExW(WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, kGestureClass, L"",
+                                    WS_POPUP, 0, 0, 1, 1, root, nullptr, inst, this);
+    if (gesture_hwnd_) SetLayeredWindowAttributes(gesture_hwnd_, 0, 1, LWA_ALPHA);
+  }
   if (!danmaku_hwnd_) {
     danmaku_hwnd_ = CreateWindowExW(WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
                                     kDanmakuClass, L"", WS_POPUP, 0, 0, 1, 1, root, nullptr, inst, this);
@@ -724,8 +727,9 @@ void Win7ChromeShell::LayoutGesture() {
     ShowWindow(gesture_hwnd_, SW_HIDE);
     return;
   }
-  SetWindowPos(gesture_hwnd_, HWND_BOTTOM, r.left, r.top, r.right - r.left, r.bottom - r.top,
-               SWP_NOACTIVATE | SWP_SHOWWINDOW);
+  MapWindowPoints(host_hwnd_, nullptr, reinterpret_cast<POINT*>(&r), 2);
+  SetWindowPos(gesture_hwnd_, nullptr, r.left, r.top, r.right - r.left, r.bottom - r.top,
+               SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW);
 }
 
 void Win7ChromeShell::LayoutHud() {
@@ -1310,7 +1314,6 @@ LRESULT CALLBACK Win7ChromeShell::RootSubclassProc(HWND hwnd, UINT msg, WPARAM w
 }
 
 // Win7 滚轮发给焦点窗（宿主或根窗），这里按光标位置转给面板或手势层。
-// 画面区上方是 mpv 视频子窗，WindowFromPoint 拿不到手势层，所以全屏/直播按手势层矩形判定。
 bool Win7ChromeShell::RouteWheel(WPARAM wp, LPARAM lp) {
   if (suspended_ || mode_.empty()) return false;
   POINT pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
@@ -1321,14 +1324,7 @@ bool Win7ChromeShell::RouteWheel(WPARAM wp, LPARAM lp) {
     OnWheel(pid, GET_WHEEL_DELTA_WPARAM(wp), pt.x, pt.y);
     return true;
   }
-  if (!gesture_hwnd_ || !IsWindowVisible(gesture_hwnd_)) return false;
-  bool to_gesture = target == gesture_hwnd_;
-  if (!to_gesture && (mode_ == "vod" || mode_ == "live") && sheet_kind_.empty() && !popup_open_) {
-    RECT g{};
-    GetWindowRect(gesture_hwnd_, &g);
-    to_gesture = PtInRect(&g, pt) && target && GetAncestor(target, GA_ROOT) == RootHwnd();
-  }
-  if (!to_gesture) return false;
+  if (!gesture_hwnd_ || target != gesture_hwnd_) return false;
   SendMessageW(gesture_hwnd_, WM_MOUSEWHEEL, wp, lp);
   return true;
 }
@@ -1837,6 +1833,10 @@ LRESULT Win7ChromeShell::OnGesture(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_SETCURSOR:
       SetCursor(LoadCursor(nullptr, IDC_ARROW));
       return TRUE;
+    case WM_MOUSEACTIVATE:
+      // 不抢焦点（键盘仍在 Flutter 视图），但点画面要把应用带到前台，同原先的子窗口。
+      if (HWND root = RootHwnd(); root && GetForegroundWindow() != root) SetForegroundWindow(root);
+      return MA_NOACTIVATE;
     case WM_LBUTTONDOWN:
     case WM_LBUTTONDBLCLK: {
       if (!sheet_kind_.empty()) {
