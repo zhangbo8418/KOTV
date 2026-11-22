@@ -38,6 +38,7 @@ constexpr int kLiveEpgTabW = 28;
 constexpr int kLiveEpgW = 220;
 constexpr int kLivePad = 8;
 constexpr int kCenterSz = 72;
+constexpr BYTE kCenterPlayAlpha = 0x73;  // Flutter CenterPlayPauseButton 0x73000000
 constexpr int kModalW = 360;
 constexpr int kModalMaxH = 560;
 constexpr int kModalMoreW = 420;
@@ -947,6 +948,19 @@ void Win7ChromeShell::Layout() {
     ShowPanel(channel_info_, false, 0, 0, 0, 0);
     ShowPanel(center_play_, center_visible_, (W - kCenterSz) / 2, (H - kCenterSz) / 2, kCenterSz,
               kCenterSz);
+    // 圆形半透明：窗区域裁成圆 + 整窗 alpha（对齐 Flutter CircleBorder 0x73000000）
+    if (center_play_.hwnd) {
+      if (center_visible_) {
+        ApplyRoundRegion(center_play_.hwnd, kCenterSz, kCenterSz, kCenterSz / 2);
+        const LONG ex = GetWindowLongW(center_play_.hwnd, GWL_EXSTYLE);
+        if ((ex & WS_EX_LAYERED) == 0) {
+          SetWindowLongW(center_play_.hwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED);
+        }
+        SetLayeredWindowAttributes(center_play_.hwnd, 0, kCenterPlayAlpha, LWA_ALPHA);
+      } else {
+        SetWindowRgn(center_play_.hwnd, nullptr, TRUE);
+      }
+    }
   }
   LayoutGesture();
   LayoutDanmaku();
@@ -1968,8 +1982,9 @@ void Win7ChromeShell::PaintChannelInfo(HDC hdc, const RECT& rc) {
 }
 
 void Win7ChromeShell::PaintCenter(HDC hdc, const RECT& rc) {
+  // 窗已用圆形 RGN；只填黑圆，周边不在窗内故透明。半透明靠 LWA_ALPHA。
   BeginHits(&center_hits_);
-  FillRoundRect(hdc, rc, 36, Blend(kPanelDark, RGB(0, 0, 0), 0.35), RGB(90, 80, 100), 1);
+  FillRectColor(hdc, rc, RGB(0, 0, 0));
   DrawChromeIcon(hdc, rc, playing_ ? ChromeIcon::Pause : ChromeIcon::Play, RGB(255, 255, 255));
   AddHit("togglePlay", rc);
 }
@@ -2637,6 +2652,9 @@ LRESULT Win7ChromeShell::OnModalMessage(HWND hwnd, UINT msg, WPARAM wParam, LPAR
 
 LRESULT Win7ChromeShell::OnMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
   switch (msg) {
+    case WM_ERASEBKGND:
+      // 避免类刷 BLACK_BRUSH 先抹方黑底（中心钮圆形窗外也会闪黑框）。
+      return 1;
     case WM_PAINT: {
       PAINTSTRUCT ps;
       HDC hdc = BeginPaint(hwnd, &ps);
