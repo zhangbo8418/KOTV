@@ -10,6 +10,8 @@ import 'buffer_budget.dart';
 import 'fvp_decoders.dart';
 import 'drm_opts.dart';
 import 'fvp_register.dart';
+import 'fvp_win_surface_io.dart';
+import 'mpv_underlay.dart';
 import 'kotv_playback.dart';
 import 'video_player_toggle.dart';
 import 'kotv_platform.dart';
@@ -48,6 +50,8 @@ void _hookFvpDecoderLog() {
 /// 起播顺序：先挂 [VideoPlayer]（建立 Texture/Surface），再 `initialize`/`play`。
 class FvpPlayback extends KotvPlayback {
   VideoPlayerController? _c;
+  /// Win7：已绑到原生子 HWND 的 mdk 对象地址。
+  int? _winSurface;
   final _posCtrl = StreamController<Duration>.broadcast();
   final _bufCtrl = StreamController<Duration>.broadcast();
   final _doneCtrl = StreamController<bool>.broadcast();
@@ -254,6 +258,9 @@ class FvpPlayback extends KotvPlayback {
 
     _c = null;
     _bumpView();
+    final surface = _winSurface;
+    _winSurface = null;
+    if (surface != null) await KotvFvpWinSurface.unbind(surface);
     await SchedulerBinding.instance.endOfFrame;
     await Future<void>.delayed(const Duration(milliseconds: 50));
     try {
@@ -312,6 +319,7 @@ class FvpPlayback extends KotvPlayback {
         openHeaders['X-KOTV-Prepare-Ms'] = '${startAt.inMilliseconds}';
       }
       // 302 交给 mdk 默认 IO 跟跳（未强制 io.avio）。
+      if (kotvUsesWindowsNativeChrome()) KotvFvpWinSurface.install();
       final c = VideoPlayerController.networkUrl(
         Uri.parse(url),
         httpHeaders: openHeaders,
@@ -401,6 +409,9 @@ class FvpPlayback extends KotvPlayback {
       if (c.value.hasError) {
         _lastError = c.value.errorDescription ?? 'FVP initialize 失败';
         throw StateError(_lastError!);
+      }
+      if (kotvUsesWindowsNativeChrome() && identical(_c, c)) {
+        _winSurface = await KotvFvpWinSurface.bind(c, _videoScale);
       }
       // 单一路径钉死 min=0（勿省略 max：Dart 默认 max=-1 会把 max/drop 打回 mdk 默认）。
       // 点播默认 minMs=1000 → 欠载约每秒一帧（ADB MediaCodec timediff≈1000ms）。
@@ -1035,6 +1046,7 @@ class FvpPlayback extends KotvPlayback {
     final m = mode.trim().isEmpty ? 'default' : mode.trim();
     if (_videoScale == m) return;
     _videoScale = m;
+    if (_winSurface != null) unawaited(KotvFvpWinSurface.setScale(m));
     // Surface：真实布局尺寸；Texture：FittedBox。勿写无效的 video.aspect。
     _bumpView();
     notifyListeners();
@@ -1282,6 +1294,9 @@ class _FvpVideoShellState extends State<_FvpVideoShell> {
   Widget build(BuildContext context) {
     final scale = widget.videoScale.trim().isEmpty ? 'default' : widget.videoScale.trim();
     final c = widget.controller;
+    if (kotvUsesWindowsNativeChrome()) {
+      return KotvMpvUnderlayHole(ready: c.value.isInitialized, coverUntilReady: false);
+    }
     return ColoredBox(
       color: Colors.black,
       child: LayoutBuilder(

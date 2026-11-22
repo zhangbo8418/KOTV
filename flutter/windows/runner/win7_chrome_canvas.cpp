@@ -17,6 +17,7 @@ struct FontState {
   std::wstring text_face = L"Microsoft YaHei";
   std::wstring bold_face;  // 独立粗体字族（Noto Sans SC Bold）；空则合成粗体。
   std::wstring icon_face;
+  std::wstring emoji_face;  // Segoe UI Emoji（Win7 需 KB2729094）或 Segoe UI Symbol
   std::map<uint64_t, HFONT> cache;
 };
 
@@ -50,15 +51,16 @@ std::wstring AssetDir() {
   return dir + L"\\data\\flutter_assets\\";
 }
 
-HFONT FontFor(float px, int weight, bool icon) {
+HFONT FontFor(float px, int weight, bool icon, bool emoji = false) {
   Canvas::LoadFonts();
   auto& st = Fonts();
   const int size = std::max(1, static_cast<int>(std::lround(px)));
-  const bool bold = !icon && weight >= 600;
-  const uint64_t key = static_cast<uint64_t>(size) | (bold ? 1ull << 32 : 0) | (icon ? 1ull << 33 : 0);
+  const bool bold = !icon && !emoji && weight >= 600;
+  const uint64_t key = static_cast<uint64_t>(size) | (bold ? 1ull << 32 : 0) | (icon ? 1ull << 33 : 0) |
+                       (emoji ? 1ull << 34 : 0);
   auto it = st.cache.find(key);
   if (it != st.cache.end()) return it->second;
-  std::wstring face = icon ? st.icon_face : st.text_face;
+  std::wstring face = icon ? st.icon_face : emoji ? st.emoji_face : st.text_face;
   int w = FW_NORMAL;
   if (bold) {
     if (!st.bold_face.empty()) {
@@ -83,6 +85,73 @@ std::wstring CodepointString(uint32_t cp) {
     s.push_back(static_cast<wchar_t>(cp));
   }
   return s;
+}
+
+// 正文字体（Noto Sans SC / 雅黑）没有 emoji 和多数符号，GDI 也不会替私有字体做回退：
+// 这些字符单独成段，用 emoji 字体画。变体选择符、连接符、肤色修饰不单独出字形，直接丢掉。
+bool DropCp(uint32_t cp) {
+  return cp == 0x200D || cp == 0xFE0E || cp == 0xFE0F || (cp >= 0x1F3FB && cp <= 0x1F3FF);
+}
+
+bool EmojiCp(uint32_t cp) {
+  return cp >= 0x1F000 || (cp >= 0x2600 && cp <= 0x27BF) || (cp >= 0x2B00 && cp <= 0x2BFF) ||
+         (cp >= 0x2300 && cp <= 0x23FF) || (cp >= 0x2190 && cp <= 0x21FF) || cp == 0x203C || cp == 0x2049 ||
+         cp == 0x2122 || cp == 0x2139 || cp == 0x24C2 || (cp >= 0x25A0 && cp <= 0x25FF) || cp == 0x3030 ||
+         cp == 0x303D || cp == 0x3297 || cp == 0x3299;
+}
+
+struct TextRun {
+  std::wstring s;
+  bool emoji = false;
+  int w = 0;
+};
+
+// 无需回退时返回空（走原 DrawText 路径）。
+std::vector<TextRun> SplitRuns(HDC dc, const std::wstring& s, HFONT text_font, HFONT emoji_font) {
+  std::vector<TextRun> runs;
+  if (Fonts().emoji_face.empty()) return runs;
+  bool any = false;
+  HGDIOBJ of = SelectObject(dc, text_font);
+  for (size_t i = 0; i < s.size();) {
+    uint32_t cp = s[i];
+    size_t n = 1;
+    if (cp >= 0xD800 && cp <= 0xDBFF && i + 1 < s.size() && s[i + 1] >= 0xDC00 && s[i + 1] <= 0xDFFF) {
+      cp = 0x10000 + ((cp - 0xD800) << 10) + (s[i + 1] - 0xDC00);
+      n = 2;
+    }
+    bool emoji = false;
+    if (DropCp(cp)) {
+      any = true;
+      i += n;
+      continue;
+    }
+    if (EmojiCp(cp)) {
+      emoji = true;
+      if (n == 1) {
+        WORD gi = 0;
+        const wchar_t ch = s[i];
+        if (GetGlyphIndicesW(dc, &ch, 1, &gi, GGI_MARK_NONEXISTING_GLYPHS) != GDI_ERROR && gi != 0xFFFF) {
+          emoji = false;
+        }
+      }
+    }
+    any = any || emoji;
+    if (runs.empty() || runs.back().emoji != emoji) runs.push_back(TextRun{std::wstring(), emoji, 0});
+    runs.back().s.append(s, i, n);
+    i += n;
+  }
+  if (!any) {
+    SelectObject(dc, of);
+    return {};
+  }
+  for (auto& r : runs) {
+    SelectObject(dc, r.emoji ? emoji_font : text_font);
+    SIZE sz{};
+    GetTextExtentPoint32W(dc, r.s.c_str(), static_cast<int>(r.s.size()), &sz);
+    r.w = sz.cx;
+  }
+  SelectObject(dc, of);
+  return runs;
 }
 
 // 遮罩用的临时 DIB（白字黑底，取蓝通道为覆盖率）。
@@ -207,6 +276,11 @@ void Canvas::LoadFonts() {
     if (HasFace(L"Noto Sans SC Bold")) st.bold_face = L"Noto Sans SC Bold";
   } else if (HasFace(L"Microsoft YaHei UI")) {
     st.text_face = L"Microsoft YaHei UI";
+  }
+  if (HasFace(L"Segoe UI Emoji")) {
+    st.emoji_face = L"Segoe UI Emoji";
+  } else if (HasFace(L"Segoe UI Symbol")) {
+    st.emoji_face = L"Segoe UI Symbol";
   }
   if (HasFace(L"Material Icons")) {
     st.icon_face = L"Material Icons";
@@ -450,6 +524,74 @@ void Canvas::Composite(const RECT& dst, const uint32_t* mask, int mask_stride, A
   }
 }
 
+// 单行分段绘制到遮罩：对齐、垂直居中与末尾省略号同 DrawText 单行语义，各段按基线对齐。
+static int DrawRuns(std::vector<TextRun>& runs, int tw, int th, float px, int weight, UINT fmt) {
+  auto& m = Mask();
+  HFONT text_font = FontFor(px, weight, false);
+  HFONT emoji_font = FontFor(px, weight, false, true);
+  int total = 0;
+  for (const auto& r : runs) total += r.w;
+  if ((fmt & DT_END_ELLIPSIS) && total > tw) {
+    const std::wstring dots = L"\u2026";
+    HGDIOBJ of = SelectObject(m.dc, text_font);
+    SIZE dsz{};
+    GetTextExtentPoint32W(m.dc, dots.c_str(), 1, &dsz);
+    const int budget = std::max(0, tw - static_cast<int>(dsz.cx));
+    int used = 0;
+    size_t keep = 0;
+    for (; keep < runs.size(); ++keep) {
+      TextRun& r = runs[keep];
+      if (used + r.w <= budget) {
+        used += r.w;
+        continue;
+      }
+      SelectObject(m.dc, r.emoji ? emoji_font : text_font);
+      while (!r.s.empty()) {
+        const size_t cut = r.s.size() >= 2 && r.s.back() >= 0xDC00 && r.s.back() <= 0xDFFF ? 2 : 1;
+        r.s.resize(r.s.size() - cut);
+        SIZE sz{};
+        GetTextExtentPoint32W(m.dc, r.s.c_str(), static_cast<int>(r.s.size()), &sz);
+        r.w = sz.cx;
+        if (used + r.w <= budget) break;
+      }
+      used += r.w;
+      ++keep;
+      break;
+    }
+    runs.resize(keep);
+    runs.push_back(TextRun{dots, false, static_cast<int>(dsz.cx)});
+    SelectObject(m.dc, of);
+    total = used + dsz.cx;
+  }
+  TEXTMETRICW tm{};
+  HGDIOBJ of = SelectObject(m.dc, text_font);
+  GetTextMetricsW(m.dc, &tm);
+  const int ascent = tm.tmAscent;
+  int x = 0;
+  if (fmt & DT_CENTER) x = (tw - total) / 2;
+  else if (fmt & DT_RIGHT) x = tw - total;
+  int y = 0;
+  if ((fmt & DT_SINGLELINE) && (fmt & DT_VCENTER)) y = (th - tm.tmHeight) / 2;
+  else if ((fmt & DT_SINGLELINE) && (fmt & DT_BOTTOM)) y = th - tm.tmHeight;
+  for (const auto& r : runs) {
+    if (r.s.empty()) continue;
+    int ry = y;
+    if (r.emoji) {
+      SelectObject(m.dc, emoji_font);
+      TEXTMETRICW etm{};
+      GetTextMetricsW(m.dc, &etm);
+      ry = y + ascent - etm.tmAscent;
+    } else {
+      SelectObject(m.dc, text_font);
+    }
+    TextOutW(m.dc, x, ry, r.s.c_str(), static_cast<int>(r.s.size()));
+    x += r.w;
+  }
+  GdiFlush();
+  SelectObject(m.dc, of);
+  return std::min(total, tw);
+}
+
 int Canvas::Text(const RECT& rc, const std::wstring& s, Argb c, float px, int weight, UINT fmt) {
   if (!bits_ || s.empty() || (c >> 24) == 0) return 0;
   const int tw = rc.right - rc.left;
@@ -459,7 +601,14 @@ int Canvas::Text(const RECT& rc, const std::wstring& s, Argb c, float px, int we
   auto& m = Mask();
   if (!m.Ensure(tw, th)) return 0;
   for (int y = 0; y < th; ++y) std::fill_n(m.bits + y * m.w, tw, 0u);
-  HGDIOBJ of = SelectObject(m.dc, FontFor(px, weight, false));
+  HFONT text_font = FontFor(px, weight, false);
+  std::vector<TextRun> runs = SplitRuns(m.dc, s, text_font, FontFor(px, weight, false, true));
+  if (!runs.empty()) {
+    const int drawn = DrawRuns(runs, tw, th, px, weight, fmt);
+    Composite(rc, m.bits, m.w, c);
+    return drawn;
+  }
+  HGDIOBJ of = SelectObject(m.dc, text_font);
   RECT r{0, 0, tw, th};
   SIZE sz{};
   GetTextExtentPoint32W(m.dc, s.c_str(), static_cast<int>(s.size()), &sz);
@@ -469,6 +618,7 @@ int Canvas::Text(const RECT& rc, const std::wstring& s, Argb c, float px, int we
   Composite(rc, m.bits, m.w, c);
   return std::min(static_cast<int>(sz.cx), tw);
 }
+
 
 void Canvas::Icon(const RECT& box, uint32_t cp, float px, Argb c) {
   if (!bits_ || !cp || (c >> 24) == 0) return;
@@ -503,7 +653,14 @@ int Canvas::Measure(const std::wstring& s, float px, int weight) const {
   if (s.empty()) return 0;
   auto& m = Mask();
   if (!m.Ensure(4, 4)) return 0;
-  HGDIOBJ of = SelectObject(m.dc, FontFor(px, weight, false));
+  HFONT text_font = FontFor(px, weight, false);
+  const std::vector<TextRun> runs = SplitRuns(m.dc, s, text_font, FontFor(px, weight, false, true));
+  if (!runs.empty()) {
+    int total = 0;
+    for (const auto& r : runs) total += r.w;
+    return total;
+  }
+  HGDIOBJ of = SelectObject(m.dc, text_font);
   SIZE sz{};
   GetTextExtentPoint32W(m.dc, s.c_str(), static_cast<int>(s.size()), &sz);
   SelectObject(m.dc, of);

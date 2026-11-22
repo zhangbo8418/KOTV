@@ -76,6 +76,10 @@ class Canvas {
 
   void SetClip(const RECT& rc);
   void ClearClip();
+  bool GetClip(RECT* rc) const {
+    if (has_clip_ && rc) *rc = clip_;
+    return has_clip_;
+  }
   // End() 之后调用：keep 以外的像素清成全透明（分层窗透明像素不接收鼠标）。
   void ClearOutside(const RECT& keep);
 

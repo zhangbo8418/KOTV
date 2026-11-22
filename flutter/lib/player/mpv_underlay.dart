@@ -26,6 +26,7 @@ Future<void> kotvMpvUpdateVideoFrame({
       ..._clipArgs(clip),
     });
   } catch (_) {}
+  KotvWinChrome.repaintSoon();
 }
 
 /// 可见区（逻辑坐标）：原生用窗口区域裁掉区外部分，画面不缩放。
@@ -105,6 +106,40 @@ Rect kotvWindowsOverlayFullscreenInset(Rect full, {bool episodesOpen = false}) {
   return full;
 }
 
+/// 根导航上打开的弹窗（对话框、底部弹层、菜单）。详情/直播在壳内层 Navigator 里，
+/// 根上弹窗不会让它们的路由失去 isCurrent，Win7 洞须另行感知后让出画面。
+class KotvPopupRouteObserver extends NavigatorObserver {
+  KotvPopupRouteObserver._();
+
+  static final instance = KotvPopupRouteObserver._();
+  static final ValueNotifier<int> open = ValueNotifier<int>(0);
+  final _routes = <Route<dynamic>>{};
+
+  void _changed() => open.value = _routes.length;
+
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    if (route is PopupRoute && _routes.add(route)) _changed();
+  }
+
+  @override
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    if (_routes.remove(route)) _changed();
+  }
+
+  @override
+  void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    if (_routes.remove(route)) _changed();
+  }
+
+  @override
+  void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
+    var changed = _routes.remove(oldRoute);
+    if (newRoute is PopupRoute) changed = _routes.add(newRoute) || changed;
+    if (changed) _changed();
+  }
+}
+
 /// 播放洞：下发几何 `updateFrame`；未就绪黑遮。
 /// underlay（macOS / Win8+ DComp）：显隐由原生 open/stop；就绪后 [BlendMode.clear]。
 /// Win7：仍经 `setVisible`；弹窗时藏层。
@@ -143,12 +178,19 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
   void initState() {
     super.initState();
     KotvMpvUnderlayHole._resync.addListener(_sync);
+    KotvPopupRouteObserver.open.addListener(_syncNextFrame);
     WidgetsBinding.instance.addPostFrameCallback((_) => _sync());
+  }
+
+  void _syncNextFrame() {
+    WidgetsBinding.instance.addPostFrameCallback((_) => _sync());
+    WidgetsBinding.instance.ensureVisualUpdate();
   }
 
   @override
   void dispose() {
     KotvMpvUnderlayHole._resync.removeListener(_sync);
+    KotvPopupRouteObserver.open.removeListener(_syncNextFrame);
     if (_win7Overlay) KotvWinChrome.setCovered(false);
     if (_win7Overlay) {
       _setVisible(false);
@@ -175,6 +217,7 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
     try {
       await _ch.invokeMethod('setVisible', {'visible': visible});
     } catch (_) {}
+    if (!visible) KotvWinChrome.repaintSoon();
   }
 
   Future<void> _updateFrame(Rect r, Rect? clip) async {
@@ -189,6 +232,7 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
         ..._clipArgs(clip),
       });
     } catch (_) {}
+    if (_win7Overlay) KotvWinChrome.repaintSoon();
   }
 
   Future<void> _syncAsync() async {
@@ -196,10 +240,10 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
     final box = context.findRenderObject() as RenderBox?;
     if (box == null || !box.hasSize) return;
 
-    // Win7：路由被盖住时藏 HWND，避免挡住对话框。
+    // Win7：路由被盖住或根上有弹窗时藏 HWND，避免挡住对话框。
     final route = ModalRoute.of(context);
     // 原生播控是置顶分层窗，Flutter 弹窗盖上来时一并挂起。
-    if (_win7Overlay && route != null && !route.isCurrent) {
+    if (_win7Overlay && ((route != null && !route.isCurrent) || KotvPopupRouteObserver.open.value > 0)) {
       KotvWinChrome.setCovered(true);
       await _setVisible(false);
       return;

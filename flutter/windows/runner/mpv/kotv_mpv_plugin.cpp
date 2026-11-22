@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cfloat>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -681,9 +682,13 @@ class KotvMpvPlugin : public flutter::Plugin {
   // Win7 原生播控面板是 Flutter 视图的兄弟子窗：视频压到最底，手势层再压到视频之下。
   void NotifySurface() {
     HWND parent = FlutterHwnd();
-    if (!parent || !core_ || !core_->hwnd) return;
+    if (!parent) return;
+    const bool mpv_shown = core_ && core_->hwnd && IsWindowVisible(core_->hwnd);
+    const bool mdk_shown = mdk_hwnd_ && IsWindowVisible(mdk_hwnd_);
+    if (!mpv_shown && !mdk_shown) return;
     constexpr UINT kFlags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;
-    SetWindowPos(core_->hwnd, HWND_BOTTOM, 0, 0, 0, 0, kFlags);
+    if (mpv_shown) SetWindowPos(core_->hwnd, HWND_BOTTOM, 0, 0, 0, 0, kFlags);
+    if (mdk_shown) SetWindowPos(mdk_hwnd_, HWND_BOTTOM, 0, 0, 0, 0, kFlags);
     HWND child = nullptr;
     while ((child = FindWindowExW(parent, child, L"KotvWinChromeGesture", nullptr)) != nullptr) {
       SetWindowPos(child, HWND_BOTTOM, 0, 0, 0, 0, kFlags);
@@ -691,10 +696,7 @@ class KotvMpvPlugin : public flutter::Plugin {
   }
 
   void HideVideo(HWND h) {
-    if (h && IsWindowVisible(h)) {
-      ShowWindow(h, SW_HIDE);
-      NotifySurface();
-    }
+    if (h && IsWindowVisible(h)) ShowWindow(h, SW_HIDE);
   }
 
   void CreateBridgeWindow() {
@@ -776,6 +778,10 @@ class KotvMpvPlugin : public flutter::Plugin {
 
   // 可见区（Win7 详情页滚到顶栏下时）用窗口区域裁掉，画面不缩放。
   void ApplyClipRegion(HWND hwnd, int cx, int cy, int cw, int ch) {
+    ApplyClipRegion(hwnd, cx, cy, cw, ch, region_set_, region_);
+  }
+
+  void ApplyClipRegion(HWND hwnd, int cx, int cy, int cw, int ch, bool& is_set, RECT& applied) {
     RECT keep{0, 0, cw, ch};
     if (has_clip_) {
       const double dpr = FrameDpr();
@@ -785,16 +791,94 @@ class KotvMpvPlugin : public flutter::Plugin {
       if (!IntersectRect(&keep, &keep, &c)) keep = RECT{0, 0, 0, 0};
     }
     const bool full = keep.left == 0 && keep.top == 0 && keep.right == cw && keep.bottom == ch;
-    if (full && !region_set_) return;
-    if (region_set_ && EqualRect(&keep, &region_)) return;
+    if (full && !is_set) return;
+    if (is_set && EqualRect(&keep, &applied)) return;
     if (full) {
       SetWindowRgn(hwnd, nullptr, TRUE);
-      region_set_ = false;
+      is_set = false;
       return;
     }
     SetWindowRgn(hwnd, CreateRectRgn(keep.left, keep.top, keep.right, keep.bottom), TRUE);
-    region_ = keep;
-    region_set_ = true;
+    applied = keep;
+    is_set = true;
+  }
+
+  // FVP（libmdk）在 Win7 上也画进子 HWND：与 mpv 共用槽几何、可见性和裁剪。
+  // object / surface_fn / aspect_fn 来自 Dart 侧 mdkPlayerAPI，只在 UI 线程调用。
+  using MdkSurfaceFn = void (*)(void*, void*, int, int, int);
+  using MdkAspectFn = void (*)(void*, float, void*);
+
+  void SyncMdk() {
+    if (!mdk_hwnd_) return;
+    const bool show = visible_ && have_frame_ && frame_w_ > 1 && frame_h_ > 1;
+    if (!show) {
+      HideVideo(mdk_hwnd_);
+      return;
+    }
+    int cx = 0, cy = 0, cw = 0, ch = 0;
+    if (!ResolveFramePhysical(&cx, &cy, &cw, &ch)) return;
+    RECT now{};
+    GetWindowRect(mdk_hwnd_, &now);
+    MapWindowPoints(HWND_DESKTOP, GetParent(mdk_hwnd_), reinterpret_cast<POINT*>(&now), 2);
+    if (now.left != cx || now.top != cy || now.right - now.left != cw || now.bottom - now.top != ch) {
+      MoveWindow(mdk_hwnd_, cx, cy, cw, ch, TRUE);
+    }
+    ApplyClipRegion(mdk_hwnd_, cx, cy, cw, ch, mdk_region_set_, mdk_region_);
+    if (mdk_obj_ && mdk_surface_fn_ && (cw != mdk_w_ || ch != mdk_h_)) {
+      mdk_w_ = cw;
+      mdk_h_ = ch;
+      reinterpret_cast<MdkSurfaceFn>(mdk_surface_fn_)(mdk_obj_, mdk_hwnd_, cw, ch, 0);
+      ApplyMdkAspect();
+    }
+    if (!IsWindowVisible(mdk_hwnd_)) {
+      ShowWindow(mdk_hwnd_, SW_SHOWNOACTIVATE);
+      NotifySurface();
+    }
+  }
+
+  void ApplyMdkAspect() {
+    if (mdk_obj_ && mdk_aspect_fn_ && mdk_hwnd_ && mdk_w_ > 0) {
+      reinterpret_cast<MdkAspectFn>(mdk_aspect_fn_)(mdk_obj_, mdk_aspect_, mdk_hwnd_);
+    }
+  }
+
+  // 播放器释放前 mdk 仍会往 HWND 画：先藏起来，过一会儿再销毁。
+  void UnbindMdk() {
+    if (!mdk_hwnd_) return;
+    HWND h = mdk_hwnd_;
+    mdk_hwnd_ = nullptr;
+    mdk_obj_ = nullptr;
+    mdk_surface_fn_ = nullptr;
+    mdk_aspect_fn_ = nullptr;
+    mdk_w_ = mdk_h_ = 0;
+    mdk_region_set_ = false;
+    HideVideo(h);
+    HWND msg = bridge_->msg_hwnd.load();
+    if (!msg) return;
+    std::thread([msg, h]() {
+      std::this_thread::sleep_for(std::chrono::seconds(10));
+      PostMessageW(msg, kMsgDestroyHwnd, reinterpret_cast<WPARAM>(h), 0);
+    }).detach();
+  }
+
+  bool BindMdk(void* object, void* surface_fn, void* aspect_fn, float aspect) {
+    if (mdk_hwnd_ && mdk_obj_ != object) UnbindMdk();
+    if (!mdk_hwnd_) {
+      HWND parent = FlutterHwnd();
+      if (!parent) return false;
+      mdk_hwnd_ = CreateWindowExW(WS_EX_NOPARENTNOTIFY, L"STATIC", L"",
+                                  WS_CHILD | WS_CLIPSIBLINGS | WS_DISABLED, 0, 0, 16, 9, parent,
+                                  nullptr, GetModuleHandleW(nullptr), nullptr);
+      if (!mdk_hwnd_) return false;
+      mdk_w_ = mdk_h_ = 0;
+      mdk_region_set_ = false;
+    }
+    mdk_obj_ = object;
+    mdk_surface_fn_ = surface_fn;
+    mdk_aspect_fn_ = aspect_fn;
+    mdk_aspect_ = aspect;
+    SyncMdk();
+    return true;
   }
 
   bool ResolveFramePhysical(int* cx, int* cy, int* cw, int* ch) {
@@ -1062,12 +1146,34 @@ class KotvMpvPlugin : public flutter::Plugin {
     }
     if (method == "dispose") {
       DisposeCurrent();
-      have_frame_ = false;
-      visible_ = false;
-      frame_x_ = frame_y_ = frame_w_ = frame_h_ = 0;
-      frame_dpr_ = 0;
-      has_clip_ = false;
       region_set_ = false;
+      // FVP 已接管槽时几何仍有效，勿清。
+      if (!mdk_hwnd_) {
+        have_frame_ = false;
+        visible_ = false;
+        frame_x_ = frame_y_ = frame_w_ = frame_h_ = 0;
+        frame_dpr_ = 0;
+        has_clip_ = false;
+      }
+      result->Success();
+      return;
+    }
+    if (method == "mdkBind") {
+      const bool ok = BindMdk(reinterpret_cast<void*>(ArgInt64(args, "object")),
+                              reinterpret_cast<void*>(ArgInt64(args, "surface")),
+                              reinterpret_cast<void*>(ArgInt64(args, "aspectFn")),
+                              static_cast<float>(ArgDouble(args, "aspect", FLT_EPSILON)));
+      result->Success(EncodableValue(ok));
+      return;
+    }
+    if (method == "mdkAspect") {
+      mdk_aspect_ = static_cast<float>(ArgDouble(args, "aspect", FLT_EPSILON));
+      ApplyMdkAspect();
+      result->Success();
+      return;
+    }
+    if (method == "mdkUnbind") {
+      if (mdk_obj_ == reinterpret_cast<void*>(ArgInt64(args, "object"))) UnbindMdk();
       result->Success();
       return;
     }
@@ -1174,6 +1280,7 @@ class KotvMpvPlugin : public flutter::Plugin {
           HideVideo(core_->hwnd);
         }
       }
+      SyncMdk();
       result->Success();
       return;
     }
@@ -1208,6 +1315,7 @@ class KotvMpvPlugin : public flutter::Plugin {
           // 几何未变勿 MoveWindow；已可见勿再 ShowWindow。
           if (moved || need_hwnd) EnsureVideoHwnd();
           if (visible_ && Mpv() && core_->hwnd && !IsWindowVisible(core_->hwnd)) ShowVideo();
+          if (moved) SyncMdk();
         }
       }
       result->Success();
@@ -1274,6 +1382,15 @@ class KotvMpvPlugin : public flutter::Plugin {
   double clip_h_ = 0;
   bool region_set_ = false;
   RECT region_{};
+  HWND mdk_hwnd_ = nullptr;
+  void* mdk_obj_ = nullptr;
+  void* mdk_surface_fn_ = nullptr;
+  void* mdk_aspect_fn_ = nullptr;
+  float mdk_aspect_ = FLT_EPSILON;
+  int mdk_w_ = 0;
+  int mdk_h_ = 0;
+  bool mdk_region_set_ = false;
+  RECT mdk_region_{};
 #ifndef NDEBUG
   Watchdog watchdog_;
 #endif

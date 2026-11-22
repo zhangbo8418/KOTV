@@ -18,6 +18,7 @@ import 'engine/engine_launcher.dart';
 import 'player/buffer_budget.dart';
 import 'player/play_headers.dart';
 import 'player/kotv_playback.dart';
+import 'player/mpv_underlay.dart';
 import 'engine/engine_status.dart';
 import 'providers.dart';
 import 'screens/shell.dart';
@@ -354,6 +355,7 @@ class _KotvAppState extends ConsumerState<KotvApp> with WindowListener, WidgetsB
       title: 'KO影视',
       debugShowCheckedModeBanner: false,
       navigatorKey: rootNavigatorKey,
+      navigatorObservers: [KotvPopupRouteObserver.instance],
       locale: const Locale('zh', 'CN'),
       supportedLocales: const [
         Locale('zh', 'CN'),

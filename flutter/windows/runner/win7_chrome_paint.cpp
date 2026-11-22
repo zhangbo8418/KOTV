@@ -249,8 +249,39 @@ int Win7ChromeShell::PaintVolume(Canvas& cv, std::vector<Hit>& hits, int right, 
 }
 
 // AppPill：底 pillBg / 选中 selected；描边 pillBorder / primary@0.9；圆角 8*s；字 w700。
+// KotvMarqueeText：未溢出或未激活时普通单行（省略号）；溢出且激活时两份文案首尾相接水平滚动，
+// 间隔 48、36 像素/秒、每轮开头停 900ms，一轮时长夹在 2–40 秒。
+int Win7ChromeShell::MarqueeText(Canvas& cv, const RECT& rc, const std::wstring& s, Argb c, float px, int weight,
+                                 UINT fmt, bool active) {
+  const int vw = rc.right - rc.left;
+  const int tw = active ? cv.Measure(s, px, weight) : 0;
+  if (!active || tw <= vw || vw <= 0) return cv.Text(rc, s, c, px, weight, fmt);
+  if (!marquee_running_ && !marquee_panels_) marquee_tick0_ = GetTickCount();
+  if (painting_ != kPanelCount) marquee_panels_ |= 1u << painting_;
+  const double unit = grow_ * dpr_;
+  const double travel = tw + 48 * unit;
+  const double run_ms = std::clamp(travel / (36 * unit), 2.0, 40.0) * 1000;
+  const double cycle = run_ms + 900;
+  const double t = std::fmod(static_cast<double>(GetTickCount() - marquee_tick0_), cycle);
+  const double progress = t <= 900 ? 0 : (t - 900) / run_ms;
+  const int dx = static_cast<int>(std::lround(-progress * travel));
+  RECT prev{};
+  const bool had = cv.GetClip(&prev);
+  RECT clip = rc;
+  if (had) IntersectRect(&clip, &clip, &prev);
+  cv.SetClip(clip);
+  const UINT line = DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOCLIP;
+  const int x0 = rc.left + dx;
+  const int x1 = x0 + static_cast<int>(std::lround(travel));
+  cv.Text(R(x0, rc.top, x0 + tw + 2, rc.bottom), s, c, px, weight, line);
+  cv.Text(R(x1, rc.top, x1 + tw + 2, rc.bottom), s, c, px, weight, line);
+  if (had) cv.SetClip(prev);
+  else cv.ClearClip();
+  return vw;
+}
+
 void Win7ChromeShell::PaintAppPill(Canvas& cv, const RECT& rc, const std::wstring& label, const std::wstring& suffix,
-                                   double font, bool selected) {
+                                   double font, bool selected, bool marquee) {
   const float r = static_cast<float>(L(8));
   cv.RoundRect(rc, r, selected ? pal_selected_ : pal_pill_bg_, selected ? WithOpacity(pal_primary_, 0.9) : pal_pill_border_,
                1.0f);
@@ -259,7 +290,7 @@ void Win7ChromeShell::PaintAppPill(Canvas& cv, const RECT& rc, const std::wstrin
   const int pad = L(14);
   RECT inner = R(rc.left + pad, rc.top, rc.right - pad, rc.bottom);
   if (suffix.empty()) {
-    cv.Text(inner, label, fg, fs, 700, kCenterFmt);
+    MarqueeText(cv, inner, label, fg, fs, 700, kCenterFmt, marquee && selected);
     return;
   }
   const int sw = cv.Measure(suffix, fs, 700);
@@ -740,7 +771,7 @@ void Win7ChromeShell::PaintLiveLeft(Canvas& cv, std::vector<Hit>& hits) {
       const int iy = top + i * stride - group_scroll_;
       if (iy + pill_h < top || iy > bottom) continue;
       const RECT rc = R(x, iy, x + c.group, iy + pill_h);
-      PaintAppPill(cv, rc, groups_[i].label, L"", land_ ? 12 : 13, i == group_selected_);
+      PaintAppPill(cv, rc, groups_[i].label, L"", land_ ? 12 : 13, i == group_selected_, true);
       RECT hit = rc;
       IntersectRect(&hit, &hit, &col);
       hits.push_back(Hit{"group", hit, i});
@@ -771,7 +802,8 @@ void Win7ChromeShell::PaintLiveLeft(Canvas& cv, std::vector<Hit>& hits) {
       const RECT logo = R(cx, (rc.top + rc.bottom) / 2 - logo_h / 2, cx + logo_w, (rc.top + rc.bottom) / 2 - logo_h / 2 + logo_h);
       PaintLogo(cv, logo, ch.icon.rfind("img:", 0) == 0 ? ch.icon.substr(4) : std::string(), ch.label, ch.sub);
       cx += logo_w + G(land_ ? 6 : 12);
-      cv.Text(R(cx, rc.top, rc.right - G(6), rc.bottom), ch.label, pal_fg_, F(land_ ? 12 : 15), sel ? 700 : 500, kLeft);
+      MarqueeText(cv, R(cx, rc.top, rc.right - G(6), rc.bottom), ch.label, pal_fg_, F(land_ ? 12 : 15), sel ? 700 : 500,
+                  kLeft, sel);
       RECT hit = rc;
       IntersectRect(&hit, &hit, &col);
       hits.push_back(Hit{"channel", hit, i});
@@ -878,7 +910,8 @@ void Win7ChromeShell::PaintLiveLeft(Canvas& cv, std::vector<Hit>& hits) {
                 400, kLeft);
         tx += sw;
       }
-      cv.Text(R(tx, ty, rc.right - G(land_ ? 6 : 8), ty + th), p.label, sel ? kWhite : pal_fg_, ls, sel ? 700 : 500, kLeft);
+      MarqueeText(cv, R(tx, ty, rc.right - G(land_ ? 6 : 8), ty + th), p.label, sel ? kWhite : pal_fg_, ls,
+                  sel ? 700 : 500, kLeft, sel);
       RECT hit = rc;
       IntersectRect(&hit, &hit, &list);
       hits.push_back(Hit{"epg", hit, i});
@@ -981,20 +1014,20 @@ void Win7ChromeShell::PaintChannel(Canvas& cv) {
   int right = W - P(16);
   if (!line_label_.empty()) {
     const int lw = std::min(cv.Measure(line_label_, F(13), 400), (right - x) / 3);
-    cv.Text(R(right - lw, 0, right, H), line_label_, pal_muted_, F(13), 400, kRight | DT_END_ELLIPSIS);
+    MarqueeText(cv, R(right - lw, 0, right, H), line_label_, pal_muted_, F(13), 400, kRight | DT_END_ELLIPSIS, true);
     right -= lw + P(8);
   }
   const int th = cv.LineHeight(F(18), 600);
   const int sh = cv.LineHeight(F(13), 400);
   const bool second = !prog_time_.empty() || !prog_title_.empty();
   const int ty = second ? H / 2 - (th + sh) / 2 : H / 2 - th / 2;
-  cv.Text(R(x, ty, right, ty + th), channel_name_, pal_fg_, F(18), 600, kLeft);
+  MarqueeText(cv, R(x, ty, right, ty + th), channel_name_, pal_fg_, F(18), 600, kLeft, true);
   if (second) {
     int sx = x;
     if (!prog_time_.empty()) {
       sx += cv.Text(R(sx, ty + th, right, ty + th + sh), prog_time_, pal_muted_, F(12), 400, kLeft) + P(6);
     }
-    cv.Text(R(sx, ty + th, right, ty + th + sh), prog_title_, pal_muted_, F(13), 400, kLeft);
+    MarqueeText(cv, R(sx, ty + th, right, ty + th + sh), prog_title_, pal_muted_, F(13), 400, kLeft, true);
   }
 }
 

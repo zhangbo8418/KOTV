@@ -192,7 +192,10 @@ class Win7ChromeShell {
   int PaintTextAct(kotv_chrome::Canvas& cv, std::vector<Hit>& hits, const char* id, int x, int cy,
                    const std::wstring& label, float px, int pad);
   void PaintAppPill(kotv_chrome::Canvas& cv, const RECT& rc, const std::wstring& label,
-                    const std::wstring& suffix, double font, bool selected);
+                    const std::wstring& suffix, double font, bool selected, bool marquee = false);
+  int MarqueeText(kotv_chrome::Canvas& cv, const RECT& rc, const std::wstring& s, kotv_chrome::Argb c, float px,
+                  int weight, UINT fmt, bool active);
+  void UpdateMarqueeTimer();
   int SheetLayout(kotv_chrome::Canvas* cv, std::vector<Hit>* hits, const RECT& card, int scroll);
 
   // ---- 输入 ----
@@ -354,6 +357,12 @@ class Win7ChromeShell {
   std::wstring buffer_text_;
   DWORD spin_tick0_ = 0;
 
+  // KotvMarqueeText：本次绘制中有溢出跑马的面板（位掩码），定时器按 marquee_tick0_ 推进。
+  PanelId painting_ = kPanelCount;
+  uint32_t marquee_panels_ = 0;
+  DWORD marquee_tick0_ = 0;
+  bool marquee_running_ = false;
+
   // 全屏上下滑切集：画面跟手位移（逻辑像素）与上一集 / 下一集提示页
   double swipe_dy_ = 0;
   std::wstring swipe_prev_;
@@ -395,6 +404,8 @@ class Win7ChromeShell {
   bool ges_hold_fired_ = false;
   POINT ges_down_pt_{};
   bool ges_tracking_ = false;
+  // 面板显隐时系统会补发同坐标的 WM_MOUSEMOVE，不能当作悬停（否则右键收起的播控又被唤出）。
+  DWORD last_move_pos_ = 0xFFFFFFFF;
 
   // HUD
   HudKind hud_kind_ = HudKind::None;

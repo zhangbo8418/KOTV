@@ -31,6 +31,7 @@ constexpr UINT_PTR kTimerGestureHold = 4;
 constexpr UINT_PTR kTimerClock = 5;
 constexpr UINT_PTR kTimerDanmaku = 6;
 constexpr UINT_PTR kTimerSpin = 7;
+constexpr UINT_PTR kTimerMarquee = 8;
 constexpr DWORD kLongPressMs = 500;     // kLongPressTimeout
 constexpr DWORD kVolumeCollapseMs = 450;
 constexpr DWORD kMiniHideMs = 2000;
@@ -292,10 +293,12 @@ void Win7ChromeShell::SetEnabled(bool enabled) {
   if (gesture_hwnd_) ShowWindow(gesture_hwnd_, SW_HIDE);
   if (danmaku_hwnd_) ShowWindow(danmaku_hwnd_, SW_HIDE);
   if (msg_hwnd_) {
-    for (UINT_PTR t : {kTimerVolume, kTimerMini, kTimerLongPress, kTimerGestureHold, kTimerClock, kTimerDanmaku, kTimerSpin})
+    for (UINT_PTR t : {kTimerVolume, kTimerMini, kTimerLongPress, kTimerGestureHold, kTimerClock, kTimerDanmaku, kTimerSpin, kTimerMarquee})
       KillTimer(msg_hwnd_, t);
   }
   danmaku_timer_ = false;
+  marquee_panels_ = 0;
+  marquee_running_ = false;
   if (pointer_hold_) EmitPointerHold(false);
   for (bool& h : panel_hover_) h = false;
   volume_expanded_ = false;
@@ -510,7 +513,11 @@ void Win7ChromeShell::Render(PanelId id) {
   Canvas& cv = *p.canvas;
   if (!cv.Begin(w, h)) return;
   p.hits.clear();
+  const uint32_t bit = 1u << id;
+  marquee_panels_ &= ~bit;
+  painting_ = id;
   Paint(id, cv, p.hits);
+  painting_ = kPanelCount;
   cv.End();
   RECT clip{};
   if (id != kSheet && id != kPopup && InlineClip(&clip)) {
@@ -541,6 +548,17 @@ void Win7ChromeShell::RenderDirty() {
     Panel& p = panels_[i];
     if (p.shown && p.dirty) Render(static_cast<PanelId>(i));
   }
+  UpdateMarqueeTimer();
+}
+
+void Win7ChromeShell::UpdateMarqueeTimer() {
+  for (int i = 0; i < kPanelCount; ++i) {
+    if (!panels_[i].shown) marquee_panels_ &= ~(1u << i);
+  }
+  if (!msg_hwnd_ || (marquee_panels_ != 0) == marquee_running_) return;
+  marquee_running_ = marquee_panels_ != 0;
+  if (marquee_running_) SetTimer(msg_hwnd_, kTimerMarquee, 40, nullptr);
+  else KillTimer(msg_hwnd_, kTimerMarquee);
 }
 
 void Win7ChromeShell::InvalidateChrome() {
@@ -1373,6 +1391,7 @@ LRESULT Win7ChromeShell::OnPanel(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
       return TRUE;
     case WM_MOUSEMOVE: {
       if (pid == kPanelCount) break;
+      last_move_pos_ = GetMessagePos();
       const int x = GET_X_LPARAM(lp);
       const int y = GET_Y_LPARAM(lp);
       if (!panel_hover_[pid]) {
@@ -1578,6 +1597,12 @@ void Win7ChromeShell::OnTimer(UINT_PTR id) {
       break;
     case kTimerSpin:
       MarkDirty(kBuffer);
+      break;
+    case kTimerMarquee:
+      for (int i = 0; i < kPanelCount; ++i) {
+        if ((marquee_panels_ & (1u << i)) && panels_[i].shown) MarkDirty(static_cast<PanelId>(i));
+      }
+      UpdateMarqueeTimer();
       break;
     default:
       break;
@@ -1837,6 +1862,9 @@ LRESULT Win7ChromeShell::OnGesture(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         TRACKMOUSEEVENT tme{static_cast<DWORD>(sizeof(TRACKMOUSEEVENT)), TME_LEAVE, hwnd, 0};
         TrackMouseEvent(&tme);
       }
+      const DWORD pos = GetMessagePos();
+      if (!ges_down_ && pos == last_move_pos_) return 0;
+      last_move_pos_ = pos;
       const double dist = std::hypot(static_cast<double>(x - ges_down_pt_.x), static_cast<double>(y - ges_down_pt_.y));
       if (IsMini()) {
         mini_hover_ = true;

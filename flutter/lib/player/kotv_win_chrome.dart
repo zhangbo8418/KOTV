@@ -300,9 +300,24 @@ class KotvWinChrome {
   static Future<void> update(Map<String, dynamic> fields) async {
     if (!isNeeded) return;
     _ensureHandler();
+    final mode = fields['mode'];
+    final relayout = (mode is String && mode != _lastMode) || fields.containsKey('suspended');
+    if (mode is String) _lastMode = mode;
     try {
       await _ch.invokeMethod('update', fields);
     } catch (_) {}
+    if (relayout) repaintSoon();
+  }
+
+  static String? _lastMode;
+
+  /// 视频 / 手势子窗口缩小或隐藏后，露出来的 Flutter 区域要等下一次出帧才会重画；
+  /// 静止页面没有新帧就一直空着（如退出全屏后的详情页）。补几帧。
+  static void repaintSoon() {
+    if (!isNeeded) return;
+    for (final ms in const [16, 150, 500]) {
+      Timer(Duration(milliseconds: ms), WidgetsBinding.instance.scheduleForcedFrame);
+    }
   }
 
   static int _suspendDepth = 0;
