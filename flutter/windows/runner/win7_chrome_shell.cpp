@@ -38,19 +38,17 @@ constexpr int kLiveEpgTabW = 28;
 constexpr int kLiveEpgW = 220;
 constexpr int kLivePad = 8;
 constexpr int kCenterSz = 72;
-constexpr BYTE kCenterPlayAlpha = 0x73;  // Flutter CenterPlayPauseButton 0x73000000
 constexpr int kModalW = 360;
 constexpr int kModalMaxH = 560;
 constexpr int kModalMoreW = 420;
 constexpr COLORREF kPink = RGB(229, 45, 39);       // #E52D27（全屏等旧强调）
 constexpr COLORREF kPrimary = RGB(207, 66, 116);   // #CF4274 = KotvColors.primary
 constexpr COLORREF kPinkMuted = RGB(180, 90, 110);
-constexpr BYTE kInlineBarAlpha = 204;             // 0xCC ≈ VodInlineControls 0xCC0A0A12
-constexpr BYTE kFsTopBarAlpha = 0x66;             // VodFullscreenChrome 顶栏 0x66000000
-constexpr BYTE kFsBottomBarAlpha = 0x99;          // VodFullscreenChrome 底栏 0x99000000
 constexpr COLORREF kPanelDark = RGB(18, 10, 28);    // #120A1C
 constexpr COLORREF kBarDark = RGB(12, 8, 18);
 constexpr COLORREF kBarAlpha = RGB(28, 20, 36);
+// 中心钮：Win7 子窗无 alpha，用深灰近似 Flutter 0x73000000
+constexpr COLORREF kCenterFace = RGB(0x2A, 0x2A, 0x30);
 constexpr COLORREF kDanmakuKey = RGB(1, 0, 1);
 constexpr COLORREF kSheetLight = RGB(248, 246, 250);
 constexpr COLORREF kSheetDark = RGB(42, 42, 48);    // 0xCC2A2A30 近似
@@ -770,9 +768,21 @@ void Win7ChromeShell::EnsureClasses() {
   classes_ready_ = true;
 }
 
+void Win7ChromeShell::ClearChildLayered(HWND hwnd) {
+  if (!hwnd) return;
+  const LONG ex = GetWindowLongW(hwnd, GWL_EXSTYLE);
+  if (ex & WS_EX_LAYERED) {
+    SetWindowLongW(hwnd, GWL_EXSTYLE, ex & ~WS_EX_LAYERED);
+    // 改 exstyle 后需重画，否则可能留下「闪一下就没」的脏态。
+    SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+  }
+}
+
 HWND Win7ChromeShell::CreateChildPanel(const wchar_t* title) {
   HWND parent = HostHwnd();
   if (!parent) return nullptr;
+  // 勿加 WS_EX_LAYERED：本壳只跑 Win7，子窗 LAYERED 不生效且易导致整栏不可见。
   HWND hwnd = CreateWindowExW(WS_EX_NOACTIVATE, kClass, title,
                               WS_CHILD | WS_CLIPSIBLINGS, 0, 0, 0, 0, parent, nullptr,
                               GetModuleHandleW(nullptr), this);
@@ -847,12 +857,13 @@ void Win7ChromeShell::ShowPanel(Panel& p, bool show, int x, int y, int w, int h)
   }
   const bool moved = !p.shown || p.x != x || p.y != y || p.w != w || p.h != h;
   if (moved) {
-    SetWindowPos(p.hwnd, HWND_TOP, x, y, w, h, SWP_SHOWWINDOW | SWP_NOACTIVATE);
+    // 几何变化才 Move；Z 序交给 RaiseChromeZ，避免每次 HWND_TOP 造成闪烁。
+    SetWindowPos(p.hwnd, nullptr, x, y, w, h,
+                 SWP_NOZORDER | SWP_SHOWWINDOW | SWP_NOACTIVATE);
     p.x = x;
     p.y = y;
     p.w = w;
     p.h = h;
-    // 几何变才擦背景；进度刷新走 InvalidateChrome(FALSE)。
     InvalidateRect(p.hwnd, nullptr, FALSE);
   } else if (!IsWindowVisible(p.hwnd)) {
     ShowWindow(p.hwnd, SW_SHOWNOACTIVATE);
@@ -875,24 +886,36 @@ void Win7ChromeShell::Layout() {
   if (!live_right_.hwnd) live_right_.hwnd = CreateChildPanel(L"kotv_live_r");
   if (!channel_info_.hwnd) channel_info_.hwnd = CreateChildPanel(L"kotv_ch");
   if (!center_play_.hwnd) center_play_.hwnd = CreateChildPanel(L"kotv_center");
+  // 清掉历史 LAYERED，避免「点一下闪一下」的半残子窗。
+  ClearChildLayered(top_.hwnd);
+  ClearChildLayered(bottom_.hwnd);
+  ClearChildLayered(episodes_.hwnd);
+  ClearChildLayered(live_left_.hwnd);
+  ClearChildLayered(live_right_.hwnd);
+  ClearChildLayered(channel_info_.hwnd);
+  ClearChildLayered(center_play_.hwnd);
   if (!gesture_.hwnd) {
-    gesture_.hwnd = CreateWindowExW(WS_EX_LAYERED | WS_EX_NOACTIVATE, kGestureClass, L"kotv_gesture",
+    // 手势层沉在视频下（视频 WS_DISABLED 点透）；勿 LAYERED，否则 Win7 子窗异常。
+    gesture_.hwnd = CreateWindowExW(WS_EX_NOACTIVATE, kGestureClass, L"kotv_gesture",
                                     WS_CHILD | WS_CLIPSIBLINGS, 0, 0, 0, 0, parent, nullptr,
                                     GetModuleHandleW(nullptr), this);
     if (gesture_.hwnd) {
       SetWindowLongPtrW(gesture_.hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
-      // 几乎全透明但可命中（与 Flutter 画面手势层同职责）
-      SetLayeredWindowAttributes(gesture_.hwnd, 0, 1, LWA_ALPHA);
     }
   }
+  ClearChildLayered(gesture_.hwnd);
   if (!danmaku_hwnd_) {
-    danmaku_hwnd_ = CreateWindowExW(
-        WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE, kDanmakuClass, L"",
-        WS_CHILD | WS_CLIPSIBLINGS, 0, 0, 0, 0, parent, nullptr, GetModuleHandleW(nullptr), this);
-    if (danmaku_hwnd_) {
-      SetWindowLongPtrW(danmaku_hwnd_, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
-      SetLayeredWindowAttributes(danmaku_hwnd_, kDanmakuKey, 0, LWA_COLORKEY);
-      danmaku_timer_ = SetTimer(danmaku_hwnd_, 1, 33, nullptr);
+    // 弹幕色键必须 LAYERED，且 Win7 仅顶层有效 → 用 owner popup。
+    HWND owner = RootHwnd();
+    if (owner) {
+      danmaku_hwnd_ = CreateWindowExW(
+          WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, kDanmakuClass,
+          L"", WS_POPUP, 0, 0, 0, 0, owner, nullptr, GetModuleHandleW(nullptr), this);
+      if (danmaku_hwnd_) {
+        SetWindowLongPtrW(danmaku_hwnd_, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
+        SetLayeredWindowAttributes(danmaku_hwnd_, kDanmakuKey, 0, LWA_COLORKEY);
+        danmaku_timer_ = SetTimer(danmaku_hwnd_, 1, 33, nullptr);
+      }
     }
   }
 
@@ -908,24 +931,16 @@ void Win7ChromeShell::Layout() {
     ShowPanel(live_right_, false, 0, 0, 0, 0);
     ShowPanel(channel_info_, false, 0, 0, 0, 0);
     ShowPanel(center_play_, false, 0, 0, 0, 0);
-    ShowPanel(bottom_, ok, ax, ay, aw, ah > 0 ? ah : kInlineBottomH);
-    // 整栏半透明近似 VodInlineControls 0xCC0A0A12
-    if (bottom_.hwnd) {
-      const LONG ex = GetWindowLongW(bottom_.hwnd, GWL_EXSTYLE);
-      if ((ex & WS_EX_LAYERED) == 0) {
-        SetWindowLongW(bottom_.hwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED);
-      }
-      SetLayeredWindowAttributes(bottom_.hwnd, 0, kInlineBarAlpha, LWA_ALPHA);
+    // 锚点过矮时抬高，避免只露出进度条/音量「显示不全」。
+    int bh = ah > 0 ? ah : kInlineBottomH;
+    if (ok && bh < kInlineBottomH) {
+      ay = ay + bh - kInlineBottomH;
+      bh = kInlineBottomH;
     }
+    ShowPanel(bottom_, ok, ax, ay, aw, bh);
   } else if (live_mode) {
     // 直播：无点播顶底栏；左栏顶满；频道信息条仅在左右栏都关时出现（对齐 Flutter）
     ShowPanel(top_, false, 0, 0, 0, 0);
-    if (bottom_.hwnd) {
-      const LONG ex = GetWindowLongW(bottom_.hwnd, GWL_EXSTYLE);
-      if (ex & WS_EX_LAYERED) {
-        SetWindowLongW(bottom_.hwnd, GWL_EXSTYLE, ex & ~WS_EX_LAYERED);
-      }
-    }
     ShowPanel(bottom_, false, 0, 0, 0, 0);
     ShowPanel(episodes_, false, 0, 0, 0, 0);
     ShowPanel(center_play_, false, 0, 0, 0, 0);
@@ -938,17 +953,7 @@ void Win7ChromeShell::Layout() {
         channel_visible_ && !live_left_visible_ && !live_right_visible_;
     ShowPanel(channel_info_, show_ch, 16, H - kChannelH - 16, std::max(0, W - 32), kChannelH);
   } else {
-    // 全屏/铺满：半透明顶底栏叠在满屏视频上（对齐 VodFullscreenChrome），勿清 LAYERED。
-    auto make_layered = [](HWND h, BYTE alpha) {
-      if (!h) return;
-      const LONG ex = GetWindowLongW(h, GWL_EXSTYLE);
-      if ((ex & WS_EX_LAYERED) == 0) {
-        SetWindowLongW(h, GWL_EXSTYLE, ex | WS_EX_LAYERED);
-      }
-      SetLayeredWindowAttributes(h, 0, alpha, LWA_ALPHA);
-    };
-    make_layered(top_.hwnd, kFsTopBarAlpha);
-    make_layered(bottom_.hwnd, kFsBottomBarAlpha);
+    // 全屏/铺满：Win7 子窗无法真半透明，用不透明深色栏；圆形中心钮靠 RGN 挖空四周。
     ShowPanel(top_, top_visible_, 0, 0, W, kTopH);
     ShowPanel(bottom_, bottom_visible_, 0, H - kBottomH, W, kBottomH);
     // 选集叠在右侧；视频已铺满，面板盖住画面即可（勿再靠缩 HWND 留边）。
@@ -958,15 +963,9 @@ void Win7ChromeShell::Layout() {
     ShowPanel(channel_info_, false, 0, 0, 0, 0);
     ShowPanel(center_play_, center_visible_, (W - kCenterSz) / 2, (H - kCenterSz) / 2, kCenterSz,
               kCenterSz);
-    // 圆形半透明：窗区域裁成圆 + 整窗 alpha（对齐 Flutter CircleBorder 0x73000000）
     if (center_play_.hwnd) {
       if (center_visible_) {
         ApplyRoundRegion(center_play_.hwnd, kCenterSz, kCenterSz, kCenterSz / 2);
-        const LONG ex = GetWindowLongW(center_play_.hwnd, GWL_EXSTYLE);
-        if ((ex & WS_EX_LAYERED) == 0) {
-          SetWindowLongW(center_play_.hwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED);
-        }
-        SetLayeredWindowAttributes(center_play_.hwnd, 0, kCenterPlayAlpha, LWA_ALPHA);
       } else {
         SetWindowRgn(center_play_.hwnd, nullptr, TRUE);
       }
@@ -1008,7 +1007,8 @@ void Win7ChromeShell::ClearGestureHud() {
     KillTimer(hud_.hwnd, hud_hide_timer_);
     hud_hide_timer_ = 0;
   }
-  ShowPanel(hud_, false, 0, 0, 0, 0);
+  if (hud_.hwnd) ShowWindow(hud_.hwnd, SW_HIDE);
+  hud_.shown = false;
 }
 
 void Win7ChromeShell::SetGestureHud(HudKind kind, const std::wstring& text, bool auto_hide) {
@@ -1016,16 +1016,12 @@ void Win7ChromeShell::SetGestureHud(HudKind kind, const std::wstring& text, bool
     ClearGestureHud();
     return;
   }
-  HWND parent = HostHwnd();
-  if (!parent) return;
+  if (!HostHwnd()) return;
   if (!hud_.hwnd) {
     EnsureClasses();
-    hud_.hwnd = CreateWindowExW(
-        WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE, kClass, L"kotv_hud",
-        WS_CHILD | WS_CLIPSIBLINGS, 0, 0, 0, 0, parent, nullptr, GetModuleHandleW(nullptr),
-        this);
+    // HUD 半透明：Win7 子窗 LWA 无效，改顶层 popup。
+    hud_.hwnd = CreateLayeredPopup(kClass);
     if (hud_.hwnd) {
-      SetWindowLongPtrW(hud_.hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
       SetLayeredWindowAttributes(hud_.hwnd, 0, kHudAlpha, LWA_ALPHA);
     }
   }
@@ -1041,12 +1037,12 @@ void Win7ChromeShell::SetGestureHud(HudKind kind, const std::wstring& text, bool
     hud_hide_timer_ = SetTimer(hud_.hwnd, kHudHideTimerId, kHudHideMs, nullptr);
   }
   InvalidateRect(hud_.hwnd, nullptr, FALSE);
-  SetWindowPos(hud_.hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
 void Win7ChromeShell::LayoutHud() {
   if (!hud_.hwnd || hud_kind_ == HudKind::None) {
-    ShowPanel(hud_, false, 0, 0, 0, 0);
+    if (hud_.hwnd) ShowWindow(hud_.hwnd, SW_HIDE);
+    hud_.shown = false;
     return;
   }
   HWND parent = HostHwnd();
@@ -1065,13 +1061,21 @@ void Win7ChromeShell::LayoutHud() {
     ok = w > 8 && h > 8;
   }
   if (!ok) {
-    ShowPanel(hud_, false, 0, 0, 0, 0);
+    ShowWindow(hud_.hwnd, SW_HIDE);
+    hud_.shown = false;
     return;
   }
-  const int hx = x + (w - kHudW) / 2;
-  const int hy = y + (h - kHudH) / 2;
-  ShowPanel(hud_, true, hx, hy, kHudW, kHudH);
+  POINT origin{0, 0};
+  ClientToScreen(parent, &origin);
+  const int hx = origin.x + x + (w - kHudW) / 2;
+  const int hy = origin.y + y + (h - kHudH) / 2;
   SetLayeredWindowAttributes(hud_.hwnd, 0, kHudAlpha, LWA_ALPHA);
+  SetWindowPos(hud_.hwnd, HWND_TOP, hx, hy, kHudW, kHudH, SWP_SHOWWINDOW | SWP_NOACTIVATE);
+  hud_.x = hx;
+  hud_.y = hy;
+  hud_.w = kHudW;
+  hud_.h = kHudH;
+  hud_.shown = true;
 }
 
 void Win7ChromeShell::PaintGestureHud(HDC hdc, const RECT& rc) {
@@ -1646,7 +1650,12 @@ void Win7ChromeShell::LayoutDanmaku() {
     ShowWindow(danmaku_hwnd_, SW_HIDE);
     return;
   }
-  SetWindowPos(danmaku_hwnd_, HWND_TOP, x, y, w, h, SWP_SHOWWINDOW | SWP_NOACTIVATE);
+  // popup：客户区坐标 → 屏幕
+  POINT origin{0, 0};
+  ClientToScreen(parent, &origin);
+  SetLayeredWindowAttributes(danmaku_hwnd_, kDanmakuKey, 0, LWA_COLORKEY);
+  SetWindowPos(danmaku_hwnd_, HWND_TOP, origin.x + x, origin.y + y, w, h,
+               SWP_SHOWWINDOW | SWP_NOACTIVATE);
   RaiseChromeZ();
 }
 
@@ -2116,9 +2125,9 @@ void Win7ChromeShell::PaintChannelInfo(HDC hdc, const RECT& rc) {
 }
 
 void Win7ChromeShell::PaintCenter(HDC hdc, const RECT& rc) {
-  // 窗已用圆形 RGN；只填黑圆，周边不在窗内故透明。半透明靠 LWA_ALPHA。
+  // Win7 子窗无 LWA_ALPHA：圆 RGN 挖空四周；钮面深灰近似半透明黑，勿纯黑实心。
   BeginHits(&center_hits_);
-  FillRectColor(hdc, rc, RGB(0, 0, 0));
+  FillRectColor(hdc, rc, kCenterFace);
   DrawChromeIcon(hdc, rc, playing_ ? ChromeIcon::Pause : ChromeIcon::Play, RGB(255, 255, 255));
   AddHit("togglePlay", rc);
 }
@@ -3532,16 +3541,22 @@ LRESULT CALLBACK Win7ChromeShell::GestureWndProc(HWND hwnd, UINT msg, WPARAM wPa
 LRESULT CALLBACK Win7ChromeShell::RootSubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
                                                    UINT_PTR /*id*/, DWORD_PTR data) {
   auto* self = reinterpret_cast<Win7ChromeShell*>(data);
-  if (self && self->enabled_ && !self->sheet_kind_.empty()) {
-    if (msg == WM_MOVE || msg == WM_MOVING || msg == WM_EXITSIZEMOVE) {
-      self->SyncModalToHost(false);
-    } else if (msg == WM_SIZE || msg == WM_SIZING) {
-      self->SyncModalToHost(true);
-    } else if (msg == WM_WINDOWPOSCHANGED) {
-      const auto* wp = reinterpret_cast<WINDOWPOS*>(lParam);
-      const bool sized = wp && !(wp->flags & SWP_NOSIZE);
-      const bool moved = wp && !(wp->flags & SWP_NOMOVE);
-      if (sized || moved) self->SyncModalToHost(sized);
+  if (self && self->enabled_) {
+    const bool moveish =
+        msg == WM_MOVE || msg == WM_MOVING || msg == WM_EXITSIZEMOVE || msg == WM_SIZE ||
+        msg == WM_SIZING || msg == WM_WINDOWPOSCHANGED;
+    if (moveish) {
+      // popup（sheet/HUD/弹幕）跟主窗屏幕坐标走。
+      if (!self->sheet_kind_.empty()) {
+        const bool invalidate =
+            msg == WM_SIZE || msg == WM_SIZING ||
+            (msg == WM_WINDOWPOSCHANGED &&
+             reinterpret_cast<WINDOWPOS*>(lParam) &&
+             !(reinterpret_cast<WINDOWPOS*>(lParam)->flags & SWP_NOSIZE));
+        self->SyncModalToHost(invalidate);
+      }
+      self->LayoutHud();
+      self->LayoutDanmaku();
     }
   }
   return DefSubclassProc(hwnd, msg, wParam, lParam);

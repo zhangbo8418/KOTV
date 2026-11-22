@@ -108,6 +108,8 @@ class Win7ChromeShell {
   void ShowPanel(Panel& p, bool show, int x, int y, int w, int h);
   HWND CreateChildPanel(const wchar_t* title);
   HWND CreateLayeredPopup(const wchar_t* class_name);
+  // Win7：WS_EX_LAYERED 仅顶层有效，子窗设 LAYERED 会导致不绘制/闪。播控子窗必须清掉。
+  static void ClearChildLayered(HWND hwnd);
   void ApplyRoundRegion(HWND hwnd, int w, int h, int radius);
   void SubclassHost(bool enable);
   void SyncModalToHost(bool invalidate);
