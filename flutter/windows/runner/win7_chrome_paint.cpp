@@ -177,8 +177,8 @@ void Win7ChromeShell::Paint(PanelId id, Canvas& cv, std::vector<Hit>& hits) {
 int Win7ChromeShell::PaintIconAct(Canvas& cv, std::vector<Hit>& hits, const char* id, int x, int y, int box,
                                   uint32_t cp, const std::wstring& badge) {
   const RECT rc = R(x, y, x + box, y + box);
-  const bool small = box <= G(34);
-  cv.Icon(rc, cp, static_cast<float>(G(small ? 18 : 22)), kWhite);
+  const bool small_box = box <= G(34);
+  cv.Icon(rc, cp, static_cast<float>(G(small_box ? 18 : 22)), kWhite);
   if (!badge.empty()) {
     const float fs = F(9);
     const int tw = cv.Measure(badge, fs, 700);
@@ -228,8 +228,8 @@ void Win7ChromeShell::PaintSlider(Canvas& cv, const RECT& area, double frac, dou
 // KotvVolumeControl：右侧喇叭；悬停展开滑条（宽 sliderWidth*ui）。
 int Win7ChromeShell::PaintVolume(Canvas& cv, std::vector<Hit>& hits, int right, int cy, int box, bool compact,
                                  double slider_w) {
-  const bool small = box <= G(34);
-  const int glyph = G(compact ? (small ? 18 : 20) : (small ? 18 : 22));
+  const bool small_box = box <= G(34);
+  const int glyph = G(compact ? (small_box ? 18 : 20) : (small_box ? 18 : 22));
   const double vol = std::clamp(volume_, 1.0, 100.0);
   const uint32_t cp = vol <= 1 ? ic::kVolumeMute : (vol < 35 ? ic::kVolumeDown : ic::kVolumeUp);
   const RECT icon_rc = R(right - box, cy - box / 2, right, cy - box / 2 + box);
