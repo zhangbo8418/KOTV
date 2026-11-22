@@ -147,8 +147,19 @@ class KotvMpvPlugin : public flutter::Plugin {
         SetWindowPos(child, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
       }
     };
+    // 弹幕已是 popup 时 Find 可能找不到；播控 Panel 必须压在视频 HWND 之上。
     raise_class(L"KotvWinChromeDanmaku");
     raise_class(L"KotvWinChromePanel");
+  }
+
+  // ShowWindow/Create 会把视频抬到子窗最上，盖住底栏（详情只剩进度条「显示不全」）。
+  // 任何露出视频之后必须立刻 Raise；已可见则勿再 ShowWindow（会重排 Z 序闪烁）。
+  void ShowVideoKeepChromeOnTop() {
+    if (!hwnd_ || !visible_) return;
+    if (!IsWindowVisible(hwnd_)) {
+      ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
+    }
+    RaiseChromeOverVideo();
   }
 
   // 只按槽建/挪 HWND（快）。禁止在 updateFrame 里 mpv_initialize，否则会堵 UI → 未响应且底栏来不及 Layout。
@@ -438,7 +449,7 @@ class KotvMpvPlugin : public flutter::Plugin {
         Emit({{EncodableValue("event"), EncodableValue("ready")},
               {EncodableValue("width"), EncodableValue(static_cast<int32_t>(w))},
               {EncodableValue("height"), EncodableValue(static_cast<int32_t>(h))}});
-        if (visible_) ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
+        ShowVideoKeepChromeOnTop();
         EmitPosition();
       } else if (ev->event_id == MPV_EVENT_END_FILE) {
         auto* e = static_cast<mpv_event_end_file*>(ev->data);
@@ -547,7 +558,7 @@ class KotvMpvPlugin : public flutter::Plugin {
       if (hwnd_) {
         // 无有效几何前不 Show，避免 1×1/默认窗停在客户区左上角。
         if (visible_ && have_frame_) {
-          ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
+          ShowVideoKeepChromeOnTop();
         } else {
           ShowWindow(hwnd_, SW_HIDE);
         }
@@ -563,7 +574,7 @@ class KotvMpvPlugin : public flutter::Plugin {
         const double h = ArgDouble(args, "h", ArgDouble(args, "height"));
         const double dpr = ArgDouble(args, "dpr", 0);
         // 只记槽 + 建/挪 HWND。mpv_initialize / loadfile 留给 open。
-        // 几何未变则跳过 MoveWindow/RaiseChrome，避免进度同步时底栏闪。
+        // 几何未变则跳过 MoveWindow；切勿在 Raise 后再 ShowWindow（会把视频压回最上）。
         const bool was = have_frame_;
         const double ox = frame_x_, oy = frame_y_, ow = frame_w_, oh = frame_h_;
         StoreFrame(x, y, w, h, dpr);
@@ -572,11 +583,14 @@ class KotvMpvPlugin : public flutter::Plugin {
                              std::abs(oy - frame_y_) > 0.5 ||
                              std::abs(ow - frame_w_) > 0.5 ||
                              std::abs(oh - frame_h_) > 0.5;
-          if (moved || !hwnd_) {
+          const bool need_hwnd = !hwnd_;
+          if (moved || need_hwnd) {
             EnsureVideoHwnd();
-            RaiseChromeOverVideo();
+            if (visible_) ShowVideoKeepChromeOnTop();
+          } else if (visible_ && hwnd_ && !IsWindowVisible(hwnd_)) {
+            // 仅「从隐藏到显示」才 Show+Raise；已可见勿再 ShowWindow（会压播控）。
+            ShowVideoKeepChromeOnTop();
           }
-          if (hwnd_ && visible_) ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
         }
       }
       result->Success();

@@ -3058,20 +3058,28 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     }
 
     final underlayClip = _underlayGlobalClip();
-    // Win7：洞 HWND 与黑槽/surface 同全局矩形，避免自测缩到左上角。
+    // Win7：洞 HWND 与黑槽/surface 同全局矩形，避免自测缩到左上角；高度避开底栏。
     Rect? forcedGeom;
     if (kotvUsesWindowsNativeChrome() && !holdFullscreen) {
       final slot = _winRectOf(_videoSlotKey);
       final surface = _winRectOf(_inlineSurfaceKey);
       final m = slot ?? surface;
       if (m != null) {
-        forcedGeom = Rect.fromLTWH(m['left']!, m['top']!, m['width']!, m['height']!);
+        final v = _winVideoFrameAvoidInlineChrome(m);
+        forcedGeom = Rect.fromLTWH(v['left']!, v['top']!, v['width']!, v['height']!);
       } else {
         final stackBox =
             _detailStackKey.currentContext?.findRenderObject() as RenderBox?;
         if (stackBox != null && stackBox.hasSize && stackBox.attached) {
           try {
-            forcedGeom = stackBox.localToGlobal(paint.topLeft) & paint.size;
+            final full = stackBox.localToGlobal(paint.topLeft) & paint.size;
+            final v = _winVideoFrameAvoidInlineChrome({
+              'left': full.left,
+              'top': full.top,
+              'width': full.width,
+              'height': full.height,
+            });
+            forcedGeom = Rect.fromLTWH(v['left']!, v['top']!, v['width']!, v['height']!);
           } catch (_) {}
         }
       }
@@ -3805,6 +3813,20 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     }
   }
 
+  /// Win7 详情：视频 HWND 高度扣掉内嵌底栏，避免盖住原生播控（只剩进度条闪残）。
+  Map<String, double> _winVideoFrameAvoidInlineChrome(Map<String, double> video) {
+    if (!KotvWinChrome.isNeeded || _immersiveFullscreen) return video;
+    final ch = KotvWinChrome.inlineBottomH;
+    final h = video['height']!;
+    if (h <= ch + 8) return video;
+    return {
+      'left': video['left']!,
+      'top': video['top']!,
+      'width': video['width']!,
+      'height': h - ch,
+    };
+  }
+
   /// Win7：有槽才建 HWND。open 前必须 await（仅 CreateWindow，不含 mpv_initialize）。
   Future<bool> _ensureWin7VideoSlotFrame() async {
     if (!kotvUsesWindowsNativeChrome() || !mounted) return true;
@@ -3814,8 +3836,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       _syncVideoSlotRect();
       await WidgetsBinding.instance.endOfFrame;
       if (!mounted) return false;
-      final video = _winRectOf(_videoSlotKey) ?? _winRectOf(_inlineSurfaceKey);
-      if (video != null) {
+      final raw = _winRectOf(_videoSlotKey) ?? _winRectOf(_inlineSurfaceKey);
+      if (raw != null) {
+        final video = _winVideoFrameAvoidInlineChrome(raw);
         await kotvMpvUpdateVideoFrame(
           x: video['left']!,
           y: video['top']!,
@@ -3885,9 +3908,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     }
     final surface = _winRectOf(_inlineSurfaceKey);
     final slot = _winRectOf(_videoSlotKey);
-    // 视频几何不依赖底栏锚点；几何未变勿反复 updateFrame（会 RaiseChrome 造成底栏闪）。
-    final video = slot ?? surface;
-    if (video != null) {
+    // 视频几何不依赖底栏锚点；几何未变勿反复 updateFrame。高度扣底栏避免 HWND 盖播控。
+    final rawVideo = slot ?? surface;
+    if (rawVideo != null) {
+      final video = _winVideoFrameAvoidInlineChrome(rawVideo);
       final sig =
           '${video['left']!.toStringAsFixed(1)}|${video['top']!.toStringAsFixed(1)}|'
           '${video['width']!.toStringAsFixed(1)}|${video['height']!.toStringAsFixed(1)}';
