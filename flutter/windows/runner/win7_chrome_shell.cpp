@@ -1711,6 +1711,12 @@ void Win7ChromeShell::PaintBottomInline(HDC hdc, const RECT& rc) {
   RECT track{rc.left + 10, rc.bottom - 14, rc.right - 10, rc.bottom - 10};
   DrawSeekTrack(hdc, track, progress_, true, kPrimary, buffered_);
   AddHit("seek", track);
+
+  if (buffering_) {
+    RECT b{rc.left + W / 2 - 56, rc.top + 2, rc.left + W / 2 + 56, ay};
+    DrawTextLine(hdc, b, L"加载中…", RGB(220, 180, 190), 11, false,
+                 DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+  }
 }
 
 void Win7ChromeShell::PaintBottomFullscreen(HDC hdc, const RECT& rc) {

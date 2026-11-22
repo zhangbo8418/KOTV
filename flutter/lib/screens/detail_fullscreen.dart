@@ -2339,7 +2339,8 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
                         ),
                       ),
                     ),
-                  if (widget.playUrl.isNotEmpty)
+                  // Win7：缓冲/解析提示由原生壳承接，勿在 Flutter 全屏层再画转圈。
+                  if (widget.playUrl.isNotEmpty && !KotvWinChrome.isNeeded)
                     KotvBufferingOverlay(player: widget.playback),
                   if (_showForceLandscape && !_dragging && !_gestureLocked && _dragDy.abs() < 4)
                     _forceLandscapeChip(c),

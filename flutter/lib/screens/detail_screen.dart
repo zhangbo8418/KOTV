@@ -3150,6 +3150,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             ] else ...[
               Builder(
                 builder: (context) {
+                  // Win7：槽挖空，解析/缓冲/中心钮/弹幕全由原生 HWND 承接，勿在 Flutter 槽里画。
+                  if (KotvWinChrome.isNeeded) return const SizedBox.shrink();
                   final pb = _existingPlayback;
                   final parsing = _status.contains('解析') ||
                       _status.contains('嗅探') ||
@@ -3164,22 +3166,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
                           CircularProgressIndicator(color: Colors.white70),
                           SizedBox(height: 12),
                           Text('正在解析播放地址', style: TextStyle(color: Colors.white70, fontSize: 13)),
-                        ],
-                      ),
-                    );
-                  }
-                  // Win7：槽上是原生视频 HWND + 播控 HWND，Flutter 再画中心钮/缓冲/弹幕会在 HWND
-                  // 未显时露出来，或与原生栏抢视觉；解析中只留轻量提示。
-                  if (KotvWinChrome.isNeeded) {
-                    if (!parsing) return const SizedBox.shrink();
-                    return const Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          CircularProgressIndicator(color: Colors.white70),
-                          SizedBox(height: 12),
-                          Text('正在解析播放地址',
-                              style: TextStyle(color: Colors.white70, fontSize: 13)),
                         ],
                       ),
                     );
@@ -3860,6 +3846,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         directOn: _playback.directOutput,
         miniActive: _miniDesktop,
         danmakuOn: _danmakuOn,
+        forceBuffering: _winChromeForceBuffering,
         danmakuItems: _danmakuItems.value,
         moreItems: KotvWinChrome.vodInlineMoreItems(
           danmakuOn: _danmakuOn,
@@ -3875,6 +3862,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       return;
     }
   }
+
+  bool get _winChromeForceBuffering =>
+      _status.contains('解析') ||
+      _status.contains('嗅探') ||
+      _status.contains('换集中') ||
+      _status.contains('加载中');
 
   void _syncWinInlineChrome() {
     if (!KotvWinChrome.isNeeded || !mounted) return;
@@ -3931,6 +3924,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       directOn: _playback.directOutput,
       miniActive: _miniDesktop,
       danmakuOn: _danmakuOn,
+      forceBuffering: _winChromeForceBuffering,
       danmakuItems: _danmakuItems.value,
       moreItems: KotvWinChrome.vodInlineMoreItems(
         danmakuOn: _danmakuOn,
@@ -3964,7 +3958,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       surface?['width']?.toStringAsFixed(1),
       surface?['height']?.toStringAsFixed(1),
       p.playing,
-      p.buffering || p.stalling,
+      p.buffering || p.stalling || _winChromeForceBuffering,
       progQ,
       bufQ,
       p.volume.round(),

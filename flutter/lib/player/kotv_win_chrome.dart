@@ -482,6 +482,8 @@ class KotvWinChrome {
     bool directOn = false,
     bool miniActive = false,
     bool danmakuOn = false,
+    /// 解析地址/换集等尚无 player.buffering 时，强制原生壳显示加载态。
+    bool forceBuffering = false,
     List<DanmakuItem> danmakuItems = const [],
     List<Map<String, dynamic>>? moreItems,
   }) async {
@@ -505,7 +507,7 @@ class KotvWinChrome {
       'positionSec': pos.inMilliseconds / 1000.0,
       'rate': playback.rate,
       'playing': playback.playing,
-      'buffering': playback.buffering || playback.stalling,
+      'buffering': forceBuffering || playback.buffering || playback.stalling,
       'volume': playback.volume.clamp(0, 100),
       'showDirect': showDirect,
       'directOn': directOn,
@@ -551,6 +553,7 @@ class KotvWinChrome {
     String decodeMode = 'auto',
     bool showDirect = false,
     bool directOn = false,
+    bool forceBuffering = false,
   }) async {
     if (!isNeeded) return;
     final pos = playback.position;
@@ -578,7 +581,7 @@ class KotvWinChrome {
       'positionSec': pos.inMilliseconds / 1000.0,
       'rate': playback.rate,
       'playing': playback.playing,
-      'buffering': playback.buffering || playback.stalling,
+      'buffering': forceBuffering || playback.buffering || playback.stalling,
       'volume': playback.volume.clamp(0, 100),
       'openingSec': openingSec,
       'endingSec': endingSec,
