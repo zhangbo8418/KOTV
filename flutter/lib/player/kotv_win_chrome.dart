@@ -305,14 +305,35 @@ class KotvWinChrome {
     } catch (_) {}
   }
 
+  static int _suspendDepth = 0;
+  static bool _covered = false;
+  static bool _sentSuspended = false;
+
+  static Future<void> _pushSuspended() async {
+    final want = _suspendDepth > 0 || _covered;
+    if (want == _sentSuspended) return;
+    _sentSuspended = want;
+    await update({'suspended': want});
+  }
+
+  /// 播放页被别的 Flutter 路由（对话框、底部弹层）盖住：原生壳是置顶分层窗，须整体挂起。
+  /// 由 mpv 洞在路由状态变化时调用。
+  static void setCovered(bool covered) {
+    if (!isNeeded || covered == _covered) return;
+    _covered = covered;
+    unawaited(_pushSuspended());
+  }
+
   /// 原生壳挂起（面板、手势层、弹幕全藏）期间跑 Flutter 弹窗；弹窗路由盖住时 mpv 洞也会自己藏 HWND。
   static Future<T> withSuspended<T>(Future<T> Function() body) async {
     if (!isNeeded) return body();
-    await update({'suspended': true});
+    _suspendDepth++;
+    await _pushSuspended();
     try {
       return await body();
     } finally {
-      await update({'suspended': false});
+      _suspendDepth--;
+      await _pushSuspended();
     }
   }
 
@@ -751,7 +772,7 @@ class KotvWinChrome {
     int fixedDurationMs = 5000,
     int rows = 6,
     int maxOnScreen = 150,
-    double scrollArea = 1.0,
+    double scrollArea = 0.5,
     bool bold = false,
     bool showScroll = true,
     bool showTop = true,
@@ -759,6 +780,17 @@ class KotvWinChrome {
     bool showReverse = true,
     bool showPositioned = true,
     bool showSpecial = true,
+    double lineSpacing = 1.4,
+    String strokeMode = 'outline',
+    String colorMode = 'original',
+    int rowsTop = 3,
+    int rowsBottom = 3,
+    double scrollGap = 0.08,
+    double strokeWidth = 0.12,
+    double shadowOpacity = 0.5,
+    double projectionOffsetX = 0.08,
+    double projectionOffsetY = 0.08,
+    double projectionOpacity = 0.2,
   }) async {
     if (!isNeeded) return;
     _ensureHandler();
@@ -782,6 +814,17 @@ class KotvWinChrome {
       showReverse,
       showPositioned,
       showSpecial,
+      lineSpacing,
+      strokeMode,
+      colorMode,
+      rowsTop,
+      rowsBottom,
+      scrollGap,
+      strokeWidth,
+      shadowOpacity,
+      projectionOffsetX,
+      projectionOffsetY,
+      projectionOpacity,
     ]);
     if (sig == _lastDanmakuSig) return;
     final itemsSig = Object.hash(items.length, items.isEmpty ? 0 : items.first.time, items.isEmpty ? 0 : items.last.time);
@@ -805,12 +848,34 @@ class KotvWinChrome {
         'showReverse': showReverse,
         'showPositioned': showPositioned,
         'showSpecial': showSpecial,
+        'lineSpacing': lineSpacing,
+        'strokeMode': strokeMode,
+        'colorMode': colorMode,
+        'rowsTop': rowsTop,
+        'rowsBottom': rowsBottom,
+        'scrollGap': scrollGap,
+        'strokeWidth': strokeWidth,
+        'shadowOpacity': shadowOpacity,
+        'projectionOffsetX': projectionOffsetX,
+        'projectionOffsetY': projectionOffsetY,
+        'projectionOpacity': projectionOpacity,
       };
       if (sendItems) {
         const maxItems = 4000;
         final src = items.length > maxItems ? items.sublist(items.length - maxItems) : items;
         map['items'] = [
-          for (final it in src) {'t': it.time, 'c': it.content, 'm': it.mode, 'color': it.color, 'size': it.size},
+          for (final it in src)
+            {
+              't': it.time,
+              'c': it.content,
+              'm': it.mode,
+              'color': it.color,
+              'size': it.size,
+              'pool': it.pool,
+              'x': it.x,
+              'y': it.y,
+              'dur': it.durationMs,
+            },
         ];
       }
       await _ch.invokeMethod('setDanmaku', map);

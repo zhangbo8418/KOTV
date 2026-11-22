@@ -139,7 +139,9 @@ std::string JoinDanmakuItems(const flutter::EncodableList& list) {
     if (c.empty()) continue;
     if (!first) oss << '\n';
     first = false;
-    oss << t << '|' << Sanitize(c, false) << '|' << mode << '|' << color << '|' << size;
+    oss << t << '|' << Sanitize(c, false) << '|' << mode << '|' << color << '|' << size << '|'
+        << static_cast<int>(get_d("pool")) << '|' << get_d("x") << '|' << get_d("y") << '|'
+        << static_cast<int>(get_d("dur"));
   }
   return oss.str();
 }
@@ -216,6 +218,8 @@ Win7ChromeShell::ChromeMap KotvWinChrome::ToChromeMap(const EncodableMap& src) c
         FlattenRect(out, nested, "anchorLeft", "anchorTop", "anchorWidth", "anchorHeight");
       } else if (key == "surfaceScreen") {
         FlattenRect(out, nested, "surfaceLeft", "surfaceTop", "surfaceWidth", "surfaceHeight");
+      } else if (key == "clipScreen") {
+        FlattenRect(out, nested, "clipLeft", "clipTop", "clipWidth", "clipHeight");
       } else if (key == "danmaku") {
         // 展开到顶层并再 ApplyDanmaku
         auto nested_cm = ToChromeMap(nested);

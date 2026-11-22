@@ -1337,6 +1337,125 @@ void Win7ChromeShell::PaintPopup(Canvas& cv, std::vector<Hit>& hits) {
 // 弹幕（独立分层 popup，点击穿透）
 // ---------------------------------------------------------------------------
 
+bool Win7ChromeShell::DanmakuAllowed(const DanmakuItem& d) const {
+  if (d.pool == 2 && !danmaku_show_special_) return false;
+  switch (d.mode) {
+    case 4: return danmaku_show_bottom_;
+    case 5: return danmaku_show_top_;
+    case 6: return danmaku_show_reverse_;
+    case 7: return danmaku_show_positioned_;
+    default: return danmaku_show_scroll_;
+  }
+}
+
+// DanmakuOverlay._activate / _pickScrollLane / _pickFixedLane 的移植（坐标为物理像素）。
+void Win7ChromeShell::ActivateDanmaku(double media, double view_w, float fs, int weight, Canvas& cv) {
+  constexpr double kWindowSec = 3.0;
+  auto seek_cursor = [&](double from) {
+    danmaku_cursor_ = static_cast<size_t>(
+        std::lower_bound(danmaku_items_.begin(), danmaku_items_.end(), from,
+                         [](const DanmakuItem& d, double t) { return d.time < t; }) -
+        danmaku_items_.begin());
+  };
+  if (danmaku_last_sec_ < 0) {
+    danmaku_last_sec_ = std::max(0.0, media - kWindowSec);
+    seek_cursor(danmaku_last_sec_);
+  } else if (media + 0.05 < danmaku_last_sec_) {
+    if (danmaku_last_sec_ - media < 1.5) return;
+    danmaku_flying_.clear();
+    danmaku_last_sec_ = std::max(0.0, media - kWindowSec);
+    seek_cursor(danmaku_last_sec_);
+  }
+  const double from = danmaku_last_sec_;
+  const double to = media;
+  if (to <= from) return;
+  const double window_from = std::max(from, to - kWindowSec);
+  const size_t max_on = static_cast<size_t>(std::clamp(danmaku_max_on_screen_, 10, 500));
+  const int scroll_dur = std::clamp(danmaku_duration_ms_, 3000, 15000);
+  const int fixed_dur = std::clamp(danmaku_fixed_ms_, 2000, 10000);
+  const int lanes = std::clamp(danmaku_rows_, 1, 16);
+  const int top_lanes = std::clamp(danmaku_rows_top_, 1, 8);
+  const int bottom_lanes = std::clamp(danmaku_rows_bottom_, 1, 8);
+  const double gap = view_w * std::clamp(danmaku_scroll_gap_, 0.0, 0.2);
+
+  auto fixed_lane = [&](int rows, int mode) -> int {
+    std::vector<bool> occupied(static_cast<size_t>(rows), false);
+    for (const auto& f : danmaku_flying_) {
+      if (danmaku_items_[f.idx].mode != mode) continue;
+      if (media - f.activated < f.duration_ms / 1000.0) occupied[static_cast<size_t>(f.lane % rows)] = true;
+    }
+    for (int i = 0; i < rows; ++i) {
+      if (!occupied[static_cast<size_t>(i)]) return i;
+    }
+    return -1;
+  };
+  auto scroll_lane_free = [&](int lane, double text_w, int dur_ms, bool reverse) {
+    const double new_dur = dur_ms / 1000.0;
+    if (new_dur <= 0) return false;
+    const double new_speed = (view_w + text_w) / new_dur;
+    for (const auto& f : danmaku_flying_) {
+      const int mode = danmaku_items_[f.idx].mode;
+      if (mode == 4 || mode == 5 || mode == 7) continue;
+      if ((mode == 6) != reverse || f.lane != lane) continue;
+      const double dur = f.duration_ms / 1000.0;
+      if (dur <= 0) continue;
+      const double t = std::clamp((media - f.activated) / dur, 0.0, 1.0);
+      const double travel = view_w + f.text_w;
+      const double x = reverse ? -f.text_w + t * travel : view_w - t * travel;
+      const double right = x + f.text_w;
+      const double old_speed = travel / dur;
+      const double head = reverse ? x : view_w - right;
+      if (reverse ? x < gap : right > view_w - gap) return false;
+      if (new_speed > old_speed + 0.5 * dpr_) {
+        if (head <= 0) return false;
+        if (head / (new_speed - old_speed) < (1 - t) * dur) return false;
+      }
+    }
+    return true;
+  };
+
+  while (danmaku_cursor_ < danmaku_items_.size() && danmaku_items_[danmaku_cursor_].time < window_from) ++danmaku_cursor_;
+  size_t i = danmaku_cursor_;
+  for (; i < danmaku_items_.size(); ++i) {
+    const auto& it = danmaku_items_[i];
+    if (it.time >= to) break;
+    if (it.time < window_from || !DanmakuAllowed(it)) continue;
+    if (danmaku_flying_.size() >= max_on) break;
+    const int mode = it.mode;
+    int dur = 0;
+    if (mode == 7 && it.duration_ms > 0) dur = it.duration_ms;
+    else if (mode == 4 || mode == 5 || mode == 7) dur = fixed_dur;
+    else dur = scroll_dur + std::clamp(static_cast<int>(it.content.size()) * 40, 0, 3000);
+    const double text_w = cv.Measure(it.content, static_cast<float>(fs * it.SizeScale()), weight);
+    int lane = -1;
+    if (mode == 4) lane = fixed_lane(bottom_lanes, 4);
+    else if (mode == 5) lane = fixed_lane(top_lanes, 5);
+    else if (mode == 7) lane = 0;
+    else {
+      for (int l = 0; l < lanes; ++l) {
+        if (scroll_lane_free(l, text_w, dur, mode == 6)) {
+          lane = l;
+          break;
+        }
+      }
+    }
+    if (lane >= 0) danmaku_flying_.push_back(DanmakuFlying{i, it.time, lane, dur, text_w});
+  }
+  danmaku_cursor_ = i;
+  danmaku_last_sec_ = to;
+  danmaku_flying_.erase(std::remove_if(danmaku_flying_.begin(), danmaku_flying_.end(),
+                                       [&](const DanmakuFlying& f) {
+                                         return media - f.activated > f.duration_ms / 1000.0 + 0.25 ||
+                                                media < f.activated - 0.05;
+                                       }),
+                        danmaku_flying_.end());
+  if (danmaku_flying_.size() > max_on) {
+    danmaku_flying_.erase(danmaku_flying_.begin(),
+                          danmaku_flying_.begin() + static_cast<std::ptrdiff_t>(danmaku_flying_.size() - max_on));
+  }
+}
+
+// _DanmakuPainter：轨道 y = 12 + lane × laneH；顶部/底部按字高 + 4 叠行；描边 / 投影 / 阴影同 Flutter 参数。
 void Win7ChromeShell::PaintDanmaku() {
   if (!danmaku_hwnd_) return;
   const RECT box = VideoArea();
@@ -1344,65 +1463,96 @@ void Win7ChromeShell::PaintDanmaku() {
   const int H = box.bottom - box.top;
   if (W <= 0 || H <= 0) return;
   if (!danmaku_canvas_) danmaku_canvas_ = std::make_unique<Canvas>();
-  double pos = position_sec_;
-  if (playing_ && position_tick_) pos += (GetTickCount() - position_tick_) / 1000.0 * rate_;
-  const float fs = static_cast<float>(danmaku_font_ * dpr_);
-  const int weight = danmaku_bold_ ? 700 : 400;
-  std::vector<size_t> live;
-  const double max_age = std::max(danmaku_duration_ms_, danmaku_fixed_ms_) / 1000.0 + 0.2;
-  auto lo = std::lower_bound(danmaku_items_.begin(), danmaku_items_.end(), pos - max_age,
-                             [](const DanmakuItem& d, double t) { return d.time < t; });
-  for (auto it = lo; it != danmaku_items_.end() && it->time <= pos + 0.05; ++it) {
-    const auto& d = *it;
-    const bool scroll = d.mode == 1 || d.mode == 2 || d.mode == 3 || d.mode == 6;
-    const bool top = d.mode == 5;
-    const bool bottom = d.mode == 4;
-    const bool positioned = d.mode == 7;
-    const bool special = d.mode >= 8;
-    if (scroll && d.mode != 6 && !danmaku_show_scroll_) continue;
-    if (d.mode == 6 && !danmaku_show_reverse_) continue;
-    if (top && !danmaku_show_top_) continue;
-    if (bottom && !danmaku_show_bottom_) continue;
-    if (positioned && !danmaku_show_positioned_) continue;
-    if (special) continue;
-    const double age = pos - d.time;
-    const int dur = (scroll ? danmaku_duration_ms_ : danmaku_fixed_ms_);
-    if (age < 0 || age * 1000.0 > dur) continue;
-    live.push_back(static_cast<size_t>(it - danmaku_items_.begin()));
-    if (static_cast<int>(live.size()) >= danmaku_max_on_screen_) break;
-  }
-  if (live.empty() && danmaku_painted_empty_) return;
+  double media = position_sec_;
+  if (playing_ && !buffering_ && position_tick_) media += (GetTickCount() - position_tick_) / 1000.0 * rate_;
+  const double d = dpr_;
+  const float fs = static_cast<float>(std::clamp(danmaku_font_, 12.0, 48.0) * d);
+  const int weight = danmaku_bold_ ? 700 : 600;
   Canvas& cv = *danmaku_canvas_;
   if (!cv.Begin(W, H)) return;
-  const int row_h = static_cast<int>(fs * 1.3f);
-  const int area_rows = std::max(1, static_cast<int>(H * danmaku_scroll_area_) / std::max(1, row_h));
-  const int rows = std::max(1, std::min(danmaku_rows_, area_rows));
-  const Argb alpha = static_cast<Argb>(std::lround(danmaku_opacity_ * 255)) << 24;
-  const Argb shadow = static_cast<Argb>(std::lround(danmaku_opacity_ * 0.6 * 255)) << 24;
-  for (size_t idx : live) {
-    const auto& d = danmaku_items_[idx];
-    const bool scroll = d.mode == 1 || d.mode == 2 || d.mode == 3 || d.mode == 6;
-    const bool bottom = d.mode == 4;
-    const int row = static_cast<int>(idx % static_cast<size_t>(rows));
-    const int y = bottom ? H - (row + 1) * row_h - P(8) : P(8) + row * row_h;
-    const int tw = cv.Measure(d.content, fs, weight);
-    int x = (W - tw) / 2;
-    if (scroll) {
-      const double t = std::clamp((pos - d.time) * 1000.0 / danmaku_duration_ms_, 0.0, 1.0);
-      x = d.mode == 6 ? static_cast<int>(-tw + t * (W + tw)) : static_cast<int>(W - t * (W + tw));
+  ActivateDanmaku(media, W, fs, weight, cv);
+  if (danmaku_flying_.empty() && danmaku_painted_empty_) {
+    cv.End();
+    return;
+  }
+  const int lanes = std::clamp(danmaku_rows_, 1, 16);
+  const int top_lanes = std::clamp(danmaku_rows_top_, 1, 8);
+  const int bottom_lanes = std::clamp(danmaku_rows_bottom_, 1, 8);
+  const double area_h = std::clamp(H * std::clamp(danmaku_scroll_area_, 0.1, 1.0), std::min(40.0 * d, static_cast<double>(H)),
+                                   static_cast<double>(H));
+  const double lane_h =
+      std::clamp(std::max(fs * std::clamp(danmaku_line_spacing_, 1.0, 2.0), area_h / lanes), static_cast<double>(fs),
+                 std::max(static_cast<double>(fs), 80.0 * d));
+  const double op = std::clamp(danmaku_opacity_, 0.15, 1.0);
+  const Argb text_a = static_cast<Argb>(std::lround(op * 255)) << 24;
+  struct Shade {
+    double dx, dy;
+    Argb c;
+  };
+  std::vector<Shade> shades;
+  if (danmaku_stroke_mode_ == "outline") {
+    const double s = std::clamp(fs * std::clamp(danmaku_stroke_width_, 0.05, 0.3), 0.5 * d, 6.0 * d);
+    const Argb c = static_cast<Argb>(std::lround(0.85 * 255)) << 24;
+    shades = {{-s, 0, c}, {s, 0, c}, {0, -s, c}, {0, s, c}};
+  } else if (danmaku_stroke_mode_ == "projection") {
+    const Argb c = static_cast<Argb>(std::lround(std::clamp(danmaku_proj_opacity_, 0.0, 0.9) * 255)) << 24;
+    shades = {{fs * std::clamp(danmaku_proj_x_, 0.02, 0.15), fs * std::clamp(danmaku_proj_y_, 0.02, 0.15), c}};
+  } else if (danmaku_stroke_mode_ != "none") {
+    // Shadow(blurRadius: 2)：GDI 无模糊，用四向 1px 半透明近似。
+    const Argb c = static_cast<Argb>(std::lround(std::clamp(danmaku_shadow_opacity_, 0.0, 0.9) * 0.5 * 255)) << 24;
+    const double s = std::max(1.0, d);
+    shades = {{-s, -s, c}, {s, -s, c}, {-s, s, c}, {s, s, c}};
+  }
+  auto draw = [&](double x, double y, double tw, int th, const std::wstring& text, float px, Argb c) {
+    const int ix = static_cast<int>(std::lround(x));
+    const int iy = static_cast<int>(std::lround(y));
+    const int iw = static_cast<int>(std::ceil(tw)) + P(2);
+    if (ix + iw < 0 || ix > W) return;
+    const RECT rc = R(std::max(0, ix), iy, std::min(W, ix + iw), iy + th);
+    if (rc.right <= rc.left) return;
+    cv.Text(rc, text, c, px, weight, DT_SINGLELINE | DT_TOP | DT_NOCLIP | (ix < 0 ? DT_RIGHT : DT_LEFT));
+  };
+  for (const auto& f : danmaku_flying_) {
+    const auto& it = danmaku_items_[f.idx];
+    const double dur = f.duration_ms / 1000.0;
+    if (dur <= 0) continue;
+    const double t = (media - f.activated) / dur;
+    if (t < 0 || t > 1) continue;
+    const float px = static_cast<float>(fs * it.SizeScale());
+    const int th = cv.LineHeight(px, weight);
+    const double tw = f.text_w;
+    double x = 0;
+    double y = 0;
+    if (it.mode == 4) {
+      x = (W - tw) / 2;
+      y = H - 12 * d - th - (f.lane % bottom_lanes) * (th + 4 * d);
+    } else if (it.mode == 5) {
+      x = (W - tw) / 2;
+      y = 12 * d + (f.lane % top_lanes) * (th + 4 * d);
+    } else if (it.mode == 7) {
+      x = it.x * W;
+      y = it.y * H;
+    } else if (it.mode == 6) {
+      y = 12 * d + (f.lane % lanes) * lane_h;
+      x = -tw + t * (W + tw);
+    } else {
+      y = 12 * d + (f.lane % lanes) * lane_h;
+      x = W - t * (W + tw);
     }
-    if (x + tw < 0 || x > W) continue;
-    const RECT rc = R(std::max(0, x), y, std::min(W, x + tw + P(2)), y + row_h);
-    if (rc.right <= rc.left) continue;
-    const UINT fmt = DT_SINGLELINE | DT_VCENTER | DT_NOCLIP | (x < 0 ? DT_RIGHT : DT_LEFT);
-    RECT sh = rc;
-    OffsetRect(&sh, P(1), P(1));
-    cv.Text(sh, d.content, shadow, fs, weight, fmt);
-    cv.Text(rc, d.content, alpha | (static_cast<Argb>(d.color) & 0xFFFFFF), fs, weight, fmt);
+    Argb rgb = static_cast<Argb>(it.color) & 0xFFFFFF;
+    if (danmaku_color_mode_ == "white") rgb = 0xFFFFFF;
+    else if (danmaku_color_mode_ == "yellow") rgb = 0xFFFF00;
+    for (const auto& sh : shades) draw(x + sh.dx, y + sh.dy, tw, th, it.content, px, sh.c);
+    draw(x, y, tw, th, it.content, px, text_a | rgb);
   }
   cv.End();
+  RECT clip{};
+  if (InlineClip(&clip)) {
+    OffsetRect(&clip, -box.left, -box.top);
+    cv.ClearOutside(clip);
+  }
   POINT pt{box.left, box.top};
   ClientToScreen(host_hwnd_, &pt);
   kotv_chrome::PresentLayered(danmaku_hwnd_, cv, pt.x, pt.y);
-  danmaku_painted_empty_ = live.empty();
+  danmaku_painted_empty_ = danmaku_flying_.empty();
 }

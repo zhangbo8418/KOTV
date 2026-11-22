@@ -76,6 +76,8 @@ class Canvas {
 
   void SetClip(const RECT& rc);
   void ClearClip();
+  // End() 之后调用：keep 以外的像素清成全透明（分层窗透明像素不接收鼠标）。
+  void ClearOutside(const RECT& keep);
 
   void Fill(const RECT& rc, Argb c);
   void RoundRect(const RECT& rc, float radius, Argb fill, Argb border = 0, float border_w = 0);

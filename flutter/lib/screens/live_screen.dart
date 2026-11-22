@@ -4608,6 +4608,12 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
 
   @override
   Widget build(BuildContext context) {
+    // Win7：画面区几何要等本帧布局完再量（窗口缩放、进出全屏、横竖切换都只走 build）。
+    if (KotvWinChrome.isNeeded) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _syncWinChrome();
+      });
+    }
     if (!_loading && _sources.isEmpty && _error == null) {
       return Column(
         children: [

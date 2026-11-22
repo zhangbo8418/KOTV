@@ -3936,9 +3936,17 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     final anchor = _winRectOf(_inlineChromeAnchorKey);
     if (anchor == null) return null;
     final parsing = _winChromeForceBuffering;
+    // 页面滚到顶栏下时，原生画面、播控、弹幕都按顶栏下内容区裁掉（同 Flutter 滚动裁剪）。
+    final clip = _underlayGlobalClip();
     return {
       ...base,
       'mode': 'vod_inline',
+      'clipScreen': {
+        'left': clip?.left ?? 0,
+        'top': clip?.top ?? 0,
+        'width': clip?.width ?? 0,
+        'height': clip?.height ?? 0,
+      },
       'anchorScreen': anchor,
       'surfaceScreen': _winRectOf(_inlineSurfaceKey),
       'bottom': true,
@@ -3959,9 +3967,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     final rawVideo = slot ?? surface;
     if (rawVideo != null) {
       final video = _winVideoFrameAvoidInlineChrome(rawVideo);
+      final clip = _underlayGlobalClip();
       final sig =
           '${video['left']!.toStringAsFixed(1)}|${video['top']!.toStringAsFixed(1)}|'
-          '${video['width']!.toStringAsFixed(1)}|${video['height']!.toStringAsFixed(1)}';
+          '${video['width']!.toStringAsFixed(1)}|${video['height']!.toStringAsFixed(1)}|$clip';
       if (sig != _lastWinVideoFrameSig) {
         _lastWinVideoFrameSig = sig;
         final dpr = MediaQuery.devicePixelRatioOf(context);
@@ -3971,6 +3980,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           w: video['width']!,
           h: video['height']!,
           dpr: dpr,
+          clip: clip,
         ));
       }
     }
@@ -4001,6 +4011,17 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       showReverse: _danmakuShowReverse,
       showPositioned: _danmakuShowPositioned,
       showSpecial: _danmakuShowSpecial,
+      lineSpacing: _danmakuLineSpacing,
+      strokeMode: _danmakuStrokeMode,
+      colorMode: _danmakuColorMode,
+      rowsTop: _danmakuRowsTop,
+      rowsBottom: _danmakuRowsBottom,
+      scrollGap: _danmakuScrollGap,
+      strokeWidth: _danmakuStrokeWidth,
+      shadowOpacity: _danmakuShadowOpacity,
+      projectionOffsetX: _danmakuProjectionOffsetX,
+      projectionOffsetY: _danmakuProjectionOffsetY,
+      projectionOpacity: _danmakuProjectionOpacity,
     ));
     final snap = fields.toString();
     if (snap == _lastWinInlineChromeSnap) return;

@@ -761,14 +761,7 @@ class KotvMpvPlugin : public flutter::Plugin {
     NotifySurface();
   }
 
-  bool ResolveFramePhysical(int* cx, int* cy, int* cw, int* ch) {
-    if (!have_frame_ || frame_w_ <= 1 || frame_h_ <= 1) {
-      // 槽几何未到：先按占位尺寸建隐藏 HWND 供 mpv 绑定 wid，updateFrame 再挪到位并显示。
-      *cx = *cy = 0;
-      *cw = 16;
-      *ch = 9;
-      return true;
-    }
+  double FrameDpr() {
     double dpr = frame_dpr_;
     if (dpr <= 0) {
       if (HWND parent = FlutterHwnd()) {
@@ -778,7 +771,41 @@ class KotvMpvPlugin : public flutter::Plugin {
         }
       }
     }
-    if (dpr <= 0) dpr = 1.0;
+    return dpr <= 0 ? 1.0 : dpr;
+  }
+
+  // 可见区（Win7 详情页滚到顶栏下时）用窗口区域裁掉，画面不缩放。
+  void ApplyClipRegion(HWND hwnd, int cx, int cy, int cw, int ch) {
+    RECT keep{0, 0, cw, ch};
+    if (has_clip_) {
+      const double dpr = FrameDpr();
+      RECT c{static_cast<LONG>(std::lround(clip_x_ * dpr)) - cx, static_cast<LONG>(std::lround(clip_y_ * dpr)) - cy,
+             static_cast<LONG>(std::lround((clip_x_ + clip_w_) * dpr)) - cx,
+             static_cast<LONG>(std::lround((clip_y_ + clip_h_) * dpr)) - cy};
+      if (!IntersectRect(&keep, &keep, &c)) keep = RECT{0, 0, 0, 0};
+    }
+    const bool full = keep.left == 0 && keep.top == 0 && keep.right == cw && keep.bottom == ch;
+    if (full && !region_set_) return;
+    if (region_set_ && EqualRect(&keep, &region_)) return;
+    if (full) {
+      SetWindowRgn(hwnd, nullptr, TRUE);
+      region_set_ = false;
+      return;
+    }
+    SetWindowRgn(hwnd, CreateRectRgn(keep.left, keep.top, keep.right, keep.bottom), TRUE);
+    region_ = keep;
+    region_set_ = true;
+  }
+
+  bool ResolveFramePhysical(int* cx, int* cy, int* cw, int* ch) {
+    if (!have_frame_ || frame_w_ <= 1 || frame_h_ <= 1) {
+      // 槽几何未到：先按占位尺寸建隐藏 HWND 供 mpv 绑定 wid，updateFrame 再挪到位并显示。
+      *cx = *cy = 0;
+      *cw = 16;
+      *ch = 9;
+      return true;
+    }
+    const double dpr = FrameDpr();
     *cx = static_cast<int>(std::lround(frame_x_ * dpr));
     *cy = static_cast<int>(std::lround(frame_y_ * dpr));
     *cw = (std::max)(1, static_cast<int>(std::lround(frame_w_ * dpr)));
@@ -806,11 +833,13 @@ class KotvMpvPlugin : public flutter::Plugin {
                                    WS_CHILD | WS_CLIPSIBLINGS | WS_DISABLED, cx, cy, cw, ch,
                                    parent, nullptr, GetModuleHandleW(nullptr), nullptr);
       if (!core->hwnd) return false;
+      region_set_ = false;
       ShowWindow(core->hwnd, SW_HIDE);
     } else {
       MoveWindow(core->hwnd, cx, cy, cw, ch, TRUE);
       if (IsWindowVisible(core->hwnd)) NotifySurface();
     }
+    ApplyClipRegion(core->hwnd, cx, cy, cw, ch);
     return true;
   }
 
@@ -1037,6 +1066,8 @@ class KotvMpvPlugin : public flutter::Plugin {
       visible_ = false;
       frame_x_ = frame_y_ = frame_w_ = frame_h_ = 0;
       frame_dpr_ = 0;
+      has_clip_ = false;
+      region_set_ = false;
       result->Success();
       return;
     }
@@ -1154,7 +1185,17 @@ class KotvMpvPlugin : public flutter::Plugin {
         const double h = ArgDouble(args, "h", ArgDouble(args, "height"));
         const double dpr = ArgDouble(args, "dpr", 0);
         if (w > 1 && h > 1) {
-          const bool moved = !have_frame_ || std::abs(x - frame_x_) > 0.5 ||
+          const bool clip = HasArg(args, "clipW");
+          const double kx = clip ? ArgDouble(args, "clipX") : 0, ky = clip ? ArgDouble(args, "clipY") : 0;
+          const double kw = clip ? ArgDouble(args, "clipW") : 0, kh = clip ? ArgDouble(args, "clipH") : 0;
+          const bool clip_changed = clip != has_clip_ || std::abs(kx - clip_x_) > 0.5 || std::abs(ky - clip_y_) > 0.5 ||
+                                    std::abs(kw - clip_w_) > 0.5 || std::abs(kh - clip_h_) > 0.5;
+          has_clip_ = clip;
+          clip_x_ = kx;
+          clip_y_ = ky;
+          clip_w_ = kw;
+          clip_h_ = kh;
+          const bool moved = !have_frame_ || clip_changed || std::abs(x - frame_x_) > 0.5 ||
                              std::abs(y - frame_y_) > 0.5 || std::abs(w - frame_w_) > 0.5 ||
                              std::abs(h - frame_h_) > 0.5;
           frame_x_ = x;
@@ -1226,6 +1267,13 @@ class KotvMpvPlugin : public flutter::Plugin {
   double frame_w_ = 0;
   double frame_h_ = 0;
   double frame_dpr_ = 0;
+  bool has_clip_ = false;
+  double clip_x_ = 0;
+  double clip_y_ = 0;
+  double clip_w_ = 0;
+  double clip_h_ = 0;
+  bool region_set_ = false;
+  RECT region_{};
 #ifndef NDEBUG
   Watchdog watchdog_;
 #endif

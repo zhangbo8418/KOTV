@@ -100,6 +100,20 @@ class Win7ChromeShell {
     int mode = 1;
     int color = 0xFFFFFF;
     int size = 25;
+    int pool = 0;
+    double x = 0;
+    double y = 0;
+    int duration_ms = 0;
+    // DanmakuItem.sizeScale
+    double SizeScale() const { return size <= 18 ? 12.0 / 14.0 : (size >= 36 ? 18.0 / 14.0 : 1.0); }
+  };
+  // 在屏弹幕（_Flying）：入轨时定下轨道与时长，之后只按时间推进。
+  struct DanmakuFlying {
+    size_t idx = 0;
+    double activated = 0;
+    int lane = 0;
+    int duration_ms = 0;
+    double text_w = 0;  // 物理像素
   };
 
   enum class HudKind { None, Text, Side, Seek };
@@ -127,6 +141,8 @@ class Win7ChromeShell {
   bool HostRectFromLogical(double l, double t, double w, double h, RECT* out) const;
   RECT HostClient() const;
   RECT VideoArea() const;
+  // 详情内嵌：顶栏下内容区（宿主坐标）。页面滚动时画面和播控都要按它裁掉。
+  bool InlineClip(RECT* out) const;
   void LayoutGesture();
   void LayoutDanmaku();
   void LayoutHud();
@@ -164,6 +180,8 @@ class Win7ChromeShell {
   void PaintSheet(kotv_chrome::Canvas& cv, std::vector<Hit>& hits);
   void PaintPopup(kotv_chrome::Canvas& cv, std::vector<Hit>& hits);
   void PaintDanmaku();
+  void ActivateDanmaku(double media_sec, double view_w, float fs, int weight, kotv_chrome::Canvas& cv);
+  bool DanmakuAllowed(const DanmakuItem& d) const;
   int PaintVolume(kotv_chrome::Canvas& cv, std::vector<Hit>& hits, int right, int cy, int box,
                   bool compact, double slider_w);
   void PaintSlider(kotv_chrome::Canvas& cv, const RECT& area, double frac, double secondary,
@@ -255,6 +273,8 @@ class Win7ChromeShell {
   bool anchor_valid_ = false;
   double anchor_l_ = 0, anchor_t_ = 0, anchor_w_ = 0, anchor_h_ = 0;
   bool surface_valid_ = false;
+  double clip_l_ = 0, clip_t_ = 0, clip_w_ = 0, clip_h_ = 0;
+  bool clip_valid_ = false;
   double surface_l_ = 0, surface_t_ = 0, surface_w_ = 0, surface_h_ = 0;
 
   // 点播
@@ -400,6 +420,20 @@ class Win7ChromeShell {
   bool danmaku_show_positioned_ = true;
   bool danmaku_show_special_ = true;
   std::vector<DanmakuItem> danmaku_items_;
+  std::vector<DanmakuFlying> danmaku_flying_;
+  size_t danmaku_cursor_ = 0;
+  double danmaku_last_sec_ = -1;
+  double danmaku_line_spacing_ = 1.4;
+  std::string danmaku_stroke_mode_ = "outline";
+  std::string danmaku_color_mode_ = "original";
+  int danmaku_rows_top_ = 3;
+  int danmaku_rows_bottom_ = 3;
+  double danmaku_scroll_gap_ = 0.08;
+  double danmaku_stroke_width_ = 0.12;
+  double danmaku_shadow_opacity_ = 0.5;
+  double danmaku_proj_x_ = 0.08;
+  double danmaku_proj_y_ = 0.08;
+  double danmaku_proj_opacity_ = 0.2;
   bool danmaku_timer_ = false;
   bool danmaku_painted_empty_ = false;
 };

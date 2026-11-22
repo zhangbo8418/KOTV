@@ -1132,6 +1132,17 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       showReverse: widget.danmakuShowReverse,
       showPositioned: widget.danmakuShowPositioned,
       showSpecial: widget.danmakuShowSpecial,
+      lineSpacing: widget.danmakuLineSpacing,
+      strokeMode: widget.danmakuStrokeMode,
+      colorMode: widget.danmakuColorMode,
+      rowsTop: widget.danmakuRowsTop,
+      rowsBottom: widget.danmakuRowsBottom,
+      scrollGap: widget.danmakuScrollGap,
+      strokeWidth: widget.danmakuStrokeWidth,
+      shadowOpacity: widget.danmakuShadowOpacity,
+      projectionOffsetX: widget.danmakuProjectionOffsetX,
+      projectionOffsetY: widget.danmakuProjectionOffsetY,
+      projectionOpacity: widget.danmakuProjectionOpacity,
     ));
   }
 

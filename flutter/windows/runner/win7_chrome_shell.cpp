@@ -436,9 +436,15 @@ bool Win7ChromeShell::HostRectFromLogical(double l, double t, double w, double h
   return true;
 }
 
+bool Win7ChromeShell::InlineClip(RECT* out) const {
+  if (mode_ != "vod_inline" || !clip_valid_) return false;
+  return HostRectFromLogical(clip_l_, clip_t_, clip_w_, clip_h_, out);
+}
+
 RECT Win7ChromeShell::VideoArea() const {
   RECT rc = HostClient();
-  if (IsMini()) return rc;
+  // 全屏点播铺满 Flutter 视图；不能沿用内嵌时的 surface。
+  if (IsMini() || mode_ == "vod") return rc;
   RECT s{};
   if (surface_valid_ && HostRectFromLogical(surface_l_, surface_t_, surface_w_, surface_h_, &s)) {
     IntersectRect(&s, &s, &rc);
@@ -506,6 +512,11 @@ void Win7ChromeShell::Render(PanelId id) {
   p.hits.clear();
   Paint(id, cv, p.hits);
   cv.End();
+  RECT clip{};
+  if (id != kSheet && id != kPopup && InlineClip(&clip)) {
+    OffsetRect(&clip, -p.rc.left, -p.rc.top);
+    cv.ClearOutside(clip);
+  }
   POINT pt{p.rc.left, p.rc.top};
   ClientToScreen(host_hwnd_, &pt);
   kotv_chrome::PresentLayered(p.hwnd, cv, pt.x, pt.y);
@@ -663,6 +674,13 @@ void Win7ChromeShell::Layout() {
   if (sheet_kind_.size()) put(kSheet, hc);
   if (popup_open_) put(kPopup, hc);
 
+  RECT clip{};
+  if (InlineClip(&clip)) {
+    for (int i = 0; i < kPanelCount; ++i) {
+      RECT vis{};
+      if (want[i] && i != kSheet && i != kPopup && !IntersectRect(&vis, &rcs[i], &clip)) want[i] = false;
+    }
+  }
   for (int i = 0; i < kPanelCount; ++i) {
     if (i == kHud) continue;
     ShowPanel(static_cast<PanelId>(i), want[i], rcs[i]);
@@ -682,6 +700,8 @@ void Win7ChromeShell::LayoutGesture() {
   if (!gesture_hwnd_) return;
   RECT r = VideoArea();
   if (mode_ == "vod_inline" && !surface_valid_) r = RECT{};
+  RECT clip{};
+  if (InlineClip(&clip) && !IntersectRect(&r, &r, &clip)) r = RECT{};
   if (r.right <= r.left || r.bottom <= r.top) {
     ShowWindow(gesture_hwnd_, SW_HIDE);
     return;
@@ -851,6 +871,19 @@ bool Win7ChromeShell::ApplyUpdate(const ChromeMap& a) {
     surface_h_ = h;
     surface_valid_ = w >= 8 && h >= 8;
   }
+  if (HasKey(a, "clipWidth")) {
+    const double l = GetDouble(a, "clipLeft", 0), t = GetDouble(a, "clipTop", 0);
+    const double w = GetDouble(a, "clipWidth", 0), h = GetDouble(a, "clipHeight", 0);
+    if (std::abs(l - clip_l_) > 0.5 || std::abs(t - clip_t_) > 0.5 || std::abs(w - clip_w_) > 0.5 ||
+        std::abs(h - clip_h_) > 0.5) {
+      layout = true;
+    }
+    clip_l_ = l;
+    clip_t_ = t;
+    clip_w_ = w;
+    clip_h_ = h;
+    clip_valid_ = w >= 1 && h >= 1;
+  }
 
   // 播放态
   if (HasKey(a, "playing")) playing_ = GetBool(a, "playing", playing_);
@@ -1018,6 +1051,17 @@ void Win7ChromeShell::ApplyDanmaku(const ChromeMap& a) {
   if (HasKey(a, "showReverse")) danmaku_show_reverse_ = GetBool(a, "showReverse", danmaku_show_reverse_);
   if (HasKey(a, "showPositioned")) danmaku_show_positioned_ = GetBool(a, "showPositioned", danmaku_show_positioned_);
   if (HasKey(a, "showSpecial")) danmaku_show_special_ = GetBool(a, "showSpecial", danmaku_show_special_);
+  if (HasKey(a, "lineSpacing")) danmaku_line_spacing_ = GetDouble(a, "lineSpacing", danmaku_line_spacing_);
+  if (HasKey(a, "strokeMode")) danmaku_stroke_mode_ = GetString(a, "strokeMode");
+  if (HasKey(a, "colorMode")) danmaku_color_mode_ = GetString(a, "colorMode");
+  if (HasKey(a, "rowsTop")) danmaku_rows_top_ = GetInt(a, "rowsTop", danmaku_rows_top_);
+  if (HasKey(a, "rowsBottom")) danmaku_rows_bottom_ = GetInt(a, "rowsBottom", danmaku_rows_bottom_);
+  if (HasKey(a, "scrollGap")) danmaku_scroll_gap_ = GetDouble(a, "scrollGap", danmaku_scroll_gap_);
+  if (HasKey(a, "strokeWidth")) danmaku_stroke_width_ = GetDouble(a, "strokeWidth", danmaku_stroke_width_);
+  if (HasKey(a, "shadowOpacity")) danmaku_shadow_opacity_ = GetDouble(a, "shadowOpacity", danmaku_shadow_opacity_);
+  if (HasKey(a, "projectionOffsetX")) danmaku_proj_x_ = GetDouble(a, "projectionOffsetX", danmaku_proj_x_);
+  if (HasKey(a, "projectionOffsetY")) danmaku_proj_y_ = GetDouble(a, "projectionOffsetY", danmaku_proj_y_);
+  if (HasKey(a, "projectionOpacity")) danmaku_proj_opacity_ = GetDouble(a, "projectionOpacity", danmaku_proj_opacity_);
   if (HasKey(a, "items")) {
     danmaku_items_.clear();
     for (const auto& line : SplitLines(GetString(a, "items"))) {
@@ -1033,17 +1077,24 @@ void Win7ChromeShell::ApplyDanmaku(const ChromeMap& a) {
         cols.push_back(line.substr(cs, c - cs));
         cs = c + 1;
       }
-      while (cols.size() < 5) cols.emplace_back();
+      while (cols.size() < 9) cols.emplace_back();
       DanmakuItem d;
       d.time = std::strtod(cols[0].c_str(), nullptr);
       d.content = DecodeField(cols[1]);
       d.mode = cols[2].empty() ? 1 : std::atoi(cols[2].c_str());
       d.color = cols[3].empty() ? 0xFFFFFF : std::atoi(cols[3].c_str());
       d.size = cols[4].empty() ? 25 : std::atoi(cols[4].c_str());
+      d.pool = std::atoi(cols[5].c_str());
+      d.x = std::strtod(cols[6].c_str(), nullptr);
+      d.y = std::strtod(cols[7].c_str(), nullptr);
+      d.duration_ms = std::atoi(cols[8].c_str());
       if (!d.content.empty()) danmaku_items_.push_back(std::move(d));
     }
     std::sort(danmaku_items_.begin(), danmaku_items_.end(),
               [](const DanmakuItem& x, const DanmakuItem& y) { return x.time < y.time; });
+    danmaku_flying_.clear();
+    danmaku_cursor_ = 0;
+    danmaku_last_sec_ = -1;
   }
   if (enabled_) LayoutDanmaku();
 }

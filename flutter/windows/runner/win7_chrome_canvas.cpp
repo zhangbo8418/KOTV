@@ -278,6 +278,23 @@ void Canvas::Flush() {
   if (g_) g_->Flush(Gdiplus::FlushIntentionSync);
 }
 
+void Canvas::ClearOutside(const RECT& keep) {
+  if (!bits_) return;
+  const int l = std::clamp(static_cast<int>(keep.left), 0, w_);
+  const int r = std::clamp(static_cast<int>(keep.right), 0, w_);
+  const int t = std::clamp(static_cast<int>(keep.top), 0, h_);
+  const int b = std::clamp(static_cast<int>(keep.bottom), 0, h_);
+  for (int y = 0; y < h_; ++y) {
+    uint32_t* row = bits_ + y * cap_w_;
+    if (y < t || y >= b || r <= l) {
+      std::fill_n(row, w_, 0u);
+      continue;
+    }
+    std::fill_n(row, l, 0u);
+    std::fill_n(row + r, w_ - r, 0u);
+  }
+}
+
 void Canvas::SetClip(const RECT& rc) {
   clip_ = rc;
   has_clip_ = true;

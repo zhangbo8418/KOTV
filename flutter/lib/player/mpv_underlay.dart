@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'kotv_platform.dart';
+import 'kotv_win_chrome.dart';
 
 /// 下发视频 HWND 几何（逻辑像素 + 可选 dpr）。Win7 详情内嵌与 Hole 共用。
 Future<void> kotvMpvUpdateVideoFrame({
@@ -12,6 +13,7 @@ Future<void> kotvMpvUpdateVideoFrame({
   required double w,
   required double h,
   double? dpr,
+  Rect? clip,
 }) async {
   if (w < 8 || h < 8) return;
   try {
@@ -21,9 +23,15 @@ Future<void> kotvMpvUpdateVideoFrame({
       'w': w,
       'h': h,
       if (dpr != null && dpr > 0) 'dpr': dpr,
+      ..._clipArgs(clip),
     });
   } catch (_) {}
 }
+
+/// 可见区（逻辑坐标）：原生用窗口区域裁掉区外部分，画面不缩放。
+Map<String, double> _clipArgs(Rect? clip) => clip == null
+    ? const {}
+    : {'clipX': clip.left, 'clipY': clip.top, 'clipW': clip.width, 'clipH': clip.height};
 
 /// Win7：强制洞矩形（视图逻辑坐标），与 chrome surface/slot 同源，避免自测漂移。
 class KotvMpvForcedGeom extends InheritedWidget {
@@ -126,6 +134,7 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
   Offset? _lastOrigin;
   Size? _lastSize;
   Rect? _lastSent;
+  Rect? _lastClip;
   bool? _lastVisible;
 
   bool get _win7Overlay => kotvUsesWindowsNativeChrome();
@@ -140,6 +149,7 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
   @override
   void dispose() {
     KotvMpvUnderlayHole._resync.removeListener(_sync);
+    if (_win7Overlay) KotvWinChrome.setCovered(false);
     if (_win7Overlay) {
       _setVisible(false);
     }
@@ -167,7 +177,7 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
     } catch (_) {}
   }
 
-  Future<void> _updateFrame(Rect r) async {
+  Future<void> _updateFrame(Rect r, Rect? clip) async {
     try {
       final dpr = MediaQuery.maybeDevicePixelRatioOf(context) ?? 1.0;
       await _ch.invokeMethod('updateFrame', {
@@ -176,6 +186,7 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
         'w': r.width,
         'h': r.height,
         'dpr': dpr,
+        ..._clipArgs(clip),
       });
     } catch (_) {}
   }
@@ -187,26 +198,26 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
 
     // Win7：路由被盖住时藏 HWND，避免挡住对话框。
     final route = ModalRoute.of(context);
+    // 原生播控是置顶分层窗，Flutter 弹窗盖上来时一并挂起。
     if (_win7Overlay && route != null && !route.isCurrent) {
+      KotvWinChrome.setCovered(true);
       await _setVisible(false);
       return;
     }
+    if (_win7Overlay) KotvWinChrome.setCovered(false);
 
     final origin = box.localToGlobal(Offset.zero);
     final size = box.size;
     var hole = origin & size;
+    Rect? clip;
 
     if (_win7Overlay) {
       // 详情内嵌优先用槽/surface 覆盖几何（与 chrome 同源），避免洞自测漂移。
       final forced = KotvMpvForcedGeom.maybeOf(context);
       if (forced != null && forced.width >= 8 && forced.height >= 8) {
         hole = forced;
-      } else {
-        final clip = KotvMpvUnderlayClip.maybeOf(context);
-        if (clip != null) {
-          hole = hole.intersect(clip);
-        }
       }
+      clip = KotvMpvUnderlayClip.maybeOf(context);
     }
 
     final moved = _lastOrigin != origin || _lastSize != size;
@@ -223,9 +234,10 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
         (_lastSent!.top - hole.top).abs() < 0.5 &&
         (_lastSent!.width - hole.width).abs() < 0.5 &&
         (_lastSent!.height - hole.height).abs() < 0.5;
-    if (!sameSent || moved) {
+    if (!sameSent || moved || clip != _lastClip) {
       _lastSent = hole;
-      await _updateFrame(hole);
+      _lastClip = clip;
+      await _updateFrame(hole, clip);
     }
 
     if (_win7Overlay) {
