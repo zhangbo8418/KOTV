@@ -2989,8 +2989,6 @@ LRESULT Win7ChromeShell::OnMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
       }
       return 0;
     }
-    case WM_ERASEBKGND:
-      return 1;
     default:
       return DefWindowProcW(hwnd, msg, wParam, lParam);
   }
