@@ -3236,6 +3236,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           ],
         ),
       ),
+      ),
     );
   }
 
