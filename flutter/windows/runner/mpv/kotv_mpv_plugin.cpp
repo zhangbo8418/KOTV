@@ -562,12 +562,21 @@ class KotvMpvPlugin : public flutter::Plugin {
         const double w = ArgDouble(args, "w", ArgDouble(args, "width"));
         const double h = ArgDouble(args, "h", ArgDouble(args, "height"));
         const double dpr = ArgDouble(args, "dpr", 0);
-        // 只记槽 + 建/挪 HWND。mpv_initialize / loadfile 留给 open，避免堵死 UI 导致底栏出不来。
+        // 只记槽 + 建/挪 HWND。mpv_initialize / loadfile 留给 open。
+        // 几何未变则跳过 MoveWindow/RaiseChrome，避免进度同步时底栏闪。
+        const bool was = have_frame_;
+        const double ox = frame_x_, oy = frame_y_, ow = frame_w_, oh = frame_h_;
         StoreFrame(x, y, w, h, dpr);
         if (have_frame_) {
-          EnsureVideoHwnd();
+          const bool moved = !was || std::abs(ox - frame_x_) > 0.5 ||
+                             std::abs(oy - frame_y_) > 0.5 ||
+                             std::abs(ow - frame_w_) > 0.5 ||
+                             std::abs(oh - frame_h_) > 0.5;
+          if (moved || !hwnd_) {
+            EnsureVideoHwnd();
+            RaiseChromeOverVideo();
+          }
           if (hwnd_ && visible_) ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
-          RaiseChromeOverVideo();
         }
       }
       result->Success();

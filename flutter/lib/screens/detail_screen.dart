@@ -254,6 +254,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   int _winChromeToken = 0;
   /// Win7 pushVodInline 去抖快照（几何/播态/量化进度）。
   String? _lastWinInlineChromeSnap;
+  /// Win7 视频 HWND 几何去抖，避免进度 notify 反复 updateFrame/RaiseChrome。
+  String? _lastWinVideoFrameSig;
   int _epPage = 0;
   /// 焦点停留后切换线路 / 分集区间。
   final KotvFocusArm _detailFocusArm = KotvFocusArm();
@@ -3166,14 +3168,28 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
                       ),
                     );
                   }
+                  // Win7：槽上是原生视频 HWND + 播控 HWND，Flutter 再画中心钮/缓冲/弹幕会在 HWND
+                  // 未显时露出来，或与原生栏抢视觉；解析中只留轻量提示。
+                  if (KotvWinChrome.isNeeded) {
+                    if (!parsing) return const SizedBox.shrink();
+                    return const Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          CircularProgressIndicator(color: Colors.white70),
+                          SizedBox(height: 12),
+                          Text('正在解析播放地址',
+                              style: TextStyle(color: Colors.white70, fontSize: 13)),
+                        ],
+                      ),
+                    );
+                  }
                   return Stack(
                     fit: StackFit.expand,
                     children: [
                       ValueListenableBuilder<List<DanmakuItem>>(
                         valueListenable: _danmakuItems,
                         builder: (context, items, _) {
-                          // Win7：弹幕由进程内原生壳绘制；此处再画会被 mpv HWND 挡住。
-                          if (KotvWinChrome.isNeeded) return const SizedBox.shrink();
                           return DanmakuOverlay(
                           enabled: _danmakuOn,
                           player: pb,
@@ -3774,6 +3790,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     KotvWinChrome.unbind(_winChromeToken);
     _winChromeToken = 0;
     _lastWinInlineChromeSnap = null;
+    _lastWinVideoFrameSig = null;
   }
 
   Map<String, double>? _winRectOf(GlobalKey key) {
@@ -3867,17 +3884,23 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     }
     final surface = _winRectOf(_inlineSurfaceKey);
     final slot = _winRectOf(_videoSlotKey);
-    // 视频几何不依赖底栏锚点：锚点未好也要先推槽，否则 open 挂起后永远等不到 ready。
+    // 视频几何不依赖底栏锚点；几何未变勿反复 updateFrame（会 RaiseChrome 造成底栏闪）。
     final video = slot ?? surface;
     if (video != null) {
-      final dpr = MediaQuery.devicePixelRatioOf(context);
-      unawaited(kotvMpvUpdateVideoFrame(
-        x: video['left']!,
-        y: video['top']!,
-        w: video['width']!,
-        h: video['height']!,
-        dpr: dpr,
-      ));
+      final sig =
+          '${video['left']!.toStringAsFixed(1)}|${video['top']!.toStringAsFixed(1)}|'
+          '${video['width']!.toStringAsFixed(1)}|${video['height']!.toStringAsFixed(1)}';
+      if (sig != _lastWinVideoFrameSig) {
+        _lastWinVideoFrameSig = sig;
+        final dpr = MediaQuery.devicePixelRatioOf(context);
+        unawaited(kotvMpvUpdateVideoFrame(
+          x: video['left']!,
+          y: video['top']!,
+          w: video['width']!,
+          h: video['height']!,
+          dpr: dpr,
+        ));
+      }
     }
     final anchor = _winRectOf(_inlineChromeAnchorKey);
     if (anchor == null) {
@@ -3928,9 +3951,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     final buf = p.buffered.inMilliseconds;
     final progress = dur > 0 ? (pos / dur).clamp(0.0, 1.0) : 0.0;
     final buffered = dur > 0 ? (buf / dur).clamp(0.0, 1.0) : 0.0;
-    // 进度量化到 0.5%，减少 listener 刷屏；几何/播态变化仍立即推。
-    final progQ = (progress * 200).round();
-    final bufQ = (buffered * 200).round();
+    // 进度量化到 1%，减少 listener 刷屏；几何/播态变化仍立即推。
+    final progQ = (progress * 100).round();
+    final bufQ = (buffered * 100).round();
     return [
       anchor['left']?.toStringAsFixed(1),
       anchor['top']?.toStringAsFixed(1),

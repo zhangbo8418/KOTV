@@ -979,10 +979,14 @@ void Win7ChromeShell::LayoutGesture() {
 }
 
 void Win7ChromeShell::InvalidateChrome() {
-  // FALSE：不擦背景，减轻进度刷新时整栏闪烁。
+  // 进度刷新只脏画可见栏；FALSE 不擦背景。内嵌时勿刷隐藏的顶栏等，减少叠层闪烁。
   auto inv = [](HWND h) {
-    if (h) InvalidateRect(h, nullptr, FALSE);
+    if (h && IsWindowVisible(h)) InvalidateRect(h, nullptr, FALSE);
   };
+  if (mode_ == "vod_inline") {
+    inv(bottom_.hwnd);
+    return;
+  }
   inv(top_.hwnd);
   inv(bottom_.hwnd);
   inv(episodes_.hwnd);
