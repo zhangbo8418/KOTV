@@ -110,6 +110,13 @@ class KotvMpvUnderlayHole extends StatefulWidget {
   final bool ready;
   final bool coverUntilReady;
 
+  static final ValueNotifier<int> _resync = ValueNotifier<int>(0);
+
+  /// 祖先只改了摆放位置、洞本身不重建时（如全屏上下滑切集画面跟手），下一帧重新下发几何。
+  static void resyncAll() {
+    WidgetsBinding.instance.addPostFrameCallback((_) => _resync.value++);
+  }
+
   @override
   State<KotvMpvUnderlayHole> createState() => _KotvMpvUnderlayHoleState();
 }
@@ -126,11 +133,13 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
   @override
   void initState() {
     super.initState();
+    KotvMpvUnderlayHole._resync.addListener(_sync);
     WidgetsBinding.instance.addPostFrameCallback((_) => _sync());
   }
 
   @override
   void dispose() {
+    KotvMpvUnderlayHole._resync.removeListener(_sync);
     if (_win7Overlay) {
       _setVisible(false);
     }

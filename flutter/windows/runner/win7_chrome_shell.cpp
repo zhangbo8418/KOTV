@@ -30,6 +30,7 @@ constexpr UINT_PTR kTimerLongPress = 3;
 constexpr UINT_PTR kTimerGestureHold = 4;
 constexpr UINT_PTR kTimerClock = 5;
 constexpr UINT_PTR kTimerDanmaku = 6;
+constexpr UINT_PTR kTimerSpin = 7;
 constexpr DWORD kLongPressMs = 500;     // kLongPressTimeout
 constexpr DWORD kVolumeCollapseMs = 450;
 constexpr DWORD kMiniHideMs = 2000;
@@ -291,7 +292,7 @@ void Win7ChromeShell::SetEnabled(bool enabled) {
   if (gesture_hwnd_) ShowWindow(gesture_hwnd_, SW_HIDE);
   if (danmaku_hwnd_) ShowWindow(danmaku_hwnd_, SW_HIDE);
   if (msg_hwnd_) {
-    for (UINT_PTR t : {kTimerVolume, kTimerMini, kTimerLongPress, kTimerGestureHold, kTimerClock, kTimerDanmaku})
+    for (UINT_PTR t : {kTimerVolume, kTimerMini, kTimerLongPress, kTimerGestureHold, kTimerClock, kTimerDanmaku, kTimerSpin})
       KillTimer(msg_hwnd_, t);
   }
   danmaku_timer_ = false;
@@ -344,7 +345,7 @@ void Win7ChromeShell::EnsureWindows() {
   for (int i = 0; i < kPanelCount; ++i) {
     Panel& p = panels_[i];
     if (p.hwnd) continue;
-    p.click_through = i == kDebug || i == kHud || i == kZap;
+    p.click_through = i == kDebug || i == kHud || i == kZap || i == kBuffer || i == kPeek;
     const DWORD ex = WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | (p.click_through ? WS_EX_TRANSPARENT : 0);
     p.hwnd = CreateWindowExW(ex, kPanelClass, L"", WS_POPUP, 0, 0, 1, 1, root, nullptr, inst, this);
     p.canvas = std::make_unique<Canvas>();
@@ -549,6 +550,7 @@ void Win7ChromeShell::Layout() {
     HideAllPanels();
     if (gesture_hwnd_) ShowWindow(gesture_hwnd_, SW_HIDE);
     if (danmaku_hwnd_) ShowWindow(danmaku_hwnd_, SW_HIDE);
+    if (msg_hwnd_) KillTimer(msg_hwnd_, kTimerSpin);
     UpdateDanmakuTimer();
     return;
   }
@@ -640,6 +642,24 @@ void Win7ChromeShell::Layout() {
       put(kZap, RECT{cx - tw / 2, cy - th / 2, cx - tw / 2 + tw, cy - th / 2 + th});
     }
   }
+  if (!buffer_text_.empty()) {
+    const int d = G(28);
+    const int tw = measure.Measure(buffer_text_, F(15), 600);
+    const int th = static_cast<int>(std::ceil(F(15) * 1.2f));
+    const int w = std::max(d, tw) + G(18) * 2;
+    const int h = G(14) + d + G(10) + th + G(14);
+    const int cx = (box.left + box.right) / 2;
+    const int cy = (box.top + box.bottom) / 2;
+    put(kBuffer, RECT{cx - w / 2, cy - h / 2, cx - w / 2 + w, cy - h / 2 + h});
+  }
+  if (mode_ == "vod") {
+    const int dy = P(swipe_dy_);
+    if (dy > P(8) && !swipe_prev_.empty()) {
+      put(kPeek, RECT{box.left, box.top, box.right, std::min(box.bottom, box.top + dy)});
+    } else if (dy < -P(8) && !swipe_next_.empty()) {
+      put(kPeek, RECT{box.left, std::max(box.top, box.bottom + dy), box.right, box.bottom});
+    }
+  }
   if (sheet_kind_.size()) put(kSheet, hc);
   if (popup_open_) put(kPopup, hc);
 
@@ -653,6 +673,8 @@ void Win7ChromeShell::Layout() {
   if (msg_hwnd_) {
     if (mode_ == "vod" && panels_[kBottom].shown) SetTimer(msg_hwnd_, kTimerClock, 1000, nullptr);
     else KillTimer(msg_hwnd_, kTimerClock);
+    if (panels_[kBuffer].shown) SetTimer(msg_hwnd_, kTimerSpin, 16, nullptr);
+    else KillTimer(msg_hwnd_, kTimerSpin);
   }
 }
 
@@ -925,6 +947,31 @@ bool Win7ChromeShell::ApplyUpdate(const ChromeMap& a) {
   set_wstr(catchup_invert_, "catchupInvert");
   set_wstr(catchup_fail_, "catchupFail");
 
+  if (HasKey(a, "bufferText")) {
+    const auto t = DecodeField(GetString(a, "bufferText"));
+    if (t != buffer_text_) {
+      if (buffer_text_.empty()) spin_tick0_ = GetTickCount();
+      layout = true;
+      buffer_text_ = t;
+    }
+  }
+  if (HasKey(a, "swipeDy")) {
+    const double v = GetDouble(a, "swipeDy", 0);
+    if (v != swipe_dy_) layout = true;
+    swipe_dy_ = v;
+  }
+  if (HasKey(a, "swipePrev")) {
+    const auto t = DecodeField(GetString(a, "swipePrev"));
+    if (t != swipe_prev_) layout = true;
+    swipe_prev_ = t;
+  }
+  if (HasKey(a, "swipeNext")) {
+    const auto t = DecodeField(GetString(a, "swipeNext"));
+    if (t != swipe_next_) layout = true;
+    swipe_next_ = t;
+  }
+  if (HasKey(a, "channelLogo")) channel_logo_ = GetString(a, "channelLogo");
+
   // HUD（由 Dart 状态推导）
   if (HasKey(a, "hudKind")) {
     const std::string k = GetString(a, "hudKind");
@@ -1155,20 +1202,9 @@ LRESULT CALLBACK Win7ChromeShell::HostSubclassProc(HWND hwnd, UINT msg, WPARAM w
       self->Layout();
       return r;
     }
-    case WM_MOUSEWHEEL: {
-      POINT pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
-      HWND target = WindowFromPoint(pt);
-      if (target == self->gesture_hwnd_ && target) {
-        return SendMessageW(target, msg, wp, lp);
-      }
-      const PanelId pid = self->PanelOf(target);
-      if (pid != kPanelCount) {
-        ScreenToClient(target, &pt);
-        self->OnWheel(pid, GET_WHEEL_DELTA_WPARAM(wp), pt.x, pt.y);
-        return 0;
-      }
+    case WM_MOUSEWHEEL:
+      if (self->RouteWheel(wp, lp)) return 0;
       break;
-    }
     case WM_KEYDOWN:
     case WM_SYSKEYDOWN:
     case WM_KEYUP:
@@ -1196,11 +1232,36 @@ LRESULT CALLBACK Win7ChromeShell::HostSubclassProc(HWND hwnd, UINT msg, WPARAM w
 LRESULT CALLBACK Win7ChromeShell::RootSubclassProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR,
                                                    DWORD_PTR data) {
   auto* self = reinterpret_cast<Win7ChromeShell*>(data);
+  if (msg == WM_MOUSEWHEEL && self && self->enabled_ && self->RouteWheel(wp, lp)) return 0;
   const LRESULT r = DefSubclassProc(hwnd, msg, wp, lp);
   if (self && self->enabled_ && (msg == WM_MOVE || msg == WM_WINDOWPOSCHANGED)) {
     self->Layout();
   }
   return r;
+}
+
+// Win7 滚轮发给焦点窗（宿主或根窗），这里按光标位置转给面板或手势层。
+// 画面区上方是 mpv 视频子窗，WindowFromPoint 拿不到手势层，所以全屏/直播按手势层矩形判定。
+bool Win7ChromeShell::RouteWheel(WPARAM wp, LPARAM lp) {
+  if (suspended_ || mode_.empty()) return false;
+  POINT pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+  HWND target = WindowFromPoint(pt);
+  const PanelId pid = PanelOf(target);
+  if (pid != kPanelCount) {
+    ScreenToClient(target, &pt);
+    OnWheel(pid, GET_WHEEL_DELTA_WPARAM(wp), pt.x, pt.y);
+    return true;
+  }
+  if (!gesture_hwnd_ || !IsWindowVisible(gesture_hwnd_)) return false;
+  bool to_gesture = target == gesture_hwnd_;
+  if (!to_gesture && (mode_ == "vod" || mode_ == "live") && sheet_kind_.empty() && !popup_open_) {
+    RECT g{};
+    GetWindowRect(gesture_hwnd_, &g);
+    to_gesture = PtInRect(&g, pt) && target && GetAncestor(target, GA_ROOT) == RootHwnd();
+  }
+  if (!to_gesture) return false;
+  SendMessageW(gesture_hwnd_, WM_MOUSEWHEEL, wp, lp);
+  return true;
 }
 
 Win7ChromeShell::PanelId Win7ChromeShell::PanelOf(HWND hwnd) const {
@@ -1463,6 +1524,9 @@ void Win7ChromeShell::OnTimer(UINT_PTR id) {
       break;
     case kTimerDanmaku:
       PaintDanmaku();
+      break;
+    case kTimerSpin:
+      MarkDirty(kBuffer);
       break;
     default:
       break;

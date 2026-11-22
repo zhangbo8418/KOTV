@@ -82,6 +82,14 @@ class Canvas {
   void Circle(float cx, float cy, float r, Argb fill);
   void Line(float x0, float y0, float x1, float y1, float w, Argb c);
   void VGradient(const RECT& rc, Argb top, Argb bottom);
+  // 圆弧描边（角度单位度，0° 指向 3 点钟，顺时针为正；平头）。
+  void Arc(float cx, float cy, float r, float start_deg, float sweep_deg, float w, Argb c);
+  // 按 BoxFit.contain 画进 rc，并裁成圆角 radius；未缓存返回 false。
+  bool Image(const RECT& rc, const std::string& key, float radius);
+
+  // 图片缓存（Dart 解码后送来的非预乘 RGBA）。
+  static void PutImage(const std::string& key, int w, int h, const uint8_t* rgba, size_t len);
+  static bool HasImage(const std::string& key);
 
   // fmt：DT_LEFT/DT_CENTER/DT_RIGHT | DT_VCENTER | DT_SINGLELINE 等。返回绘制宽度。
   int Text(const RECT& rc, const std::wstring& s, Argb c, float px, int weight, UINT fmt);

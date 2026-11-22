@@ -8,8 +8,10 @@
 // plugin_registrar_manager.h；与 kotv_mpv_plugin 同写法）。
 
 #include <sstream>
+#include <string>
 #include <type_traits>
 #include <variant>
+#include <vector>
 
 namespace {
 
@@ -265,6 +267,28 @@ void KotvWinChrome::HandleMethod(const std::string& method, const EncodableMap* 
     success(EncodableValue(true));
     return;
   }
+  if (method == "setImage") {
+    if (args) {
+      auto get = [&](const char* k) -> const EncodableValue* {
+        const auto it = args->find(EncodableValue(k));
+        return it == args->end() ? nullptr : &it->second;
+      };
+      const auto* key = get("key");
+      const auto* w = get("width");
+      const auto* h = get("height");
+      const auto* px = get("rgba");
+      if (key && w && h && px && std::holds_alternative<std::string>(*key) &&
+          std::holds_alternative<int32_t>(*w) && std::holds_alternative<int32_t>(*h) &&
+          std::holds_alternative<std::vector<uint8_t>>(*px)) {
+        const auto& bytes = std::get<std::vector<uint8_t>>(*px);
+        kotv_chrome::Canvas::PutImage(std::get<std::string>(*key), std::get<int32_t>(*w), std::get<int32_t>(*h),
+                                      bytes.data(), bytes.size());
+        shell_.InvalidateChrome();
+      }
+    }
+    success(EncodableValue(true));
+    return;
+  }
   if (method == "setDanmaku") {
     if (args) shell_.ApplyDanmaku(ToChromeMap(*args));
     success(EncodableValue(true));
@@ -280,11 +304,9 @@ void KotvWinChrome::HandleMethod(const std::string& method, const EncodableMap* 
       if (nested_dm) shell_.ApplyDanmaku(cm);
     }
     if (shell_.enabled()) {
-      if (need_layout) {
-        shell_.Layout();
-      } else {
-        shell_.InvalidateChrome();
-      }
+      // 先全部标脏：布局不变尺寸的面板（如缓冲文案、换台名）也要重画。
+      shell_.InvalidateChrome();
+      if (need_layout) shell_.Layout();
     }
     success(EncodableValue(true));
     return;

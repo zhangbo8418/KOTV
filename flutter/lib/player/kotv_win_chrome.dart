@@ -1,4 +1,5 @@
-import 'dart:async' show unawaited;
+import 'dart:async';
+import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
@@ -7,9 +8,11 @@ import 'package:flutter/services.dart';
 
 import '../theme/kotv_palette.dart';
 import '../theme/layout_scale.dart';
+import '../widgets/kotv_network_image.dart';
 import 'danmaku_layer.dart';
 import 'kotv_platform.dart';
 import 'kotv_playback.dart';
+import 'kotv_traffic.dart';
 
 /// Win7 原生播控通道：推送 / 弹层 / 事件的唯一收拢入口。
 ///
@@ -302,6 +305,77 @@ class KotvWinChrome {
     } catch (_) {}
   }
 
+  /// 原生壳挂起（面板、手势层、弹幕全藏）期间跑 Flutter 弹窗；弹窗路由盖住时 mpv 洞也会自己藏 HWND。
+  static Future<T> withSuspended<T>(Future<T> Function() body) async {
+    if (!isNeeded) return body();
+    await update({'suspended': true});
+    try {
+      return await body();
+    } finally {
+      await update({'suspended': false});
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // 网络台标：Dart 拉取解码成 RGBA 交给原生缓存（同 [KotvNetworkImage] 的请求与 dataURI 规则）
+  // ---------------------------------------------------------------------------
+
+  /// 台标解码完成时自增；页面监听后重推一次。
+  static final ValueNotifier<int> imagesReady = ValueNotifier<int>(0);
+  static final Map<String, bool> _imageState = {};
+
+  /// `_LiveChannelLogo._httpLogo`
+  static bool isNetworkLogo(String logo) {
+    final s = logo.trim();
+    return s.startsWith('http://') || s.startsWith('https://') || s.startsWith('proxy://') || s.startsWith('data:');
+  }
+
+  /// 网络台标在原生缓存里的 key；非网络台标或加载失败返回空串（原生画首字色块），加载中也返回 key（原生留空）。
+  static String logoKey(String logo, {required double width, required double dpr}) {
+    final raw = logo.trim();
+    if (!isNeeded || !isNetworkLogo(raw)) return '';
+    final tw = (width * dpr).ceil().clamp(1, 512);
+    final key = '${raw.hashCode.toRadixString(16)}_${raw.length}_$tw';
+    final st = _imageState[key];
+    if (st == false) return '';
+    if (st == null) {
+      _imageState[key] = true;
+      unawaited(_loadImage(key, raw, tw));
+    }
+    return key;
+  }
+
+  static Future<void> _loadImage(String key, String raw, int targetWidth) async {
+    ui.Codec? codec;
+    ui.Image? image;
+    try {
+      var bytes = kotvDecodeDataImage(raw);
+      if (bytes == null) {
+        final req = kotvResolveImageRequest(raw);
+        if (!(req.url.startsWith('http://') || req.url.startsWith('https://'))) {
+          throw StateError('empty pic');
+        }
+        bytes = await kotvFetchImageBytes(req.url, req.headers);
+      }
+      codec = await ui.instantiateImageCodec(bytes, targetWidth: targetWidth);
+      image = (await codec.getNextFrame()).image;
+      final data = await image.toByteData(format: ui.ImageByteFormat.rawStraightRgba);
+      if (data == null) throw StateError('decode');
+      await _ch.invokeMethod('setImage', {
+        'key': key,
+        'width': image.width,
+        'height': image.height,
+        'rgba': data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes),
+      });
+    } catch (_) {
+      _imageState[key] = false;
+    } finally {
+      image?.dispose();
+      codec?.dispose();
+    }
+    imagesReady.value++;
+  }
+
   static Future<void> showSheet({
     required String kind,
     String title = '',
@@ -495,6 +569,13 @@ class KotvWinChrome {
         row(id: 'danmakuLoad', label: '加载弹幕', kind: 'switch', on: flag('danmakuLoad')),
         row(id: 'danmakuAuto', label: '自动搜索弹幕', kind: 'switch', on: flag('danmakuAuto')),
         row(id: 'danmakuSpiderFirst', label: '片源弹幕优先', kind: 'switch', on: flag('danmakuSpiderFirst')),
+        row(
+          id: 'danmakuApi',
+          label: '弹幕 API',
+          kind: 'link',
+          chevron: true,
+          trailing: g('danmakuApi').isEmpty ? '未配置' : '已配置',
+        ),
         slider(id: 'danmakuSize', label: '字号', value: n('danmakuSize', 18), min: 12, max: 48, divisions: 36),
         slider(id: 'danmakuOpacity', label: '透明度', value: n('danmakuOpacity', 85), min: 15, max: 100, divisions: 17, format: '%.0f%%'),
         slider(id: 'danmakuRows', label: '行数', value: n('danmakuRows', 6), min: 1, max: 16, divisions: 15),
@@ -849,5 +930,73 @@ class KotvWinChrome {
     if (e['up'] == true) return KeyUpEvent(physicalKey: physical, logicalKey: logical, timeStamp: time);
     if (e['repeat'] == true) return KeyRepeatEvent(physicalKey: physical, logicalKey: logical, timeStamp: time);
     return KeyDownEvent(physicalKey: physical, logicalKey: logical, timeStamp: time);
+  }
+}
+
+/// 原生壳的 [KotvBufferingOverlay]：同样的显隐条件与每秒测速，文案推给原生 `bufferText`（空串即隐藏）。
+class KotvWinBufferText {
+  KotvWinBufferText(this.onChanged);
+
+  /// 网速变化或缓冲结束时回调，页面据此重推。
+  final VoidCallback onChanged;
+  Timer? _tick;
+  int _speedBps = 0;
+  bool _armed = false;
+  bool _disposed = false;
+  KotvPlayback? _player;
+  bool _force = false;
+
+  bool get _want => _force || (_player?.stalling ?? false);
+
+  String label(KotvPlayback? player, {bool force = false, String? forceText}) {
+    _player = player;
+    _force = force;
+    final want = _want;
+    _arm(want);
+    if (!want) return '';
+    final forced = forceText?.trim();
+    if (forced != null && forced.isNotEmpty) return forced;
+    return '缓冲中  ${kotvFormatSpeed(_speedBps, showZero: true)}';
+  }
+
+  void _arm(bool on) {
+    if (_disposed) return;
+    if (on) {
+      if (!_armed) {
+        KotvTraffic.reset();
+        _armed = true;
+        _speedBps = 0;
+        unawaited(_poll());
+      }
+      _tick ??= Timer.periodic(const Duration(milliseconds: 1000), (_) {
+        if (!_want) {
+          _arm(false);
+          onChanged();
+          return;
+        }
+        unawaited(_poll());
+      });
+    } else {
+      _tick?.cancel();
+      _tick = null;
+      if (_armed) {
+        KotvTraffic.reset();
+        _armed = false;
+      }
+    }
+  }
+
+  Future<void> _poll() async {
+    final v = await KotvTraffic.sampleBps(playerFallbackBps: _player?.networkSpeedBps ?? 0);
+    if (_disposed || !_armed) return;
+    if (v != _speedBps) {
+      _speedBps = v;
+      onChanged();
+    }
+  }
+
+  void dispose() {
+    _arm(false);
+    _disposed = true;
   }
 }

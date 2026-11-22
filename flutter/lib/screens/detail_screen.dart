@@ -259,6 +259,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   String? _lastWinVideoFrameSig;
   /// Win7 原生手势层单击延迟（等双击判定）与按下点。
   Timer? _winInlineTapTimer;
+  late final KotvWinBufferText _winBuffer = KotvWinBufferText(() {
+    if (mounted) _syncWinInlineChrome();
+  });
   Offset? _winInlineDownAt;
   int _epPage = 0;
   /// 焦点停留后切换线路 / 分集区间。
@@ -777,6 +780,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _routeTitle = widget.title;
     _routeMark = widget.mark;
     WidgetsBinding.instance.addObserver(this);
+    // Win7：滑动切集时画面层只换 Positioned.top，mpv 子窗要跟着重新摆。
+    if (KotvWinChrome.isNeeded) _fsSwipeDy.addListener(KotvMpvUnderlayHole.resyncAll);
     _api = ref.read(apiProvider);
     _active = this;
     detailImmersiveBack = _handleImmersiveBack;
@@ -1448,6 +1453,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _stopBtProgressPoll();
     _danmakuItems.dispose();
     _fsSwipeDy.dispose();
+    _winBuffer.dispose();
     _detailFocusArm.dispose();
     // 正常路径已在 [_stopHard] 里 await release+dispose，引擎引用已清空。
     // 异常路径：先调度 release（清 mdk），再摘引用；与 [_stopHard] 同序意图。
@@ -2266,11 +2272,14 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     final d = _detail;
     if (d == null) return;
     final episode = (_epIdx >= 0 && _epIdx < _eps.length) ? _eps[_epIdx].name : '';
-    final picked = await showKotvDanmakuSearchDialog(
-      context,
-      api: ref.read(apiProvider),
-      name: d.name,
-      episode: episode,
+    // Win7：原生播控挂起，Flutter 弹窗才不会被分层播控窗盖住。
+    final picked = await KotvWinChrome.withSuspended(
+      () => showKotvDanmakuSearchDialog(
+        context,
+        api: ref.read(apiProvider),
+        name: d.name,
+        episode: episode,
+      ),
     );
     if (picked == null || !mounted) return;
     var idx = _danmakuSources.indexWhere((s) => s.url == picked.url);
@@ -3700,7 +3709,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             ExcludeFocus(
               child: _buildSharedVideo(fit: _aspect.fit),
             ),
-          if (_playUrl.isNotEmpty && !stableSlot)
+          if (_playUrl.isNotEmpty && !stableSlot && !KotvWinChrome.isNeeded)
             KotvBufferingOverlay(
               player: _playback,
               force: _status.contains('解析') ||
@@ -3807,6 +3816,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     if (!KotvWinChrome.isNeeded) return;
     _winInlineTapTimer?.cancel();
     _winInlineTapTimer = null;
+    _winBuffer.label(null);
     if (_winChromeToken == 0) return;
     KotvWinChrome.unbind(_winChromeToken);
     _winChromeToken = 0;
@@ -3913,6 +3923,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     // 进度量化到 0.25s，减少 listener 刷屏；几何/播态变化仍立即推。
     base['positionSec'] = ((base['positionSec'] as double) * 4).roundToDouble() / 4;
     base['bufferedSec'] = ((base['bufferedSec'] as double) * 4).roundToDouble() / 4;
+    // 同内嵌 KotvBufferingOverlay(force: 解析中, forceText: '正在解析播放地址')。
+    final resolving = _status.contains('解析') || _status.contains('嗅探') || _status.contains('换集中');
+    base['bufferText'] = _winBuffer.label(
+      _existingPlayback,
+      force: resolving,
+      forceText: resolving ? '正在解析播放地址' : null,
+    );
     if (_miniDesktop) {
       return {...base, 'mode': 'mini', 'miniKind': 'vod', 'bottom': true, 'centerVisible': false};
     }

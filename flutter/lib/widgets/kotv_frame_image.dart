@@ -38,6 +38,10 @@ class KotvFrameImage extends StatefulWidget {
   State<KotvFrameImage> createState() => _KotvFrameImageState();
 }
 
+/// 与 [KotvFrameImage] 同一 http.Client 拉图（Win7 原生台标用）。
+Future<Uint8List> kotvFetchImageBytes(String url, Map<String, String> headers) =>
+    _KotvFrameImageState._fetch(url, headers);
+
 class _KotvFrameImageState extends State<KotvFrameImage> {
   static final http.Client _client = http.Client();
 

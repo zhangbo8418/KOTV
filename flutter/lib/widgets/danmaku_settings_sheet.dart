@@ -10,6 +10,39 @@ import 'dialogs.dart';
 import 'kotv_tv_text_field.dart';
 import '../player/kotv_playback.dart';
 
+/// 弹幕设置里的单行文本输入（弹幕 API）；取消返回 null。
+Future<String?> showKotvDanmakuTextPrompt(
+  BuildContext context, {
+  required String title,
+  required String hint,
+  required String current,
+}) async {
+  final c = TextEditingController(text: current);
+  final pal = KotvPalette.of(context);
+  final v = await showDialog<String>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      backgroundColor: pal.dialogBg,
+      title: Text(title, style: TextStyle(color: pal.fg)),
+      content: KotvTvTextField(
+        controller: c,
+        autofocus: true,
+        style: TextStyle(color: pal.fg),
+        decoration: InputDecoration(
+          hintText: hint,
+          hintStyle: TextStyle(color: pal.muted),
+        ),
+      ),
+      actions: [
+        KotvFocusAction(label: '取消', color: pal.muted, onPressed: () => Navigator.pop(ctx)),
+        KotvFocusAction(label: '确定', color: pal.fg, onPressed: () => Navigator.pop(ctx, c.text.trim())),
+      ],
+    ),
+  );
+  c.dispose();
+  return v;
+}
+
 /// 弹幕完整设置（设置页与播放页「更多」共用）。
 Future<void> showKotvDanmakuSettingsSheet({
   required BuildContext context,
@@ -66,29 +99,7 @@ class _DanmakuSettingsBodyState extends State<_DanmakuSettingsBody> {
   }
 
   Future<void> _promptText(String title, String hint, String current) async {
-    final c = TextEditingController(text: current);
-    final pal = KotvPalette.of(context);
-    final v = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: pal.dialogBg,
-        title: Text(title, style: TextStyle(color: pal.fg)),
-        content: KotvTvTextField(
-          controller: c,
-          autofocus: true,
-          style: TextStyle(color: pal.fg),
-          decoration: InputDecoration(
-            hintText: hint,
-            hintStyle: TextStyle(color: pal.muted),
-          ),
-        ),
-        actions: [
-          KotvFocusAction(label: '取消', color: pal.muted, onPressed: () => Navigator.pop(ctx)),
-          KotvFocusAction(label: '确定', color: pal.fg, onPressed: () => Navigator.pop(ctx, c.text.trim())),
-        ],
-      ),
-    );
-    c.dispose();
+    final v = await showKotvDanmakuTextPrompt(context, title: title, hint: hint, current: current);
     if (v != null) await _set('danmakuApi', v);
   }
 

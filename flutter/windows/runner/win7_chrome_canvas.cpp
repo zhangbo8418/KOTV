@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
+#include <memory>
+#include <string>
 #include <vector>
 
 #include <gdiplus.h>
@@ -127,6 +129,12 @@ struct Scratch {
 Scratch& Mask() {
   static Scratch s;
   return s;
+}
+
+// 进程退出时 GDI+ 可能已先关闭，缓存故意不析构。
+std::map<std::string, std::unique_ptr<Gdiplus::Bitmap>>& Images() {
+  static auto* m = new std::map<std::string, std::unique_ptr<Gdiplus::Bitmap>>();
+  return *m;
 }
 
 Gdiplus::Color ToColor(Argb c) {
@@ -334,6 +342,64 @@ void Canvas::VGradient(const RECT& rc, Argb top, Argb bottom) {
   g_->FillRectangle(&b, static_cast<INT>(rc.left), static_cast<INT>(rc.top),
                     static_cast<INT>(rc.right - rc.left), static_cast<INT>(rc.bottom - rc.top));
   g_->SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+}
+
+void Canvas::Arc(float cx, float cy, float r, float start_deg, float sweep_deg, float w, Argb c) {
+  if (!g_ || (c >> 24) == 0 || r <= 0 || sweep_deg == 0) return;
+  Gdiplus::Pen pen(ToColor(c), w);
+  g_->DrawArc(&pen, cx - r, cy - r, r * 2, r * 2, start_deg, sweep_deg);
+}
+
+bool Canvas::HasImage(const std::string& key) {
+  auto& m = Images();
+  return m.find(key) != m.end();
+}
+
+void Canvas::PutImage(const std::string& key, int w, int h, const uint8_t* rgba, size_t len) {
+  if (key.empty() || w <= 0 || h <= 0 || !rgba || len < static_cast<size_t>(w) * h * 4) return;
+  auto bmp = std::make_unique<Gdiplus::Bitmap>(w, h, PixelFormat32bppPARGB);
+  Gdiplus::Rect all(0, 0, w, h);
+  Gdiplus::BitmapData data{};
+  if (bmp->LockBits(&all, Gdiplus::ImageLockModeWrite, PixelFormat32bppPARGB, &data) != Gdiplus::Ok) return;
+  for (int y = 0; y < h; ++y) {
+    auto* row = reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(data.Scan0) + y * data.Stride);
+    const uint8_t* s = rgba + static_cast<size_t>(y) * w * 4;
+    for (int x = 0; x < w; ++x, s += 4) {
+      const uint32_t a = s[3];
+      row[x] = (a << 24) | ((s[0] * a / 255) << 16) | ((s[1] * a / 255) << 8) | (s[2] * a / 255);
+    }
+  }
+  bmp->UnlockBits(&data);
+  auto& m = Images();
+  // 台标一般几十到几百张；超量时整体清掉重建，避免常驻内存无界增长。
+  if (m.size() > 512) m.clear();
+  m[key] = std::move(bmp);
+}
+
+bool Canvas::Image(const RECT& rc, const std::string& key, float radius) {
+  if (!g_) return false;
+  auto& m = Images();
+  auto it = m.find(key);
+  if (it == m.end() || !it->second) return false;
+  Gdiplus::Bitmap* bmp = it->second.get();
+  const float bw = static_cast<float>(bmp->GetWidth());
+  const float bh = static_cast<float>(bmp->GetHeight());
+  const float rw = static_cast<float>(rc.right - rc.left);
+  const float rh = static_cast<float>(rc.bottom - rc.top);
+  if (bw <= 0 || bh <= 0 || rw <= 0 || rh <= 0) return false;
+  const float s = std::min(rw / bw, rh / bh);
+  const float dw = bw * s;
+  const float dh = bh * s;
+  const Gdiplus::RectF dst(rc.left + (rw - dw) / 2, rc.top + (rh - dh) / 2, dw, dh);
+  Gdiplus::GraphicsPath path;
+  AddRound(path, Gdiplus::RectF(static_cast<float>(rc.left), static_cast<float>(rc.top), rw, rh), radius);
+  Gdiplus::Region old;
+  g_->GetClip(&old);
+  g_->SetClip(&path, Gdiplus::CombineModeIntersect);
+  g_->SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
+  g_->DrawImage(bmp, dst);
+  g_->SetClip(&old);
+  return true;
 }
 
 void Canvas::Composite(const RECT& dst, const uint32_t* mask, int mask_stride, Argb c) {

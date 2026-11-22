@@ -71,6 +71,8 @@ class Win7ChromeShell {
     kDebug,
     kHud,
     kZap,
+    kBuffer,
+    kPeek,
     kSheet,
     kPopup,
     kPanelCount
@@ -155,6 +157,10 @@ class Win7ChromeShell {
   void PaintDebug(kotv_chrome::Canvas& cv);
   void PaintHud(kotv_chrome::Canvas& cv);
   void PaintZap(kotv_chrome::Canvas& cv);
+  void PaintBuffer(kotv_chrome::Canvas& cv);
+  void PaintPeek(kotv_chrome::Canvas& cv);
+  void PaintLogo(kotv_chrome::Canvas& cv, const RECT& rc, const std::string& key, const std::wstring& name,
+                 const std::wstring& letter_hint);
   void PaintSheet(kotv_chrome::Canvas& cv, std::vector<Hit>& hits);
   void PaintPopup(kotv_chrome::Canvas& cv, std::vector<Hit>& hits);
   void PaintDanmaku();
@@ -191,6 +197,7 @@ class Win7ChromeShell {
   void OnSheetTap(const Hit& hit, int x);
   void OnWheel(PanelId pid, int delta, int x, int y);
   bool HandleKey(UINT msg, WPARAM wp, LPARAM lp);
+  bool RouteWheel(WPARAM wp, LPARAM lp);
   void EmitPointer(const char* phase, int host_x, int host_y, double dx = 0, double dy = 0,
                    bool shift = false);
   void Emit(ChromeMap map);
@@ -322,6 +329,17 @@ class Win7ChromeShell {
   std::wstring catchup_invert_;
   std::wstring catchup_fail_;
   bool fullscreen_active_ = false;
+
+  // 缓冲浮层（KotvBufferingOverlay）：文案非空即显示，转圈按 tick 动画。
+  std::wstring buffer_text_;
+  DWORD spin_tick0_ = 0;
+
+  // 全屏上下滑切集：画面跟手位移（逻辑像素）与上一集 / 下一集提示页
+  double swipe_dy_ = 0;
+  std::wstring swipe_prev_;
+  std::wstring swipe_next_;
+
+  std::string channel_logo_;
 
   // 迷你
   bool mini_hover_ = false;

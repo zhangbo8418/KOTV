@@ -24,6 +24,7 @@ import '../theme/kotv_theme.dart';
 import '../theme/layout_scale.dart';
 import '../util/pick_subtitle_file.dart';
 import '../widgets/buffering_overlay.dart';
+import '../widgets/danmaku_settings_sheet.dart';
 import '../widgets/vod_player_chrome.dart';
 import 'shell.dart';
 
@@ -345,6 +346,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   int _winSleepMinutes = 0;
   Timer? _winSleepTimer;
   Timer? _winEpHideTimer;
+  late final KotvWinBufferText _winBuffer = KotvWinBufferText(_syncWinChrome);
   bool _winStableVolume = false;
   bool _winLoopSkip = true;
   bool _winDebugHud = false;
@@ -895,6 +897,10 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
         if (i != null) widget.onDanmakuSourceChanged?.call(i);
         return;
       case 'danmaku':
+        if (id == 'danmakuApi') {
+          await _winPromptDanmakuApi();
+          return;
+        }
         await KotvWinChrome.showDanmakuChoice(id, _winSettings);
         return;
       case 'more':
@@ -906,6 +912,26 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       widget.onDanmakuSettingsChanged?.call();
       await KotvWinChrome.showDanmakuSettingsSheet(await _winLoadSettings());
     }
+  }
+
+  /// 弹幕设置「弹幕 API」：原生壳挂起后弹 Flutter 输入框，完成后回到弹幕设置。
+  Future<void> _winPromptDanmakuApi() async {
+    await KotvWinChrome.hideSheet();
+    if (!mounted) return;
+    final v = await KotvWinChrome.withSuspended(
+      () => showKotvDanmakuTextPrompt(
+        context,
+        title: '弹幕 API',
+        hint: 'https://…?n={name}&e={episode}',
+        current: (_winSettings['danmakuApi'] ?? '').trim(),
+      ),
+    );
+    if (!mounted) return;
+    if (v != null) {
+      await _winPersist('danmakuApi', v);
+      widget.onDanmakuSettingsChanged?.call();
+    }
+    await KotvWinChrome.showDanmakuSettingsSheet(await _winLoadSettings());
   }
 
   /// [VodFullscreenChrome] `_showMore` 各行。
@@ -1084,6 +1110,10 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       'moreItems': _winMoreItems(),
       'debugHud': _winDebugHud,
       if (_winDebugHud) 'debugText': _winDebugText(),
+      'bufferText': widget.playUrl.isNotEmpty ? _winBuffer.label(pb) : '',
+      'swipeDy': _dragDy,
+      'swipePrev': _epIdx > 0 && _epIdx <= widget.episodes.length ? '上一集 · ${widget.episodes[_epIdx - 1]}' : '',
+      'swipeNext': _epIdx + 1 < widget.episodes.length ? '下一集 · ${widget.episodes[_epIdx + 1]}' : '',
     }));
     unawaited(KotvWinChrome.setDanmaku(
       enabled: _danmakuOn,
@@ -1140,6 +1170,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     widget.playback.removeListener(_onPlaybackChanged);
     _winSleepTimer?.cancel();
     _winEpHideTimer?.cancel();
+    _winBuffer.dispose();
     if (KotvWinChrome.isNeeded) {
       KotvWinChrome.unbind(_winChromeToken);
       _winChromeToken = 0;

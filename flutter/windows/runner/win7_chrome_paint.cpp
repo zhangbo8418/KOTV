@@ -165,6 +165,8 @@ void Win7ChromeShell::Paint(PanelId id, Canvas& cv, std::vector<Hit>& hits) {
     case kDebug: PaintDebug(cv); break;
     case kHud: PaintHud(cv); break;
     case kZap: PaintZap(cv); break;
+    case kBuffer: PaintBuffer(cv); break;
+    case kPeek: PaintPeek(cv); break;
     case kSheet: PaintSheet(cv, hits); break;
     case kPopup: PaintPopup(cv, hits); break;
     default: break;
@@ -542,6 +544,91 @@ void Win7ChromeShell::PaintZap(Canvas& cv) {
   cv.Text(R(0, 0, W, H), live_error_, 0xB3FFFFFF, F(14), 400, kCenterFmt);
 }
 
+namespace {
+
+// Curves.fastOutSlowIn = Cubic(0.4, 0.0, 0.2, 1.0)
+double FastOutSlowIn(double t) {
+  if (t <= 0) return 0;
+  if (t >= 1) return 1;
+  auto bez = [](double a, double b, double m) { return 3 * a * (1 - m) * (1 - m) * m + 3 * b * (1 - m) * m * m + m * m * m; };
+  double lo = 0, hi = 1;
+  for (int i = 0; i < 24; ++i) {
+    const double mid = (lo + hi) / 2;
+    if (bez(0.4, 0.2, mid) < t) lo = mid;
+    else hi = mid;
+  }
+  return bez(0.0, 1.0, (lo + hi) / 2);
+}
+
+double IntervalCurve(double t, double begin, double end) {
+  return FastOutSlowIn(std::clamp((t - begin) / (end - begin), 0.0, 1.0));
+}
+
+}  // namespace
+
+// KotvBufferingOverlay：#111111 圆角 20 卡片，28 的 CircularProgressIndicator(#E53955, 3) + 15 号粗体文案。
+void Win7ChromeShell::PaintBuffer(Canvas& cv) {
+  const int W = cv.width();
+  const int H = cv.height();
+  cv.RoundRect(R(0, 0, W, H), static_cast<float>(G(20)), 0xFF111111);
+  const int d = G(28);
+  const float stroke = static_cast<float>(3 * dpr_);
+  const float cx = W / 2.0f;
+  const float cy = G(14) + d / 2.0f;
+  const float r = (d - stroke) / 2.0f;
+  // 同 _CircularProgressIndicatorState 不定进度：1333ms 一段头尾追赶，2222ms 一圈旋转。
+  const double ms = static_cast<double>(GetTickCount() - spin_tick0_);
+  const double s = std::fmod(ms, 1333.0) / 1333.0;
+  const double rot = std::fmod(ms, 2222.0) / 2222.0;
+  const double head = IntervalCurve(s, 0.0, 0.5);
+  const double tail = IntervalCurve(s, 0.5, 1.0);
+  const double kPi = 3.14159265358979323846;
+  const double start = -kPi / 2 + tail * 1.5 * kPi + rot * 4 * kPi + s * 0.5 * kPi;
+  const double sweep = std::max(head * 1.5 * kPi - tail * 1.5 * kPi, 0.001);
+  cv.Arc(cx, cy, r, static_cast<float>(start * 180 / kPi), static_cast<float>(sweep * 180 / kPi), stroke, 0xFFE53955);
+  const int ty = G(14) + d + G(10);
+  cv.Text(R(0, ty, W, H - G(14)), buffer_text_, kWhite, F(15), 600, DT_CENTER | DT_TOP | DT_SINGLELINE);
+}
+
+// 全屏上下滑切集露出的「上一集 / 下一集」黑页（_swipePeek：18 号粗体，白 0.88，距边 48）。
+void Win7ChromeShell::PaintPeek(Canvas& cv) {
+  const int W = cv.width();
+  const int H = cv.height();
+  cv.Fill(R(0, 0, W, H), 0xFF000000);
+  const bool prev = swipe_dy_ > 0;
+  const std::wstring& label = prev ? swipe_prev_ : swipe_next_;
+  const float fs = F(18);
+  const int lh = cv.LineHeight(fs, 700);
+  const int y = prev ? H - P(48) - lh : P(48);
+  cv.Text(R(P(24), y, W - P(24), y + lh), label, WithOpacity(kWhite, 0.88), fs, 700,
+          DT_CENTER | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS);
+}
+
+// _LiveChannelLogo：网络台标按 contain 画进圆角 4 方框；没有台标或加载失败按首字取色块。
+void Win7ChromeShell::PaintLogo(Canvas& cv, const RECT& rc, const std::string& key, const std::wstring& name,
+                                 const std::wstring& letter_hint) {
+  // 网络台标：解码中留空，同 KotvFrameImage 未出帧前不画。
+  if (!key.empty()) {
+    cv.Image(rc, key, static_cast<float>(P(4)));
+    return;
+  }
+  std::wstring letter = letter_hint;
+  if (letter.empty()) {
+    std::wstring s = name;
+    while (!s.empty() && s.front() == L' ') s.erase(s.begin());
+    if (!s.empty() && s.front() == L'\x2605') s.erase(s.begin());
+    while (!s.empty() && s.front() == L' ') s.erase(s.begin());
+    letter = s.empty() ? L"！" : s.substr(0, (s.size() > 1 && IS_HIGH_SURROGATE(s[0])) ? 2 : 1);
+  }
+  static const Argb kLogo[] = {0xFFE53935, 0xFFD81B60, 0xFF8E24AA, 0xFF5E35B1, 0xFF3949AB, 0xFF1E88E5,
+                               0xFF039BE5, 0xFF00ACC1, 0xFF00897B, 0xFF43A047, 0xFF7CB342, 0xFFC0CA33,
+                               0xFFFB8C00, 0xFFF4511E, 0xFF6D4C41, 0xFF546E7A};
+  unsigned int hcode = 0;
+  for (wchar_t wc : letter) hcode = 31 * hcode + static_cast<unsigned int>(wc);
+  cv.RoundRect(rc, static_cast<float>(P(4)), kLogo[hcode % 16]);
+  cv.Text(rc, letter, kWhite, F(12), 600, kCenterFmt);
+}
+
 // ---------------------------------------------------------------------------
 // 直播
 // ---------------------------------------------------------------------------
@@ -670,9 +757,6 @@ void Win7ChromeShell::PaintLiveLeft(Canvas& cv, std::vector<Hit>& hits) {
     const RECT col = R(x, top, x + c.channel, bottom);
     hits.push_back(Hit{"col:channel", col, -1});
     cv.SetClip(col);
-    static const Argb kLogo[] = {0xFFE53935, 0xFFD81B60, 0xFF8E24AA, 0xFF5E35B1, 0xFF3949AB, 0xFF1E88E5,
-                                 0xFF039BE5, 0xFF00ACC1, 0xFF00897B, 0xFF43A047, 0xFF7CB342, 0xFFC0CA33,
-                                 0xFFFB8C00, 0xFFF4511E, 0xFF6D4C41, 0xFF546E7A};
     for (int i = 0; i < static_cast<int>(channels_.size()); ++i) {
       const int iy = top + i * stride - channel_scroll_;
       if (iy + ch_h < top || iy > bottom) continue;
@@ -684,19 +768,8 @@ void Win7ChromeShell::PaintLiveLeft(Canvas& cv, std::vector<Hit>& hits) {
       cv.Text(R(cx, rc.top, cx + num_w, rc.bottom), ch.trailing, pal_muted_, F(land_ ? 12 : 16), 400,
               DT_LEFT | DT_VCENTER | DT_SINGLELINE);
       cx += num_w + G(land_ ? 4 : 12);
-      std::wstring letter = ch.sub;
-      if (letter.empty()) {
-        std::wstring s = ch.label;
-        while (!s.empty() && s.front() == L' ') s.erase(s.begin());
-        if (!s.empty() && s.front() == L'\x2605') s.erase(s.begin());
-        while (!s.empty() && s.front() == L' ') s.erase(s.begin());
-        letter = s.empty() ? L"！" : s.substr(0, (s.size() > 1 && IS_HIGH_SURROGATE(s[0])) ? 2 : 1);
-      }
-      unsigned int hcode = 0;
-      for (wchar_t wc : letter) hcode = 31 * hcode + static_cast<unsigned int>(wc);
       const RECT logo = R(cx, (rc.top + rc.bottom) / 2 - logo_h / 2, cx + logo_w, (rc.top + rc.bottom) / 2 - logo_h / 2 + logo_h);
-      cv.RoundRect(logo, static_cast<float>(P(4)), kLogo[hcode % 16]);
-      cv.Text(logo, letter, kWhite, F(12), 600, kCenterFmt);
+      PaintLogo(cv, logo, ch.icon.rfind("img:", 0) == 0 ? ch.icon.substr(4) : std::string(), ch.label, ch.sub);
       cx += logo_w + G(land_ ? 6 : 12);
       cv.Text(R(cx, rc.top, rc.right - G(6), rc.bottom), ch.label, pal_fg_, F(land_ ? 12 : 15), sel ? 700 : 500, kLeft);
       RECT hit = rc;
@@ -903,18 +976,7 @@ void Win7ChromeShell::PaintChannel(Canvas& cv) {
   cv.Text(R(x, 0, x + num_w, H), channel_no_, pal_muted_, F(20), 400, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
   x += num_w + P(12);
   const RECT logo = R(x, H / 2 - P(18), x + P(48), H / 2 + P(18));
-  std::wstring s = channel_name_;
-  while (!s.empty() && s.front() == L' ') s.erase(s.begin());
-  if (!s.empty() && s.front() == L'\x2605') s.erase(s.begin());
-  while (!s.empty() && s.front() == L' ') s.erase(s.begin());
-  const std::wstring letter = s.empty() ? L"！" : s.substr(0, (s.size() > 1 && IS_HIGH_SURROGATE(s[0])) ? 2 : 1);
-  static const Argb kLogo[] = {0xFFE53935, 0xFFD81B60, 0xFF8E24AA, 0xFF5E35B1, 0xFF3949AB, 0xFF1E88E5,
-                               0xFF039BE5, 0xFF00ACC1, 0xFF00897B, 0xFF43A047, 0xFF7CB342, 0xFFC0CA33,
-                               0xFFFB8C00, 0xFFF4511E, 0xFF6D4C41, 0xFF546E7A};
-  unsigned int hcode = 0;
-  for (wchar_t wc : letter) hcode = 31 * hcode + static_cast<unsigned int>(wc);
-  cv.RoundRect(logo, static_cast<float>(P(4)), kLogo[hcode % 16]);
-  cv.Text(logo, letter, kWhite, F(12), 600, kCenterFmt);
+  PaintLogo(cv, logo, channel_logo_, channel_name_, std::wstring());
   x += P(48) + P(8);
   int right = W - P(16);
   if (!line_label_.empty()) {

@@ -601,6 +601,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       if (KotvWinChrome.isNeeded) {
         _winChromeToken = KotvWinChrome.bind(_onWinChromeEvent);
         _danmakuItems.addListener(_syncWinChrome);
+        KotvWinChrome.imagesReady.addListener(_syncWinChrome);
         _syncWinChrome();
       }
     });
@@ -613,6 +614,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   /// 后端切换会换 [_playback] 实例；监听跟着当前实例走。
   KotvPlayback? _winListened;
   String? _lastWinLiveSnap;
+  late final KotvWinBufferText _winBuffer = KotvWinBufferText(_syncWinChrome);
   /// 竖屏画面单击延迟（等双击判定）与按下点。
   Timer? _winPortraitTapTimer;
   Offset? _winPortraitDownAt;
@@ -1057,6 +1059,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         }
       }
       final highlight = _epgHighlightIndex();
+      final dpr = MediaQuery.devicePixelRatioOf(context);
+      final logoW = (land ? 28.0 : 40.0) * ui;
       fields = {
         'mode': 'live',
         'surfaceScreen': {
@@ -1082,7 +1086,14 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         'groupSelected': _groupIdx,
         'channels': [
           for (var i = 0; i < _channels.length; i++)
-            KotvWinChrome.row(label: '${_channels[i]['name'] ?? ''}', trailing: _channelNumberLabel(_channels[i], i)),
+            KotvWinChrome.row(
+              label: '${_channels[i]['name'] ?? ''}',
+              trailing: _channelNumberLabel(_channels[i], i),
+              icon: () {
+                final key = KotvWinChrome.logoKey('${_channels[i]['logo'] ?? ''}', width: logoW, dpr: dpr);
+                return key.isEmpty ? '' : 'img:$key';
+              }(),
+            ),
         ],
         'channelSelected': _chIdx,
         'channelDigits': _channelNumDigitsFor(_channels),
@@ -1115,6 +1126,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         'liveRightItems': _winLiveRightItems(land, ui),
         'channelNo': _channelNum,
         'channelName': _title,
+        'channelLogo': KotvWinChrome.logoKey(_currentLogo, width: 48, dpr: dpr),
         'programTime': _programTimeLabel,
         'programTitle': _programTitleLabel.isNotEmpty ? _programTitleLabel : _status,
         'lineLabel': _lineLabel,
@@ -1125,6 +1137,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       ...KotvWinChrome.metrics(context),
       ...KotvWinChrome.playbackFields(p, forceBuffering: busy),
       ...fields,
+      // 同横竖屏 KotvBufferingOverlay(force: busy)；迷你窗不画。
+      'bufferText': _miniDesktop || surface == null ? _winBuffer.label(null) : _winBuffer.label(p, force: busy),
       'gestures': _livePlayerGestures,
       'hasCast': true,
       'hasMini': true,
@@ -1182,6 +1196,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     liveScreenHandleBack = null;
     if (KotvWinChrome.isNeeded) {
       _danmakuItems.removeListener(_syncWinChrome);
+      KotvWinChrome.imagesReady.removeListener(_syncWinChrome);
+      _winBuffer.dispose();
       try {
         _winListened?.removeListener(_syncWinChrome);
       } catch (_) {}
@@ -4683,13 +4699,15 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                     child: Stack(
                       fit: StackFit.expand,
                       children: [
-                        KotvBufferingOverlay(
-                          player: _playback,
-                          force: _status.contains('解析') ||
-                              _status.contains('加载') ||
-                              _status.contains('缓冲') ||
-                              _loading,
-                        ),
+                        // Win7：转圈与网速由原生壳画（KotvWinBufferText）。
+                        if (!KotvWinChrome.isNeeded)
+                          KotvBufferingOverlay(
+                            player: _playback,
+                            force: _status.contains('解析') ||
+                                _status.contains('加载') ||
+                                _status.contains('缓冲') ||
+                                _loading,
+                          ),
                         if (_zapDigits.isNotEmpty)
                           Positioned(
                             right: 36,
@@ -5509,13 +5527,15 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                 // Android Hybrid：起播/换台无帧时盖黑防叠影；桌面 Texture 不挂此层。
                 _buildLiveSurfaceCover(),
                 _buildLiveDanmakuOverlay(),
-                KotvBufferingOverlay(
-                  player: _playback,
-                  force: _status.contains('解析') ||
-                      _status.contains('加载') ||
-                      _status.contains('缓冲') ||
-                      _loading,
-                ),
+                // Win7：转圈与网速由原生壳画（KotvWinBufferText）。
+                if (!KotvWinChrome.isNeeded)
+                  KotvBufferingOverlay(
+                    player: _playback,
+                    force: _status.contains('解析') ||
+                        _status.contains('加载') ||
+                        _status.contains('缓冲') ||
+                        _loading,
+                  ),
                 if (_catchup && _playUrl.isNotEmpty)
                   CenterPlayPauseButton(
                     player: _playback,

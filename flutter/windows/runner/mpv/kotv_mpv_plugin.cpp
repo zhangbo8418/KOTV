@@ -9,6 +9,7 @@
 #include <mpv/client.h>
 
 #include <algorithm>
+#include <cctype>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -949,7 +950,7 @@ class KotvMpvPlugin : public flutter::Plugin {
         std::clamp(std::clamp(ArgDouble(args, "shadowStrength", 50.0), 0.0, 100.0) / 50.0, 0.0,
                    2.5);
     std::string edge = ArgString(args, "edgeType");
-    std::transform(edge.begin(), edge.end(), edge.begin(), ::tolower);
+    for (auto& ch : edge) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
     if (edge == "none") {
       SetProp(m, "sub-border-size", "0");
       SetProp(m, "sub-shadow-offset", "0");
@@ -1106,7 +1107,7 @@ class KotvMpvPlugin : public flutter::Plugin {
                          : method == "setSubtitleTrack" ? "sid"
                                                         : "secondary-sid";
       std::string key = id;
-      std::transform(key.begin(), key.end(), key.begin(), ::tolower);
+      for (auto& ch : key) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
       if (key.empty() || key == "off" || key == "none") id = key.empty() ? "auto" : "no";
       CommandAsync(Mpv(), {"set", prop, id});
       result->Success();
