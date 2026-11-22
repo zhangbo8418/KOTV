@@ -396,6 +396,14 @@ class KotvWinChrome {
     } catch (_) {}
   }
 
+  /// 手势/遥控 HUD（倍速、音量、seek 预览等）；空串清除。
+  static Future<void> showHud(String text, {bool autoHide = false}) => update({
+        'gestureHud': text,
+        'gestureHudAutoHide': autoHide,
+      });
+
+  static Future<void> clearHud() => update({'gestureHud': ''});
+
   static Future<void> showSheet({
     required String kind,
     String title = '',

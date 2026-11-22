@@ -275,6 +275,17 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   bool _onGlobalBackKey(KeyEvent event) {
     if (event is! KeyDownEvent || !kotvIsBackKey(event.logicalKey)) return false;
     if (!mounted) return false;
+    // Win7：无 Flutter 焦点页，返回统一在此分层关掉（选集→栏→退出）。
+    if (KotvWinChrome.isNeeded) {
+      if (_dismissOneLayer()) return true;
+      final back = detailImmersiveBack;
+      if (back != null) {
+        unawaited(back());
+        return true;
+      }
+      unawaited(_exitFullscreen());
+      return true;
+    }
     // 栏/选集仍开时交给页内 Focus.onKeyEvent，避免抢走 Overlay 菜单的 ESC。
     if (_showChrome || _epOpen) return false;
     // 栏隐后 primary 可能离开页内 Focus；仍用同一套返回分层。
@@ -460,7 +471,8 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       case 'key':
         final ke = KotvWinChrome.keyEventFromMap(e);
         if (ke != null) {
-          _onKey(FocusManager.instance.primaryFocus ?? _winKeyFallback, ke);
+          // 无 Flutter Focus 树；直接走按键语义（HUD/播控由原生承接）。
+          _onKey(_winKeyFallback, ke);
         }
         break;
       case 'toggle':
@@ -1071,9 +1083,11 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     _holdingSpeed = true;
     _suppressTapAfterHold = true;
     unawaited(widget.playback.setRate(target));
-    if (showHint && mounted) {
-      setState(() => _holdSpeedHint =
-          '×${target.toStringAsFixed(target == target.roundToDouble() ? 0 : 1)}');
+    final label = '×${target.toStringAsFixed(target == target.roundToDouble() ? 0 : 1)}';
+    if (KotvWinChrome.isNeeded) {
+      unawaited(KotvWinChrome.showHud(label));
+    } else if (showHint && mounted) {
+      setState(() => _holdSpeedHint = label);
     }
   }
 
@@ -1083,7 +1097,11 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     _holdingSpeed = false;
     _rateBeforeHold = null;
     unawaited(widget.playback.setRate(restore));
-    if (showHint && mounted) setState(() => _holdSpeedHint = null);
+    if (KotvWinChrome.isNeeded) {
+      unawaited(KotvWinChrome.clearHud());
+    } else if (showHint && mounted) {
+      setState(() => _holdSpeedHint = null);
+    }
   }
 
   /// 亮顶底栏。非 [intentional]：栏隐不 reveal，仅栏已显续命；尊重沉浸锁。
@@ -1770,7 +1788,15 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
 
   void _nudgeSeekPreview(Duration step) {
     _seekPreviewBase ??= widget.playback.position;
-    setState(() => _seekPreviewDelta += step);
+    _seekPreviewDelta += step;
+    if (KotvWinChrome.isNeeded) {
+      final arrow = step.isNegative ? '«  ' : '»  ';
+      unawaited(KotvWinChrome.showHud(
+        '$arrow${fmtBoundedPlayerTime(_seekPreviewTarget)} / ${fmtBoundedPlayerTime(widget.playback.duration)}',
+      ));
+      return;
+    }
+    if (mounted) setState(() {});
   }
 
   void _commitSeekPreview() {
@@ -1778,7 +1804,11 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     final target = _seekPreviewTarget;
     _seekPreviewBase = null;
     _seekPreviewDelta = Duration.zero;
-    if (mounted) setState(() {});
+    if (KotvWinChrome.isNeeded) {
+      unawaited(KotvWinChrome.clearHud());
+    } else if (mounted) {
+      setState(() {});
+    }
     widget.playback.seek(target);
   }
 
@@ -1786,7 +1816,11 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     if (_seekPreviewBase == null) return;
     _seekPreviewBase = null;
     _seekPreviewDelta = Duration.zero;
-    if (mounted) setState(() {});
+    if (KotvWinChrome.isNeeded) {
+      unawaited(KotvWinChrome.clearHud());
+    } else if (mounted) {
+      setState(() {});
+    }
   }
 
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
@@ -1837,8 +1871,8 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
 
     if (!isDown && !isRepeat) return KeyEventResult.ignored;
 
-    // 有底栏/选集：方向键交给 TvFocus；快退/快进才 seek（勿抢横移）。
-    if (_showChrome || _epOpen) {
+    // 有底栏/选集：Flutter 平台方向键交给 TvFocus；Win7 无 Flutter 焦点树，落入下方媒体键语义。
+    if ((_showChrome || _epOpen) && !KotvWinChrome.isNeeded) {
       if (isDown && kotvIsMenuKey(key)) {
         _toggleEpisodes();
         return KeyEventResult.handled;
@@ -1926,7 +1960,10 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
 
   void _showChromeAndFocusPlay() {
     _bumpChrome(intentional: true);
-    _chromeKey.currentState?.restoreRemoteFocus();
+    // Win7：播控在原生 HWND，无 Flutter TvFocus 可还。
+    if (!KotvWinChrome.isNeeded) {
+      _chromeKey.currentState?.restoreRemoteFocus();
+    }
   }
 
   void _onHover(PointerHoverEvent e, BoxConstraints c) {
@@ -2154,15 +2191,8 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
 
   @override
   Widget build(BuildContext context) {
-    // Win7 全屏 / 铺满窗口：视频与播控、手势、弹幕全在原生 HWND；
-    // Flutter 页整页挖空，只留 Focus 收键盘/返回（事件亦经 kotv_win_chrome）。
-    if (KotvWinChrome.isNeeded) {
-      return Focus(
-        autofocus: true,
-        onKeyEvent: _onKey,
-        child: const IgnorePointer(child: SizedBox.expand()),
-      );
-    }
+    // Win7 全屏 / 铺满：整页无 Flutter 焦点/控件；按键经原生壳 → kotv_win_chrome。
+    if (KotvWinChrome.isNeeded) return const SizedBox.shrink();
     return Focus(
       autofocus: true,
       onKeyEvent: _onKey,

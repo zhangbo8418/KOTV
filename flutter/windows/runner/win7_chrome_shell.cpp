@@ -3206,6 +3206,14 @@ bool Win7ChromeShell::ApplyUpdate(const ChromeMap& args_ref) {
   if (HasKey(*args, "holdSpeed")) {
     hold_speed_rate_ = std::clamp(GetDouble(*args, "holdSpeed", hold_speed_rate_), 2.0, 5.0);
   }
+  if (HasKey(*args, "gestureHud")) {
+    const auto t = GetString(*args, "gestureHud");
+    if (t.empty()) {
+      ClearGestureHud();
+    } else {
+      SetGestureHud(HudKind::Seek, Utf8ToWide(t), GetBool(*args, "gestureHudAutoHide", false));
+    }
+  }
   progress_ = GetDouble(*args, "progress", progress_);
   if (HasKey(*args, "buffered")) buffered_ = GetDouble(*args, "buffered", buffered_);
   if (HasKey(*args, "positionSec"))
