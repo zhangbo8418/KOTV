@@ -12,6 +12,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -168,18 +169,14 @@ class KotvMpvPlugin : public flutter::Plugin {
     return true;
   }
 
-  // 有槽 HWND 后再 mpv_create/initialize（重；仅 create/open 调用）。
-  bool EnsureMpv() {
-    if (mpv_ && hwnd_) return true;
-    if (!EnsureVideoHwnd()) return false;
+  // mpv_create/initialize 很重，禁止在 MethodChannel 线程同步调用（会让窗口「未响应」）。
+  // 调用方须已持有 engine_mu_；hwnd_ 须已在 UI 线程建好。
+  bool EnsureMpvEngineUnlocked() {
     if (mpv_) return true;
+    if (!hwnd_) return false;
 
     mpv_ = mpv_create();
-    if (!mpv_) {
-      DestroyWindow(hwnd_);
-      hwnd_ = nullptr;
-      return false;
-    }
+    if (!mpv_) return false;
 
     int64_t wid = reinterpret_cast<int64_t>(hwnd_);
     mpv_set_option(mpv_, "wid", MPV_FORMAT_INT64, &wid);
@@ -194,23 +191,53 @@ class KotvMpvPlugin : public flutter::Plugin {
     mpv_set_option_string(mpv_, "input-vo-keyboard", "no");
     mpv_set_option_string(mpv_, "terminal", "no");
     if (mpv_initialize(mpv_) < 0) {
-      Destroy();
+      mpv_terminate_destroy(mpv_);
+      mpv_ = nullptr;
       return false;
     }
-    ShowWindow(hwnd_, SW_HIDE);
+    if (hwnd_) ShowWindow(hwnd_, SW_HIDE);
     ApplyDecode();
     stop_events_ = false;
-    event_thread_ = std::thread([this] { EventLoop(); });
+    if (!event_thread_.joinable()) {
+      event_thread_ = std::thread([this] { EventLoop(); });
+    }
     return true;
   }
 
+  void ScheduleInitAndOpen() {
+    const uint64_t gen = ++open_gen_;
+    std::thread([this, gen] {
+      std::lock_guard<std::mutex> lock(engine_mu_);
+      if (gen != open_gen_.load()) return;
+      if (!EnsureMpvEngineUnlocked()) {
+        if (gen == open_gen_.load()) {
+          Emit({{EncodableValue("event"), EncodableValue(std::string("error"))},
+                {EncodableValue("message"),
+                 EncodableValue(std::string("mpv init failed"))}});
+        }
+        return;
+      }
+      if (gen != open_gen_.load()) return;
+      ApplyPendingProps();
+      FlushPendingOpen();
+    }).detach();
+  }
+
   void Destroy() {
-    stop_events_ = true;
-    if (mpv_) mpv_wakeup(mpv_);
+    open_gen_++;
+    {
+      // 等后台 initialize/loadfile 结束，避免拆机竞态。
+      std::lock_guard<std::mutex> lock(engine_mu_);
+      stop_events_ = true;
+      if (mpv_) mpv_wakeup(mpv_);
+    }
     if (event_thread_.joinable()) event_thread_.join();
-    if (mpv_) {
-      mpv_terminate_destroy(mpv_);
-      mpv_ = nullptr;
+    {
+      std::lock_guard<std::mutex> lock(engine_mu_);
+      if (mpv_) {
+        mpv_terminate_destroy(mpv_);
+        mpv_ = nullptr;
+      }
     }
     if (hwnd_) {
       DestroyWindow(hwnd_);
@@ -224,6 +251,7 @@ class KotvMpvPlugin : public flutter::Plugin {
     pending_url_.clear();
     pending_start_ms_ = 0;
     pending_http_headers_.clear();
+    pending_props_.clear();
   }
 
   void ApplyDecode() {
@@ -249,41 +277,33 @@ class KotvMpvPlugin : public flutter::Plugin {
     if (!hw.empty()) hwdec_ = hw;
   }
 
-  void IngestOpenExtras(const EncodableMap* args) {
-    if (!mpv_ || !args) return;
+  void StashOpenProps(const EncodableMap* args) {
+    pending_props_.clear();
+    if (!args) return;
     auto pit = args->find(EncodableValue("props"));
-    if (pit != args->end()) {
-      if (const auto* props = std::get_if<EncodableMap>(&pit->second)) {
-        for (const auto& kv : *props) {
-          const auto* k = std::get_if<std::string>(&kv.first);
-          if (!k) continue;
-          std::string v;
-          if (const auto* s = std::get_if<std::string>(&kv.second))
-            v = *s;
-          else if (const auto* b = std::get_if<bool>(&kv.second))
-            v = *b ? "yes" : "no";
-          else if (const auto* i = std::get_if<int32_t>(&kv.second))
-            v = std::to_string(*i);
-          else if (const auto* d = std::get_if<double>(&kv.second))
-            v = std::to_string(*d);
-          if (!v.empty()) mpv_set_property_string(mpv_, k->c_str(), v.c_str());
-        }
-      }
+    if (pit == args->end()) return;
+    const auto* props = std::get_if<EncodableMap>(&pit->second);
+    if (!props) return;
+    for (const auto& kv : *props) {
+      const auto* k = std::get_if<std::string>(&kv.first);
+      if (!k) continue;
+      std::string v;
+      if (const auto* s = std::get_if<std::string>(&kv.second))
+        v = *s;
+      else if (const auto* b = std::get_if<bool>(&kv.second))
+        v = *b ? "yes" : "no";
+      else if (const auto* i = std::get_if<int32_t>(&kv.second))
+        v = std::to_string(*i);
+      else if (const auto* d = std::get_if<double>(&kv.second))
+        v = std::to_string(*d);
+      if (!v.empty()) pending_props_[*k] = std::move(v);
     }
-    auto hit = args->find(EncodableValue("headers"));
-    if (hit != args->end()) {
-      if (const auto* headers = std::get_if<EncodableMap>(&hit->second)) {
-        std::string fields;
-        for (const auto& kv : *headers) {
-          const auto* k = std::get_if<std::string>(&kv.first);
-          const auto* v = std::get_if<std::string>(&kv.second);
-          if (!k || !v) continue;
-          if (!fields.empty()) fields += "\r\n";
-          fields += *k + ": " + *v;
-        }
-        if (!fields.empty())
-          mpv_set_property_string(mpv_, "http-header-fields", fields.c_str());
-      }
+  }
+
+  void ApplyPendingProps() {
+    if (!mpv_) return;
+    for (const auto& kv : pending_props_) {
+      mpv_set_property_string(mpv_, kv.first.c_str(), kv.second.c_str());
     }
   }
 
@@ -444,14 +464,8 @@ class KotvMpvPlugin : public flutter::Plugin {
     }
     if (method == "create") {
       IngestDecodeArgs(args);
-      // 有槽则按槽创建；无槽也先返回 ok，等 updateFrame 再真正建 HWND。
-      if (have_frame_) {
-        if (!EnsureMpv()) {
-          result->Error("CREATE_FAILED", "mpv init failed");
-          return;
-        }
-        ApplyDecode();
-      }
+      // 只建 HWND（快）；mpv_initialize 放到 open 的后台线程，避免 UI 未响应。
+      if (have_frame_) EnsureVideoHwnd();
       result->Success(EncodableValue(EncodableMap{
           {EncodableValue("ok"), EncodableValue(true)},
           {EncodableValue("ready"), EncodableValue(true)},
@@ -464,19 +478,19 @@ class KotvMpvPlugin : public flutter::Plugin {
       pending_url_ = ArgString(args, "url");
       pending_start_ms_ = ArgInt64(args, "startAtMs");
       pending_http_headers_ = ExtractHttpHeaders(args);
+      StashOpenProps(args);
       pending_open_ = !pending_url_.empty();
-      // 必须先有槽（Dart 在 open 前 await updateFrame）。无槽则失败，避免 Success+waitReady 死等。
-      if (!EnsureMpv()) {
+      // UI 线程只建窗；initialize+loadfile 丢后台，立刻 Success 让 Flutter 继续泵消息。
+      if (!have_frame_ || !EnsureVideoHwnd()) {
         pending_open_ = false;
         pending_url_.clear();
         pending_start_ms_ = 0;
         pending_http_headers_.clear();
+        pending_props_.clear();
         result->Error("NO_SLOT", "video slot rect required before open");
         return;
       }
-      ApplyDecode();
-      IngestOpenExtras(args);
-      FlushPendingOpen();
+      ScheduleInitAndOpen();
       result->Success();
       return;
     }
@@ -598,6 +612,8 @@ class KotvMpvPlugin : public flutter::Plugin {
   mpv_handle* mpv_ = nullptr;
   HWND hwnd_ = nullptr;
   std::thread event_thread_;
+  std::mutex engine_mu_;
+  std::atomic<uint64_t> open_gen_{0};
   std::atomic<bool> stop_events_{false};
   std::string decode_mode_ = "auto";
   std::string hwdec_;
@@ -613,6 +629,7 @@ class KotvMpvPlugin : public flutter::Plugin {
   std::string pending_url_;
   int64_t pending_start_ms_ = 0;
   std::string pending_http_headers_;
+  std::map<std::string, std::string> pending_props_;
 };
 
 }  // namespace
