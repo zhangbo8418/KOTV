@@ -2694,6 +2694,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             format: format,
             startAt: Duration(milliseconds: startMs),
           );
+          if (KotvWinChrome.isNeeded && _immersiveFullscreen) KotvMpvUnderlayHole.resyncAll(force: true);
           if (serial != _playAtSerial || !mounted) {
             await kotvStopIfUnowned(pb, [_mk, _fvp, _exo, _html, _art, _xg, _zw]);
             return;
@@ -3859,6 +3860,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   /// Win7：有槽才建 HWND。open 前必须 await（仅 CreateWindow，不含 mpv_initialize）。
   Future<bool> _ensureWin7VideoSlotFrame() async {
     if (!kotvUsesWindowsNativeChrome() || !mounted) return true;
+    // 满窗口/全屏换集：画面不在详情槽里，按槽下发会把视频缩回槽位；让洞重发整屏几何。
+    if (_immersiveFullscreen) {
+      KotvMpvUnderlayHole.resyncAll(force: true);
+      await WidgetsBinding.instance.endOfFrame;
+      return mounted;
+    }
     final dpr = MediaQuery.devicePixelRatioOf(context);
     for (var i = 0; i < 20; i++) {
       if (!mounted) return false;

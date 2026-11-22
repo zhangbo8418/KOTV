@@ -154,10 +154,14 @@ class KotvMpvUnderlayHole extends StatefulWidget {
   final bool coverUntilReady;
 
   static final ValueNotifier<int> _resync = ValueNotifier<int>(0);
+  static int _forceGen = 0;
 
   /// 祖先只改了摆放位置、洞本身不重建时（如全屏上下滑切集画面跟手），下一帧重新下发几何。
-  static void resyncAll() {
+  /// [force]：原生几何可能被别处改写过（如开播前按详情槽建 HWND），几何没变也重发。
+  static void resyncAll({bool force = false}) {
+    if (force) _forceGen++;
     WidgetsBinding.instance.addPostFrameCallback((_) => _resync.value++);
+    WidgetsBinding.instance.ensureVisualUpdate();
   }
 
   @override
@@ -171,6 +175,7 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
   Rect? _lastSent;
   Rect? _lastClip;
   bool? _lastVisible;
+  int _forceSeen = KotvMpvUnderlayHole._forceGen;
 
   bool get _win7Overlay => kotvUsesWindowsNativeChrome();
 
@@ -264,6 +269,10 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
       clip = KotvMpvUnderlayClip.maybeOf(context);
     }
 
+    if (_forceSeen != KotvMpvUnderlayHole._forceGen) {
+      _forceSeen = KotvMpvUnderlayHole._forceGen;
+      _lastSent = null;
+    }
     final moved = _lastOrigin != origin || _lastSize != size;
     _lastOrigin = origin;
     _lastSize = size;
