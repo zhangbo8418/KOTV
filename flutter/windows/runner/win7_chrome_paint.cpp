@@ -1211,8 +1211,8 @@ int Win7ChromeShell::SheetLayout(Canvas* cv, std::vector<Hit>* hits, const RECT&
         const int sy = (row.top + row.bottom) / 2 - sw_h / 2;
         const Argb track = it.on ? (sw_tile ? kAccent : 0xFF5C5C66) : 0xFF3A3A42;
         cv->RoundRect(R(sx, sy, sx + sw_w, sy + sw_h), sw_h / 2.0f, track);
-        const float tr = it.on ? P(12) : P(8);
-        const float tcx = it.on ? sx + sw_w - P(16) : sx + P(16);
+        const float tr = static_cast<float>(it.on ? P(12) : P(8));
+        const float tcx = static_cast<float>(it.on ? sx + sw_w - P(16) : sx + P(16));
         cv->Circle(tcx, sy + sw_h / 2.0f, tr, it.on ? kWhite : 0xFFB0B0B8);
       }
       hit("sheetTap", row, i);
