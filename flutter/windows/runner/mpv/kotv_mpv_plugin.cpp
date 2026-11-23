@@ -14,6 +14,7 @@
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
+#include <cstdarg>
 #include <cstdio>
 #include <deque>
 #include <map>
@@ -37,6 +38,28 @@ constexpr UINT kMsgDrain = WM_APP + 0x31;
 constexpr UINT kMsgDestroyHwnd = WM_APP + 0x32;
 constexpr wchar_t kBridgeClass[] = L"KotvMpvBridge";
 constexpr auto kTeardownWait = std::chrono::milliseconds(1500);
+
+// %TEMP%\kotv_mpv.log：只记 mpv 的 warn 及以上和嵌入窗口信息，进程启动时清空。
+void MpvLog(const char* fmt, ...) {
+  static std::mutex mu;
+  static bool fresh = true;
+  std::lock_guard<std::mutex> lock(mu);
+  wchar_t path[MAX_PATH];
+  if (!GetTempPathW(MAX_PATH, path)) return;
+  wcscat_s(path, L"kotv_mpv.log");
+  FILE* f = nullptr;
+  if (_wfopen_s(&f, path, fresh ? L"w" : L"a") != 0 || !f) return;
+  fresh = false;
+  SYSTEMTIME t;
+  GetLocalTime(&t);
+  fprintf(f, "%02d:%02d:%02d.%03d ", t.wHour, t.wMinute, t.wSecond, t.wMilliseconds);
+  va_list ap;
+  va_start(ap, fmt);
+  vfprintf(f, fmt, ap);
+  va_end(ap);
+  fputc('\n', f);
+  fclose(f);
+}
 
 std::string ArgString(const EncodableMap* m, const char* key, const std::string& def = "") {
   if (!m) return def;
@@ -214,6 +237,7 @@ struct OpenParams {
   std::string url;
   int64_t start_ms = 0;
   std::string headers;
+  std::string load_options;  // 只挂在这一次 loadfile 上（Dart 已按 %n% 编码）
   std::map<std::string, std::string> props;
 };
 
@@ -464,6 +488,11 @@ void EventLoop(std::shared_ptr<MpvCore> core, std::shared_ptr<Bridge> bridge) {
                   {EncodableValue("width"), EncodableValue(static_cast<int32_t>(w))},
                   {EncodableValue("height"), EncodableValue(static_cast<int32_t>(h))}});
       bridge->Post(Posted{Posted::kShowVideo, core->id, {}});
+      int live = 0;
+      if (mpv_get_property(m, "media-live", MPV_FORMAT_FLAG, &live) >= 0 && live) {
+        post_event({{EncodableValue("event"), EncodableValue("live")},
+                    {EncodableValue("live"), EncodableValue(true)}});
+      }
       post_event(PositionEvent(m));
     } else if (ev->event_id == MPV_EVENT_VIDEO_RECONFIG) {
       RefreshInfoCache(core.get(), m);
@@ -475,8 +504,18 @@ void EventLoop(std::shared_ptr<MpvCore> core, std::shared_ptr<Bridge> bridge) {
                     {EncodableValue("width"), EncodableValue(static_cast<int32_t>(w))},
                     {EncodableValue("height"), EncodableValue(static_cast<int32_t>(h))}});
       }
+    } else if (ev->event_id == MPV_EVENT_LOG_MESSAGE) {
+      auto* lm = static_cast<mpv_event_log_message*>(ev->data);
+      std::string text = lm && lm->text ? lm->text : "";
+      while (!text.empty() && (text.back() == '\n' || text.back() == '\r')) text.pop_back();
+      MpvLog("core %llu: [%s] %s: %s", static_cast<unsigned long long>(core->id),
+             lm ? lm->level : "", lm ? lm->prefix : "", text.c_str());
     } else if (ev->event_id == MPV_EVENT_END_FILE) {
       auto* e = static_cast<mpv_event_end_file*>(ev->data);
+      if (e) {
+        MpvLog("core %llu: end-file reason=%d error=%s", static_cast<unsigned long long>(core->id),
+               static_cast<int>(e->reason), mpv_error_string(e->error));
+      }
       if (e && e->reason == MPV_END_FILE_REASON_EOF) {
         post_event({{EncodableValue("event"), EncodableValue("completed")}});
       } else if (e && e->reason == MPV_END_FILE_REASON_ERROR) {
@@ -497,6 +536,15 @@ void InitAndOpen(std::shared_ptr<MpvCore> core, std::shared_ptr<Bridge> bridge, 
   if (!m) {
     bridge->WaitTeardownIdle();
     if (core->disposed.load() || gen != core->open_gen.load()) return;
+    // wid 无效时 mpv 会自建顶层窗口（Win7 上 wid=0 也找不到桌面 WorkerW），宁可报错不开。
+    if (!core->hwnd || !IsWindow(core->hwnd)) {
+      MpvLog("core %llu: video window %p invalid, mpv not created",
+             static_cast<unsigned long long>(core->id), static_cast<void*>(core->hwnd));
+      bridge->Post(Posted{Posted::kEvent, core->id,
+                          {{EncodableValue("event"), EncodableValue("error")},
+                           {EncodableValue("message"), EncodableValue("video window unavailable")}}});
+      return;
+    }
     m = mpv_create();
     if (!m) {
       bridge->Post(Posted{Posted::kEvent, core->id,
@@ -525,6 +573,9 @@ void InitAndOpen(std::shared_ptr<MpvCore> core, std::shared_ptr<Bridge> bridge, 
                            {EncodableValue("message"), EncodableValue("mpv init failed")}}});
       return;
     }
+    mpv_request_log_messages(m, "warn");
+    MpvLog("core %llu: mpv ready, wid=%p parent=%p", static_cast<unsigned long long>(core->id),
+           static_cast<void*>(core->hwnd), static_cast<void*>(GetParent(core->hwnd)));
     core->mpv.store(m);
     core->event_thread = std::thread(EventLoop, core, bridge);
   }
@@ -535,12 +586,17 @@ void InitAndOpen(std::shared_ptr<MpvCore> core, std::shared_ptr<Bridge> bridge, 
   SetProp(m, "http-header-fields", open.headers);
   bridge->Post(Posted{Posted::kHideVideo, core->id, {}});
   // replace 即可换片；勿 stop（打断无缝换集）。
+  std::string file_opts = open.load_options;
   if (open.start_ms > 0) {
     char start_opt[64];
     snprintf(start_opt, sizeof(start_opt), "start=%.3f", open.start_ms / 1000.0);
-    CommandSync(m, {"loadfile", open.url, "replace", "-1", start_opt});
-  } else {
+    if (!file_opts.empty()) file_opts += ",";
+    file_opts += start_opt;
+  }
+  if (file_opts.empty()) {
     CommandSync(m, {"loadfile", open.url, "replace"});
+  } else {
+    CommandSync(m, {"loadfile", open.url, "replace", "-1", file_opts});
   }
   CommandSync(m, {"set", "pause", "no"});
 }
@@ -1027,6 +1083,7 @@ class KotvMpvPlugin : public flutter::Plugin {
       open.url = ArgString(args, "url");
       open.start_ms = ArgInt64(args, "startAtMs");
       open.headers = ExtractHttpHeaders(args);
+      open.load_options = ArgString(args, "loadOptions");
       open.props = ExtractProps(args);
       if (!EnsureVideoHwnd()) {
         result->Error("NO_HWND", "video window unavailable");

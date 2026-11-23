@@ -750,9 +750,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       case 'pickPlayer':
         unawaited(_winApplyPickedPlayer(e['id'] as String? ?? ''));
         break;
-      case 'exit':
       case 'back':
-        _handleLiveBack();
+        kotvHandleAppBack?.call();
         break;
     }
   }

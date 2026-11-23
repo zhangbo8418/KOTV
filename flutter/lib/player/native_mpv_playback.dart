@@ -541,8 +541,15 @@ class NativeMpvPlayback extends KotvPlayback {
       // 开播 mime：无扩展名的 /proxy/play 须靠 mime 触发 lavf HLS demuxer。
       final mime = kotvPlayMime(url, format);
       // 缺省也带 force-iso=no，避免会话复用后粘滞。
-      final openProps = <String, String>{'force-iso': 'no', ..._extraOpenProps};
+      final openProps = <String, String>{
+        'force-iso': 'no',
+        // Windows 原生插件不自带 lavf 基线；与桌面 media_kit / 安卓同串。
+        if (kotvIsWindows()) ...{'demuxer-lavf-o': kotvDemuxerLavfO, 'ytdl': 'no'},
+        ..._extraOpenProps,
+      };
       _extraOpenProps = const {};
+      final loadOpts = <String>[];
+      if (kotvIsWindows()) kotvAppendLavfHlsLoadOpts(url, mime, loadOpts);
       await _ch.invokeMethod('open', {
         'url': url,
         'headers': _headers,
@@ -553,6 +560,7 @@ class NativeMpvPlayback extends KotvPlayback {
         'vulkan': _opts.vulkan,
         'conf': _opts.conf,
         'props': openProps,
+        if (loadOpts.isNotEmpty) 'loadOptions': kotvEncodeMpvLoadfileOptions(loadOpts),
         'tlsVerify': _opts.tlsVerify,
         'audioPassThrough': _opts.audioPassThrough,
         'diskCache': _opts.diskCache && !live,
