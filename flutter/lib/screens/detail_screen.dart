@@ -3355,6 +3355,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         epIdx: epIdx,
         playUrl: _playUrl,
         decodeMode: _decodeMode,
+        prefDecodeMode: _prefDecodeMode,
         renderMode: _renderMode,
         aspect: _aspect,
         onAspectChanged: (a) {
@@ -3921,8 +3922,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     final base = <String, dynamic>{
       ...KotvWinChrome.metrics(context),
       ...KotvWinChrome.playbackFields(p, forceBuffering: _winChromeForceBuffering),
-      'showDirect': kotvShowDirectOutput(p, _decodeMode),
-      'directOn': p.directOutputActive,
+      'showDirect': kotvShowDirectOutput(p, _prefDecodeMode),
+      'directOn': kotvDirectOutputOn(p, _decodeMode),
       'hasCast': true,
       'hasMini': true,
       'gestures': true,

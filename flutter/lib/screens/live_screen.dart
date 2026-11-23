@@ -965,7 +965,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       pill('decode', '解码 · $_decodeLabel'),
       if (_showDirectOutput) ...[
         gap(8),
-        pill('direct', '硬解直出 · ${_playback.directOutputActive ? '开' : '关'}'),
+        pill('direct', '硬解直出 · ${_directOutputOn ? '开' : '关'}'),
       ],
       if (kotvPlayerRenderApplies(_playerVal)) ...[
         gap(8),
@@ -1146,7 +1146,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
           ? flutterPlayerLabel(_playerVal.trim().isEmpty ? kotvDefaultLivePlayer() : _playerVal)
           : '',
       'catchupDecode': _decodeLabel,
-      'catchupDirect': _showDirectOutput ? (_playback.directOutputActive ? '直出开' : '直出关') : '',
+      'catchupDirect': _showDirectOutput ? (_directOutputOn ? '直出开' : '直出关') : '',
       'catchupAcross': _liveAcross ? '跨组开' : '跨组关',
       'catchupInvert': _liveInvert ? '反转开' : '反转关',
       'catchupFail': _liveAutoChange ? '换线开' : '换线关',
@@ -3267,7 +3267,9 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     _scheduleScrollToCurrent();
   }
 
-  bool get _showDirectOutput => kotvShowDirectOutput(_playback, _decodeMode);
+  bool get _showDirectOutput => kotvShowDirectOutput(_playback, _prefDecodeMode);
+
+  bool get _directOutputOn => kotvDirectOutputOn(_playback, _decodeMode);
 
   /// 切换硬解直出：Win7 上换 ANGLE 后端，须换 Player 并按当前进度重开。
   Future<void> _toggleDirectOutput() async {
@@ -4593,7 +4595,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       onPlayer: kotvCanSwitchPlayer(live: true) ? () => unawaited(_pickPlayer()) : null,
       onDecode: () => unawaited(_pickDecode()),
       onDirectOutput: _showDirectOutput ? () => unawaited(_toggleDirectOutput()) : null,
-      directOutputOn: _playback.directOutputActive,
+      directOutputOn: _directOutputOn,
       onScale: () => unawaited(_cycleLiveScale()),
       scaleLabel: _liveScaleLabel(_liveScale),
       onAcross: _onLiveAcross,
@@ -5268,7 +5270,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                                       if (_showDirectOutput) ...[
                                         SizedBox(height: 8 * ui),
                                         AppPill(
-                                          label: '硬解直出 · ${_playback.directOutputActive ? '开' : '关'}',
+                                          label: '硬解直出 · ${_directOutputOn ? '开' : '关'}',
                                           height: 40,
                                           onTap: () => unawaited(_toggleDirectOutput()),
                                         ),
@@ -5704,7 +5706,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                     if (_showDirectOutput) ...[
                       const SizedBox(width: 6),
                       AppPill(
-                        label: '直出·${_playback.directOutputActive ? '开' : '关'}',
+                        label: '直出·${_directOutputOn ? '开' : '关'}',
                         height: 32,
                         fontSize: 12,
                         onTap: () => unawaited(_toggleDirectOutput()),

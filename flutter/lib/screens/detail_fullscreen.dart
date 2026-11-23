@@ -46,6 +46,7 @@ class DetailFullscreenPage extends StatefulWidget {
     this.onPrev,
     this.playUrl = '',
     this.decodeMode = 'auto',
+    this.prefDecodeMode = 'auto',
     this.renderMode = 'surface',
     this.aspect = const AspectSpec(key: 'default', fit: BoxFit.contain),
     this.onAspectChanged,
@@ -132,6 +133,9 @@ class DetailFullscreenPage extends StatefulWidget {
   final VoidCallback? onPrev;
   final String playUrl;
   final String decodeMode;
+
+  /// 设置里的解码；[decodeMode] 可能是起播回退临时改的软解。
+  final String prefDecodeMode;
   final String renderMode;
   final AspectSpec aspect;
   final ValueChanged<AspectSpec>? onAspectChanged;
@@ -1099,8 +1103,8 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       'decodeBadge': KotvWinChrome.decodeBadge(_decodeMode),
       'showPlayer': kotvCanSwitchPlayer(live: false),
       'playerBadge': flutterIsEmbedPlayer(_winPlayerVal) ? '内' : '外',
-      'showDirect': kotvShowDirectOutput(pb, _decodeMode),
-      'directOn': pb.directOutputActive,
+      'showDirect': kotvShowDirectOutput(pb, widget.prefDecodeMode),
+      'directOn': kotvDirectOutputOn(pb, _decodeMode),
       'showDisc': pb.supportsDiscNav && KotvDiscPlay.looksLike(widget.playUrl),
       'openingSec': widget.openingSec,
       'endingSec': widget.endingSec,

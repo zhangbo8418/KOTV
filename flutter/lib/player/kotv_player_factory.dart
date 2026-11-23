@@ -37,9 +37,14 @@ void kotvPushPlayerSettings(
   if (!identical(current, exo)) unawaited(kotvApplySubtitleSettings(current, settings));
 }
 
-/// 播放菜单是否显示「硬解直出」：当前后端有这个开关，且没选软解。
-bool kotvShowDirectOutput(KotvPlayback playback, String decodeMode) =>
-    playback.supportsDirectOutput && !KotvMpvOpts(decodeMode: decodeMode).soft;
+/// 播放菜单是否显示「硬解直出」：当前后端有这个开关，且设置里没选软解。
+/// [prefDecodeMode] 传用户设置的解码；起播回退临时改的软解不藏图标（见 [kotvDirectOutputOn]）。
+bool kotvShowDirectOutput(KotvPlayback playback, String prefDecodeMode) =>
+    playback.supportsDirectOutput && !KotvMpvOpts(decodeMode: prefDecodeMode).soft;
+
+/// 「硬解直出」图标亮不亮：直出开着、确实在硬解，且本次会话没被回退成软解。
+bool kotvDirectOutputOn(KotvPlayback playback, String sessionDecodeMode) =>
+    playback.directOutputActive && !KotvMpvOpts(decodeMode: sessionDecodeMode).soft;
 
 /// 页内画面：Android PlatformView；macOS/Win/Linux 原生 kotv_mpv；iOS media_kit；FVP 各平台独立。
 Widget kotvPlaybackView({
