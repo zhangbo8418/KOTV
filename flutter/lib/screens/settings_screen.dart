@@ -779,7 +779,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           if (showDirect)
             _sheetToggle(
               label: '硬解直出',
-              subtitle: '开：DXVA2 硬解，不行则软解；关：hwdec=auto，由 MPV 自己决定',
+              subtitle: '开：DXVA2 硬解，不行则软解；关：由 MPV 自己决定',
               value: mpvDirect,
               onChanged: (v) async {
                 await _set('mpvDirect', v ? 'true' : 'false', msg: '重启播放生效');
