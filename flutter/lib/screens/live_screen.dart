@@ -214,10 +214,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
 
   KotvPlayback _ensureMpv() {
     if (kotvUsesNativeMpv()) {
-      _mk ??= NativeMpvPlayback(
-        opts: _mpvOpts.copyWith(decodeMode: _decodeMode),
-        onWin7SoftOnDirect: _onWin7SoftOnDirect,
-      );
+      _mk ??= NativeMpvPlayback(opts: _mpvOpts.copyWith(decodeMode: _decodeMode));
       return _mk!;
     }
     // 同步创建；异步起播路径先 [_primeDesktopMpv]。直播须 live:true（关 cache-pause）。
@@ -265,7 +262,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     return true;
   }
 
-  /// Win7 直出（dxva2）没能硬解：会话内关直出，按 hwdec=auto 重开（不落盘）。
+  /// Win7 直出已软解：会话内关直出并换 D3D11 Player（不落盘）。
   void _onWin7SoftOnDirect() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_mpvOpts.direct) return;

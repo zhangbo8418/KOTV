@@ -479,13 +479,11 @@ void EventLoop(std::shared_ptr<MpvCore> core, std::shared_ptr<Bridge> bridge) {
     completed_sent = true;
     post_event({{EncodableValue("event"), EncodableValue("completed")}});
   };
-  auto post_hwdec = [&] {
+  auto log_hwdec = [&] {
     const std::string cur = GetStr(m, "hwdec-current");
     if (cur.empty() || cur == hwdec_sent) return;
     hwdec_sent = cur;
     MpvLog("core %llu: hwdec-current=%s vo=%s", id, cur.c_str(), GetStr(m, "current-vo").c_str());
-    post_event({{EncodableValue("event"), EncodableValue("hwdec")},
-                {EncodableValue("current"), EncodableValue(cur)}});
   };
   while (!core->stop_events.load() && m) {
     mpv_event* ev = mpv_wait_event(m, 0.05);
@@ -546,7 +544,7 @@ void EventLoop(std::shared_ptr<MpvCore> core, std::shared_ptr<Bridge> bridge) {
                     {EncodableValue("width"), EncodableValue(static_cast<int32_t>(w))},
                     {EncodableValue("height"), EncodableValue(static_cast<int32_t>(h))}});
         bridge->Post(Posted{Posted::kShowVideo, core->id, {}});
-        post_hwdec();
+        log_hwdec();
       }
     } else if (ev->event_id == MPV_EVENT_LOG_MESSAGE) {
       auto* lm = static_cast<mpv_event_log_message*>(ev->data);

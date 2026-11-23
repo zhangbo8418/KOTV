@@ -9,7 +9,6 @@ import 'package:flutter/services.dart';
 import 'buffer_budget.dart';
 import 'kotv_playback.dart';
 import 'kotv_platform.dart';
-import 'kotv_win7_direct.dart';
 import 'mpv_opts.dart';
 import 'mpv_surface.dart';
 import 'mpv_underlay.dart';
@@ -22,13 +21,7 @@ import 'silent_video_guard.dart';
 /// 原生 libmpv（MethodChannel `kotv_mpv`）。
 /// Android：PlatformView；macOS：underlay ASBDL；Win/Linux：原生 runner。
 class NativeMpvPlayback extends KotvPlayback {
-  /// [onWin7SoftOnDirect]：Win7 直出（dxva2）没能硬解、落到软解时回调一次；由页面关直出重开。
-  NativeMpvPlayback({KotvMpvOpts? opts, VoidCallback? onWin7SoftOnDirect})
-      : _opts = opts ?? const KotvMpvOpts(),
-        _onWin7SoftOnDirect = onWin7SoftOnDirect;
-
-  final VoidCallback? _onWin7SoftOnDirect;
-  bool _softOnDirectReported = false;
+  NativeMpvPlayback({KotvMpvOpts? opts}) : _opts = opts ?? const KotvMpvOpts();
 
   static const _ch = MethodChannel('kotv_mpv');
   static const _ev = EventChannel('kotv_mpv/events');
@@ -510,15 +503,6 @@ class NativeMpvPlayback extends KotvPlayback {
         }
         _engineLive = true;
         notifyListeners();
-        break;
-      case 'hwdec':
-        if (_softOnDirectReported ||
-            !kotvWin7SoftOnDirectNeedsNewPlayer(direct: _opts.direct, hwdecCurrent: '${m['current'] ?? ''}')) {
-          break;
-        }
-        _softOnDirectReported = true;
-        _log('直出未能硬解（hwdec-current=${m['current']}），本剧集改回自动');
-        _onWin7SoftOnDirect?.call();
         break;
       case 'error':
         _lastError = '${m['message'] ?? 'MPV error'}';
