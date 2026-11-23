@@ -2870,10 +2870,11 @@ internal class KotvExoSurfaceHost(context: Context) : FrameLayout(context) {
       val sv = SurfaceView(context).apply {
         layoutParams = lp
         // Hybrid Composition 需要媒体层叠出；关了部分机型会黑屏。
-        // 加载中滑动叠影不靠关 overlay，改由详情页黑底盖住 PlatformView。
+        // 出画前透底由 KotvSurfaceBackdrop 垫黑，不靠关 overlay。
         setZOrderMediaOverlay(true)
         isFocusable = false
         isFocusableInTouchMode = false
+        holder.addCallback(KotvSurfaceBackdrop(this))
       }
       surfaceView = sv
       val cb = object : SurfaceHolder.Callback {

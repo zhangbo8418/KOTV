@@ -2737,9 +2737,10 @@ internal class KotvMpvSurfaceHost(context: Context) :
         layoutParams = lp
         isFocusable = false
         isFocusableInTouchMode = false
-        // 与 Exo 一致：MediaOverlay 才能压过 Flutter 叠层，否则 Hybrid 下常见有声黑屏。
-        // 滚动重影靠详情 Positioned 跟槽；勿再靠关 overlay「藏」画面。
+        // MediaOverlay 才能压过 Flutter 叠层，否则 Hybrid 下常见有声黑屏；
+        // 出画前透底由 KotvSurfaceBackdrop 垫黑，勿靠关 overlay「藏」画面。
         setZOrderMediaOverlay(true)
+        holder.addCallback(KotvSurfaceBackdrop(this))
         holder.addCallback(this@KotvMpvSurfaceHost)
       }
       surfaceView = sv
