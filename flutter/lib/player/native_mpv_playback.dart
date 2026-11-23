@@ -57,6 +57,8 @@ class NativeMpvPlayback extends KotvPlayback {
   bool _demuxed = false;
   /// 换源递增；旧 [kotvGuardSilentVideo] 会话见 serial 变化即退出。
   int _openSerial = 0;
+  /// 每次 open 递增并下发；Windows 插件把它带在事件上，快速切台时丢掉上一个台的迟到事件。
+  int _loadSerial = 0;
   double _volume = 80;
   double _rate = 1;
   int _w = 0;
@@ -443,6 +445,8 @@ class NativeMpvPlayback extends KotvPlayback {
     }
     if (raw is! Map) return;
     final m = Map<String, dynamic>.from(raw);
+    final serial = m['serial'];
+    if (serial is int && serial != 0 && serial != _loadSerial) return;
     final event = '${m['event'] ?? ''}';
     switch (event) {
       case 'position':
@@ -536,6 +540,7 @@ class NativeMpvPlayback extends KotvPlayback {
     Duration startAt = Duration.zero,
     bool waitReady = true,
   }) async {
+    final loadSerial = ++_loadSerial;
     _url = url;
     _live = live;
     _createdAsLive = live;
@@ -588,6 +593,7 @@ class NativeMpvPlayback extends KotvPlayback {
       final loadOpts = <String>[];
       if (kotvIsWindows()) kotvAppendLavfHlsLoadOpts(url, mime, loadOpts);
       await _ch.invokeMethod('open', {
+        'serial': loadSerial,
         'url': url,
         'headers': _headers,
         if (mime != null) 'mime': mime,

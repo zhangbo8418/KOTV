@@ -250,6 +250,7 @@ struct OpenParams {
   int64_t start_ms = 0;
   std::string headers;
   std::string load_options;  // 只挂在这一次 loadfile 上（Dart 已按 %n% 编码）
+  int64_t serial = 0;        // Dart 每次 open 递增；事件带回去，Dart 丢掉旧台的迟到事件
   std::map<std::string, std::string> props;
 };
 
@@ -273,6 +274,11 @@ struct MpvCore {
   std::mutex queue_mu;
   std::string queued_id;
   EncodableList queued_subs;
+
+  // 播放列表项 id → 发起它的 open 序号。排队的下一集不登记，沿用当前序号。
+  std::mutex entry_mu;
+  std::map<int64_t, int64_t> entry_serial;
+  std::atomic<int64_t> want_serial{0};
 };
 
 // 会话级选项（UI 线程维护，快照后交给后台）。
@@ -313,6 +319,27 @@ void CommandAsync(mpv_handle* m, const std::vector<std::string>& args) {
   for (const auto& a : args) c.push_back(a.c_str());
   c.push_back(nullptr);
   mpv_command_async(m, 0, c.data());
+}
+
+// loadfile 同步执行，返回新播放列表项的 playlist_entry_id（拿不到为 -1）。
+int64_t LoadfileSync(mpv_handle* m, const std::vector<std::string>& args) {
+  std::vector<const char*> c;
+  c.reserve(args.size() + 1);
+  for (const auto& a : args) c.push_back(a.c_str());
+  c.push_back(nullptr);
+  mpv_node res{};
+  if (mpv_command_ret(m, c.data(), &res) < 0) return -1;
+  int64_t id = -1;
+  if (res.format == MPV_FORMAT_NODE_MAP && res.u.list) {
+    for (int i = 0; i < res.u.list->num; ++i) {
+      if (std::string(res.u.list->keys[i]) == "playlist_entry_id" &&
+          res.u.list->values[i].format == MPV_FORMAT_INT64) {
+        id = res.u.list->values[i].u.int64;
+      }
+    }
+  }
+  mpv_free_node_contents(&res);
+  return id;
 }
 
 void CommandSync(mpv_handle* m, const std::vector<std::string>& args) {
@@ -482,8 +509,23 @@ void EventLoop(std::shared_ptr<MpvCore> core, std::shared_ptr<Bridge> bridge) {
   mpv_handle* m = core->mpv.load();
   const auto id = static_cast<unsigned long long>(core->id);
   auto next_pos = clock::now();
+  // 当前文件的播放列表项与其 open 序号；loadfile 登记可能晚于 START_FILE，所以每次投递时再查。
+  int64_t cur_entry = -1;
+  int64_t cur_serial = 0;
+  auto serial_now = [&] {
+    std::lock_guard<std::mutex> lock(core->entry_mu);
+    auto it = core->entry_serial.find(cur_entry);
+    if (it != core->entry_serial.end()) cur_serial = it->second;
+    return cur_serial;
+  };
   auto post_event = [&](EncodableMap map) {
+    map[EncodableValue("serial")] = EncodableValue(serial_now());
     bridge->Post(Posted{Posted::kEvent, core->id, std::move(map)});
+  };
+  // 旧台的迟到事件不亮视频窗（want_serial=0：拿不到项 id，不比对）。
+  auto show_video = [&] {
+    const int64_t want = core->want_serial.load();
+    if (want == 0 || serial_now() == want) bridge->Post(Posted{Posted::kShowVideo, core->id, {}});
   };
   // 每个文件各报一次：media-live 常在开播后才定下来；keep-open 下片尾只有 eof-reached，没有 END_FILE。
   bool live_sent = false;
@@ -548,6 +590,7 @@ void EventLoop(std::shared_ptr<MpvCore> core, std::shared_ptr<Bridge> bridge) {
       continue;
     }
     if (ev->event_id == MPV_EVENT_START_FILE) {
+      if (auto* sf = static_cast<mpv_event_start_file*>(ev->data)) cur_entry = sf->playlist_entry_id;
       live_sent = false;
       completed_sent = false;
       skip_sent = false;
@@ -597,7 +640,7 @@ void EventLoop(std::shared_ptr<MpvCore> core, std::shared_ptr<Bridge> bridge) {
                   {EncodableValue("width"), EncodableValue(static_cast<int32_t>(w))},
                   {EncodableValue("height"), EncodableValue(static_cast<int32_t>(h))}});
       // 纯音频没有画面：不亮视频子窗，否则黑块挡住 Flutter 的音频封面层。
-      if (w > 0 && h > 0) bridge->Post(Posted{Posted::kShowVideo, core->id, {}});
+      if (w > 0 && h > 0) show_video();
       post_event(PositionEvent(m));
     } else if (ev->event_id == MPV_EVENT_VIDEO_RECONFIG) {
       RefreshInfoCache(core.get(), m);
@@ -610,7 +653,7 @@ void EventLoop(std::shared_ptr<MpvCore> core, std::shared_ptr<Bridge> bridge) {
         post_event({{EncodableValue("event"), EncodableValue("size")},
                     {EncodableValue("width"), EncodableValue(static_cast<int32_t>(w))},
                     {EncodableValue("height"), EncodableValue(static_cast<int32_t>(h))}});
-        bridge->Post(Posted{Posted::kShowVideo, core->id, {}});
+        show_video();
         log_hwdec();
       }
     } else if (ev->event_id == MPV_EVENT_LOG_MESSAGE) {
@@ -722,10 +765,16 @@ void InitAndOpen(std::shared_ptr<MpvCore> core, std::shared_ptr<Bridge> bridge, 
     if (!file_opts.empty()) file_opts += ",";
     file_opts += start_opt;
   }
-  if (file_opts.empty()) {
-    CommandSync(m, {"loadfile", open.url, "replace"});
-  } else {
-    CommandSync(m, {"loadfile", open.url, "replace", "-1", file_opts});
+  core->want_serial.store(0);
+  const int64_t entry = file_opts.empty()
+                            ? LoadfileSync(m, {"loadfile", open.url, "replace"})
+                            : LoadfileSync(m, {"loadfile", open.url, "replace", "-1", file_opts});
+  if (entry >= 0) {
+    std::lock_guard<std::mutex> lock(core->entry_mu);
+    // 旧台的项查不到时，事件线程沿用上次查到的旧序号，Dart 照样丢弃。
+    core->entry_serial.clear();
+    core->entry_serial[entry] = open.serial;
+    core->want_serial.store(open.serial);
   }
   CommandSync(m, {"set", "pause", "no"});
 }
@@ -1231,6 +1280,7 @@ class KotvMpvPlugin : public flutter::Plugin {
       open.start_ms = ArgInt64(args, "startAtMs");
       open.headers = ExtractHttpHeaders(args);
       open.load_options = ArgString(args, "loadOptions");
+      open.serial = ArgInt64(args, "serial");
       open.props = ExtractProps(args);
       if (!EnsureVideoHwnd()) {
         result->Error("NO_HWND", "video window unavailable");
