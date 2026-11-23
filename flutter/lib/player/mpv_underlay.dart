@@ -100,12 +100,6 @@ class KotvMpvUnderlayClip extends InheritedWidget {
   }
 }
 
-/// 旧：Win7 全屏曾用 inset 给顶/底栏留黑边。现改为栏叠视频，保留函数仅兼容旧调用。
-@Deprecated('Win7 fullscreen chrome overlays video; do not inset the HWND')
-Rect kotvWindowsOverlayFullscreenInset(Rect full, {bool episodesOpen = false}) {
-  return full;
-}
-
 /// 根导航上打开的弹窗（对话框、底部弹层、菜单）。详情/直播在壳内层 Navigator 里，
 /// 根上弹窗不会让它们的路由失去 isCurrent，Win7 洞须另行感知后让出画面。
 class KotvPopupRouteObserver extends NavigatorObserver {

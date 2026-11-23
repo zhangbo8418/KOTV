@@ -3123,7 +3123,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           layer = KotvMpvForcedGeom(globalRect: forcedGeom, child: layer);
         }
         return Positioned(
-          left: clip!.left,
+          left: clip.left,
           top: clip.top,
           width: clip.width,
           height: clip.height,
@@ -4571,20 +4571,28 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     );
 
     Widget videoPane({required bool expand}) {
-      // 播控叠在画面底部（与迷你窗/全屏一致），避免落在卡片外或与 HWND 错位。
-      Widget stageWithChrome({required Widget stage}) {
-        if (_playUrl.isEmpty) return stage;
-        return Stack(
+      Widget sized(Widget w) => expand ? w : AspectRatio(aspectRatio: 16 / 9, child: w);
+      final stage = _videoStage(interactive: true);
+      final Widget pane;
+      if (_playUrl.isEmpty) {
+        pane = sized(stage);
+      } else if (KotvWinChrome.isNeeded) {
+        // Win7：视频 HWND 在 Flutter 之上，底栏叠在画面底部，由原生壳按锚点承接。
+        pane = sized(Stack(
           key: _inlineSurfaceKey,
           fit: StackFit.expand,
           children: [
             stage,
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              child: _inlineChrome(),
-            ),
+            Positioned(left: 0, right: 0, bottom: 0, child: _inlineChrome()),
+          ],
+        ));
+      } else {
+        // 视频层（PlatformView / 洞）按槽位盖在页面上，Flutter 底栏放在画面下方才不被盖住。
+        pane = Column(
+          mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,
+          children: [
+            expand ? Expanded(child: stage) : sized(stage),
+            _inlineChrome(),
           ],
         );
       }
@@ -4598,12 +4606,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         child: ClipRRect(
           borderRadius: BorderRadius.circular(10),
           // 画面 ExcludeFocus + 原生 PlatformView 关焦点；控件靠 TvFocus 参与全局遍历。
-          child: expand
-              ? stageWithChrome(stage: _videoStage(interactive: true))
-              : AspectRatio(
-                  aspectRatio: 16 / 9,
-                  child: stageWithChrome(stage: _videoStage(interactive: true)),
-                ),
+          child: pane,
         ),
       );
     }
