@@ -213,6 +213,14 @@ class _AppShellState extends ConsumerState<AppShell> {
       _handlingBack = false;
     });
 
+    // 切仓/换源的全局遮罩：返回即撤遮罩，并软取消后端正在跑的请求。
+    final busy = ref.read(uiBusyProvider);
+    if (busy != null && busy.isNotEmpty) {
+      ref.read(uiBusyProvider.notifier).state = null;
+      unawaited(ref.read(apiProvider).cancelPending(hard: false, thunder: false));
+      return;
+    }
+
     // 全屏先退一层（弹窗、选集或底栏），再退沉浸。必须先于 root.pop / maybePop。
     if (DetailScreen.isImmersive) {
       final back = detailImmersiveBack;

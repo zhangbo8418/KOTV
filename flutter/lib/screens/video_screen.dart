@@ -831,7 +831,8 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
           nav.popUntil((r) => r.isFirst);
         }
         // 只保留全局遮罩一层转圈，避免与页内 spinner 叠两层
-        ref.read(uiBusyProvider.notifier).state = '正在切换到 $name…';
+        final busyMsg = '正在切换到 $name…';
+        ref.read(uiBusyProvider.notifier).state = busyMsg;
         setState(() {
           _tid = null;
           _extend.clear();
@@ -848,7 +849,8 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
         } catch (e) {
           if (mounted) setState(() => _statusMsg = '切换失败: $e');
         } finally {
-          ref.read(uiBusyProvider.notifier).state = null;
+          // 按返回取消后，遮罩可能已换成别的任务。
+          if (ref.read(uiBusyProvider) == busyMsg) ref.read(uiBusyProvider.notifier).state = null;
         }
       },
     );

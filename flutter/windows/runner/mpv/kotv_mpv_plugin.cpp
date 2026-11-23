@@ -39,7 +39,7 @@ constexpr UINT kMsgDestroyHwnd = WM_APP + 0x32;
 constexpr wchar_t kBridgeClass[] = L"KotvMpvBridge";
 constexpr auto kTeardownWait = std::chrono::milliseconds(1500);
 
-// %TEMP%\kotv_mpv.log：只记 mpv 的 warn 及以上和嵌入窗口信息，进程启动时清空。
+// %TEMP%\kotv_mpv.log：mpv 的 warn 及以上、解码器探测和嵌入窗口信息，进程启动时清空。
 void MpvLog(const char* fmt, ...) {
   static std::mutex mu;
   static bool fresh = true;
@@ -615,6 +615,13 @@ void EventLoop(std::shared_ptr<MpvCore> core, std::shared_ptr<Bridge> bridge) {
       }
     } else if (ev->event_id == MPV_EVENT_LOG_MESSAGE) {
       auto* lm = static_cast<mpv_event_log_message*>(ev->data);
+      // warn 以上全记；verbose 只留解码器探测与 d3d11 / dxva2 设备相关的行。
+      if (lm && lm->log_level > MPV_LOG_LEVEL_WARN) {
+        const std::string prefix = lm->prefix ? lm->prefix : "";
+        const bool hw = prefix == "vd" || prefix.find("hwdec") != std::string::npos ||
+                        prefix.find("d3d11") != std::string::npos || prefix.find("dxva2") != std::string::npos;
+        if (!hw) continue;
+      }
       std::string text = lm && lm->text ? lm->text : "";
       while (!text.empty() && (text.back() == '\n' || text.back() == '\r')) text.pop_back();
       std::string line = std::string(lm ? lm->level : "") + "] " + (lm ? lm->prefix : "") + ": " + text;
@@ -695,7 +702,7 @@ void InitAndOpen(std::shared_ptr<MpvCore> core, std::shared_ptr<Bridge> bridge, 
                            {EncodableValue("message"), EncodableValue("mpv init failed")}}});
       return;
     }
-    mpv_request_log_messages(m, "warn");
+    mpv_request_log_messages(m, "v");
     MpvLog("core %llu: mpv ready, wid=%p parent=%p", static_cast<unsigned long long>(core->id),
            static_cast<void*>(core->hwnd), static_cast<void*>(GetParent(core->hwnd)));
     core->mpv.store(m);

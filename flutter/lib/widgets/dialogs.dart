@@ -1013,8 +1013,8 @@ Future<bool> showRepoPicker(BuildContext context, WidgetRef ref) async {
       title != link &&
       !title.toLowerCase().startsWith('http://') &&
       !title.toLowerCase().startsWith('https://');
-  ref.read(uiBusyProvider.notifier).state =
-      named ? '正在切换到 $title…' : '正在切换线路…';
+  final busyMsg = named ? '正在切换到 $title…' : '正在切换线路…';
+  ref.read(uiBusyProvider.notifier).state = busyMsg;
   try {
     await api.loadConfig(selected.url).timeout(const Duration(seconds: 120));
     ref.invalidate(configProvider);
@@ -1028,7 +1028,8 @@ Future<bool> showRepoPicker(BuildContext context, WidgetRef ref) async {
     }
     return false;
   } finally {
-    ref.read(uiBusyProvider.notifier).state = null;
+    // 按返回取消后，遮罩可能已换成别的任务。
+    if (ref.read(uiBusyProvider) == busyMsg) ref.read(uiBusyProvider.notifier).state = null;
   }
 }
 

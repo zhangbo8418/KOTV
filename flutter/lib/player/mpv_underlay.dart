@@ -206,6 +206,11 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
   @override
   void didUpdateWidget(covariant KotvMpvUnderlayHole oldWidget) {
     super.didUpdateWidget(oldWidget);
+    // 新会话（如切直出换了播放器）：原生 dispose 已清掉几何和显隐，就绪后要整份重发。
+    if (oldWidget.ready && !widget.ready) {
+      _lastSent = null;
+      _lastVisible = null;
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) => _sync());
   }
 
