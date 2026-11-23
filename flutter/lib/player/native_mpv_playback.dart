@@ -120,6 +120,13 @@ class NativeMpvPlayback extends KotvPlayback {
   @override
   bool get directOutput => _opts.direct;
 
+  /// mpv 实际在用的 hwdec（`no` = 软解）；每个文件起播后由引擎报一次。
+  String _hwdecCurrent = '';
+
+  /// 直出开着但 dxva2 没起来、落到了软解：图标临时显示为关。
+  @override
+  bool get directOutputActive => _opts.direct && _hwdecCurrent != 'no';
+
   /// Windows：写进插件的 %TEMP%\kotv_mpv.log，和引擎日志排在一起。
   void _log(String message) {
     if (!kotvIsWindows()) return;
@@ -490,6 +497,12 @@ class NativeMpvPlayback extends KotvPlayback {
       case 'transition':
         _enterQueued('${m['id'] ?? ''}');
         break;
+      case 'hwdec':
+        final v = '${m['value'] ?? ''}';
+        if (v == _hwdecCurrent) break;
+        _hwdecCurrent = v;
+        notifyListeners();
+        break;
       case 'completed':
         if (_completed) break;
         _completed = true;
@@ -806,12 +819,16 @@ class NativeMpvPlayback extends KotvPlayback {
       return false;
     }
     try {
+      final mime = kotvPlayMime(url, format);
+      final loadOpts = <String>[];
+      if (kotvIsWindows()) kotvAppendLavfHlsLoadOpts(url, mime, loadOpts);
       final ok = await _ch.invokeMethod<bool>('queueNext', {
         'id': id,
         'url': url,
         'headers': h,
-        'mime': kotvPlayMime(url, format),
+        'mime': mime,
         'subs': subs,
+        if (loadOpts.isNotEmpty) 'loadOptions': kotvEncodeMpvLoadfileOptions(loadOpts),
         if (startAt > Duration.zero) 'startAtMs': startAt.inMilliseconds,
       });
       _queued = ok == true ? (id: id, url: url, headers: h, format: format, subs: subs) : null;

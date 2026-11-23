@@ -545,10 +545,10 @@ _IconAct _directOutputIcon({
   FocusNode? focusNode,
   bool scrollIntoView = false,
 }) {
-  final on = player.directOutput;
+  final on = player.directOutputActive;
   return _IconAct(
     icon: on ? Icons.flash_on : Icons.flash_off,
-    tip: on ? '硬解直出：开' : '硬解直出：关',
+    tip: on ? '硬解直出：开' : (player.directOutput ? '硬解直出：开（硬解失败，已软解）' : '硬解直出：关'),
     size: size,
     focusNode: focusNode,
     scrollIntoView: scrollIntoView,

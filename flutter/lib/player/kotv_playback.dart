@@ -140,6 +140,9 @@ abstract class KotvPlayback extends ChangeNotifier {
   bool get supportsDirectOutput => false;
   bool get directOutput => true;
 
+  /// 图标显示用：直出开着且确实在硬解（落到软解时为 false）。切换仍按 [directOutput]。
+  bool get directOutputActive => directOutput;
+
   /// Android Exo / 原生 MPV：Surface / Texture；其它后端忽略。
   Future<void> setRenderMode(String mode) async {}
 

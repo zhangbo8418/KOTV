@@ -3922,7 +3922,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       ...KotvWinChrome.metrics(context),
       ...KotvWinChrome.playbackFields(p, forceBuffering: _winChromeForceBuffering),
       'showDirect': kotvShowDirectOutput(p, _decodeMode),
-      'directOn': p.directOutput,
+      'directOn': p.directOutputActive,
       'hasCast': true,
       'hasMini': true,
       'gestures': true,

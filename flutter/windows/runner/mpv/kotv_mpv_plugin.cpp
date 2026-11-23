@@ -61,6 +61,18 @@ void MpvLog(const char* fmt, ...) {
   fclose(f);
 }
 
+// Win7 = 6.1。GetVersionEx 受清单影响，直接问 ntdll。
+bool IsWindows7() {
+  using RtlGetVersionFn = LONG(WINAPI*)(PRTL_OSVERSIONINFOW);
+  HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+  auto rtl = ntdll ? reinterpret_cast<RtlGetVersionFn>(GetProcAddress(ntdll, "RtlGetVersion")) : nullptr;
+  if (!rtl) return false;
+  RTL_OSVERSIONINFOW vi{};
+  vi.dwOSVersionInfoSize = sizeof(vi);
+  if (rtl(&vi) != 0) return false;
+  return vi.dwMajorVersion == 6 && vi.dwMinorVersion == 1;
+}
+
 std::string ArgString(const EncodableMap* m, const char* key, const std::string& def = "") {
   if (!m) return def;
   auto it = m->find(EncodableValue(key));
@@ -256,6 +268,11 @@ struct MpvCore {
   std::string tracks_audio = "[]";
   std::string tracks_video = "[]";
   std::string tracks_sub = "[]";
+
+  // 无缝换集：排在播放列表下标 1 的下一集。UI 线程写，事件线程播到它时取走。
+  std::mutex queue_mu;
+  std::string queued_id;
+  EncodableList queued_subs;
 };
 
 // 会话级选项（UI 线程维护，快照后交给后台）。
@@ -484,7 +501,26 @@ void EventLoop(std::shared_ptr<MpvCore> core, std::shared_ptr<Bridge> bridge) {
     if (cur.empty() || cur == hwdec_sent) return;
     hwdec_sent = cur;
     MpvLog("core %llu: hwdec-current=%s vo=%s", id, cur.c_str(), GetStr(m, "current-vo").c_str());
+    post_event({{EncodableValue("event"), EncodableValue("hwdec")}, {EncodableValue("value"), EncodableValue(cur)}});
   };
+  auto has_queued = [&] {
+    std::lock_guard<std::mutex> lock(core->queue_mu);
+    return !core->queued_id.empty();
+  };
+  // 片尾：有排队的下一集就前进过去，否则报 completed。
+  bool skip_sent = false;
+  auto on_eof = [&] {
+    if (!has_queued()) {
+      post_completed();
+      return;
+    }
+    if (skip_sent) return;
+    skip_sent = true;
+    CommandAsync(m, {"playlist-next"});
+    CommandAsync(m, {"set", "pause", "no"});
+  };
+  // 切入排队集后要挂的外挂字幕：等 file-loaded 再 sub-add。
+  EncodableList pending_subs;
   while (!core->stop_events.load() && m) {
     mpv_event* ev = mpv_wait_event(m, 0.05);
     if (!ev) continue;
@@ -502,7 +538,7 @@ void EventLoop(std::shared_ptr<MpvCore> core, std::shared_ptr<Bridge> bridge) {
         if (mpv_get_property(m, "eof-reached", MPV_FORMAT_FLAG, &flag) >= 0) {
           // 片尾后拖回去再播完要能再报一次。
           if (flag) {
-            post_completed();
+            on_eof();
           } else {
             completed_sent = false;
           }
@@ -514,9 +550,40 @@ void EventLoop(std::shared_ptr<MpvCore> core, std::shared_ptr<Bridge> bridge) {
     if (ev->event_id == MPV_EVENT_START_FILE) {
       live_sent = false;
       completed_sent = false;
+      skip_sent = false;
       hwdec_sent.clear();
+      pending_subs.clear();
+      int64_t pos = -1;
+      mpv_get_property(m, "playlist-pos", MPV_FORMAT_INT64, &pos);
+      std::string next_id;
+      if (pos == 1) {
+        std::lock_guard<std::mutex> lock(core->queue_mu);
+        next_id.swap(core->queued_id);
+        pending_subs.swap(core->queued_subs);
+      }
+      if (!next_id.empty()) {
+        SetProp(m, "keep-open", "yes");
+        MpvLog("core %llu: seamless next %s", id, next_id.c_str());
+        post_event({{EncodableValue("event"), EncodableValue("transition")},
+                    {EncodableValue("id"), EncodableValue(next_id)}});
+      }
     } else if (ev->event_id == MPV_EVENT_FILE_LOADED ||
                ev->event_id == MPV_EVENT_PLAYBACK_RESTART) {
+      if (ev->event_id == MPV_EVENT_FILE_LOADED) {
+        for (const auto& v : pending_subs) {
+          const auto* sub = std::get_if<EncodableMap>(&v);
+          const std::string path = ArgString(sub, "path");
+          if (path.empty()) continue;
+          const char* flag = ArgBool(sub, "select", true) ? "select" : "auto";
+          const std::string title = ArgString(sub, "title");
+          if (title.empty()) {
+            CommandAsync(m, {"sub-add", path, flag});
+          } else {
+            CommandAsync(m, {"sub-add", path, flag, title});
+          }
+        }
+        pending_subs.clear();
+      }
       RefreshInfoCache(core.get(), m);
       RefreshTrackCache(core.get(), m);
       int64_t w = 0, h = 0;
@@ -566,8 +633,9 @@ void EventLoop(std::shared_ptr<MpvCore> core, std::shared_ptr<Bridge> bridge) {
         MpvLog("core %llu: end-file reason=%d error=%s", id, static_cast<int>(e->reason),
                mpv_error_string(e->error));
       }
+      // keep-open=no 且有排队时 mpv 自己前进到下一项，这里不报 completed。
       if (e && e->reason == MPV_END_FILE_REASON_EOF) {
-        post_completed();
+        if (!has_queued()) post_completed();
       } else if (e && e->reason == MPV_END_FILE_REASON_ERROR) {
         post_event({{EncodableValue("event"), EncodableValue("error")},
                     {EncodableValue("message"),
@@ -608,6 +676,10 @@ void InitAndOpen(std::shared_ptr<MpvCore> core, std::shared_ptr<Bridge> bridge, 
     mpv_set_option_string(m, "vo", "gpu-next,gpu,direct3d");
     mpv_set_option_string(m, "gpu-api", "auto");
     mpv_set_option_string(m, "gpu-context", "auto");
+    // Win7 换不成 10bit 交换链：libplacebo 默认挑 R10G10B10A2，每帧 ResizeBuffers 都 E_INVALIDARG，画面全黑。
+    if (IsWindows7()) mpv_set_option_string(m, "d3d11-output-format", "rgba8");
+    // 本集将完时提前打开排队的下一集（无缝换集）。
+    mpv_set_option_string(m, "prefetch-playlist", "yes");
     mpv_set_option_string(m, "hwdec", ResolveHwdec(opts).c_str());
     mpv_set_option_string(m, "hwdec-software-fallback", "yes");
     mpv_set_option_string(m, "keep-open", "yes");
@@ -945,6 +1017,19 @@ class KotvMpvPlugin : public flutter::Plugin {
 
   mpv_handle* Mpv() { return core_ ? core_->mpv.load() : nullptr; }
 
+  // 撤掉排队的下一集并恢复 keep-open=yes；原先有排队才返回 true。
+  bool ClearQueued() {
+    if (!core_) return false;
+    {
+      std::lock_guard<std::mutex> lock(core_->queue_mu);
+      if (core_->queued_id.empty()) return false;
+      core_->queued_id.clear();
+      core_->queued_subs.clear();
+    }
+    SetProp(Mpv(), "keep-open", "yes");
+    return true;
+  }
+
   void IngestSession(const EncodableMap* args) {
     opts_.decode_mode = ArgString(args, "decode", opts_.decode_mode);
     opts_.direct = ArgBool(args, "direct", opts_.direct);
@@ -1144,6 +1229,8 @@ class KotvMpvPlugin : public flutter::Plugin {
         result->Error("NO_HWND", "video window unavailable");
         return;
       }
+      // loadfile replace 会清空播放列表，这里只撤状态。
+      ClearQueued();
       ScheduleOpen(std::move(open));
       result->Success();
       return;
@@ -1161,6 +1248,7 @@ class KotvMpvPlugin : public flutter::Plugin {
     if (method == "stop") {
       // 与随后的 loadfile 在同一实例内按序执行，UI 不等。
       if (core_) core_->open_gen++;
+      ClearQueued();
       CommandAsync(Mpv(), {"stop"});
       if (core_) HideVideo(core_->hwnd);
       result->Success();
@@ -1245,7 +1333,10 @@ class KotvMpvPlugin : public flutter::Plugin {
                                                         : "secondary-sid";
       std::string key = id;
       for (auto& ch : key) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-      if (key.empty() || key == "off" || key == "none") id = key.empty() ? "auto" : "no";
+      // 与 Dart 同口径：字幕空 id = 关闭，音视频空 id = 自动。
+      const bool sub = method == "setSubtitleTrack" || method == "setSecondarySubtitleTrack";
+      if (key == "off" || key == "none" || (key.empty() && sub)) id = "no";
+      if (key.empty() && !sub) id = "auto";
       CommandAsync(Mpv(), {"set", prop, id});
       result->Success();
       return;
@@ -1346,8 +1437,63 @@ class KotvMpvPlugin : public flutter::Plugin {
       result->Success();
       return;
     }
-    if (method == "queueNext" || method == "clearNext" || method == "skipToNext") {
-      result->Success(EncodableValue(false));
+    // 无缝换集，契约同 Android：下一集追加到播放列表下标 1，keep-open=no 让 EOF 自然前进。
+    if (method == "queueNext") {
+      mpv_handle* m = Mpv();
+      const std::string qid = ArgString(args, "id");
+      const std::string url = ArgString(args, "url");
+      if (!m || opts_.live || opts_.repeat_one || qid.empty() || url.empty()) {
+        result->Success(EncodableValue(false));
+        return;
+      }
+      std::string file_opts = ArgString(args, "loadOptions");
+      const int64_t start_ms = ArgInt64(args, "startAtMs");
+      if (start_ms > 0) {
+        char start_opt[64];
+        snprintf(start_opt, sizeof(start_opt), "start=%.3f", start_ms / 1000.0);
+        if (!file_opts.empty()) file_opts += ",";
+        file_opts += start_opt;
+      }
+      {
+        std::lock_guard<std::mutex> lock(core_->queue_mu);
+        core_->queued_id = qid;
+        core_->queued_subs.clear();
+        if (args) {
+          auto it = args->find(EncodableValue("subs"));
+          if (it != args->end()) {
+            if (const auto* list = std::get_if<EncodableList>(&it->second)) core_->queued_subs = *list;
+          }
+        }
+      }
+      // 只留正在播的一项，新排的总在下标 1。
+      CommandAsync(m, {"playlist-clear"});
+      if (file_opts.empty()) {
+        CommandAsync(m, {"loadfile", url, "append"});
+      } else {
+        CommandAsync(m, {"loadfile", url, "append", "-1", file_opts});
+      }
+      SetProp(m, "keep-open", "no");
+      result->Success(EncodableValue(true));
+      return;
+    }
+    if (method == "clearNext") {
+      if (ClearQueued()) {
+        CommandAsync(Mpv(), {"playlist-clear"});
+      }
+      result->Success();
+      return;
+    }
+    if (method == "skipToNext") {
+      bool queued = false;
+      if (core_) {
+        std::lock_guard<std::mutex> lock(core_->queue_mu);
+        queued = !core_->queued_id.empty();
+      }
+      if (queued && Mpv()) {
+        CommandAsync(Mpv(), {"playlist-next"});
+        CommandAsync(Mpv(), {"set", "pause", "no"});
+      }
+      result->Success(EncodableValue(queued && Mpv() != nullptr));
       return;
     }
     if (method == "discTitleCount" || method == "discChapterCount") {

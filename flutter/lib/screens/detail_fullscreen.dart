@@ -538,7 +538,10 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
         _bumpChrome();
         break;
       case 'track':
-        unawaited(_winOpenTrackSheet(e['kind'] as String? ?? ''));
+        // 底栏按钮带 id=open；弹层里选中的行带轨道 id。
+        final kind = e['kind'] as String? ?? '';
+        final id = e['id'] as String? ?? '';
+        unawaited(id == 'open' ? _winOpenTrackSheet(kind) : _winPickTrack(kind, id));
         break;
       case 'episodes':
         _toggleEpisodes();
@@ -847,10 +850,11 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       case 'subtitle':
         if (id == 'file') {
           if (!mounted) return;
-          final path = await kotvPickSubtitleFile(context);
+          final path = await KotvWinChrome.withSuspended(() => kotvPickSubtitleFile(context));
           if (path != null) await pb.addSubtitlePath(path);
         } else if (id == 'assrt') {
-          await widget.onAssrtSearch?.call();
+          final search = widget.onAssrtSearch;
+          if (search != null) await KotvWinChrome.withSuspended(search);
         } else if (id.startsWith('sec:')) {
           await pb.setSecondarySubtitleTrack(id.substring(4));
         } else {
@@ -862,12 +866,6 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
 
   Future<void> _onWinSheet(String kind, String id) async {
     switch (kind) {
-      case 'subtitle':
-      case 'audio':
-      case 'video':
-      case 'disc':
-        await _winPickTrack(kind, id);
-        return;
       case 'speed':
         final v = double.tryParse(id);
         if (v == null) return;
@@ -1102,7 +1100,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       'showPlayer': kotvCanSwitchPlayer(live: false),
       'playerBadge': flutterIsEmbedPlayer(_winPlayerVal) ? '内' : '外',
       'showDirect': kotvShowDirectOutput(pb, _decodeMode),
-      'directOn': pb.directOutput,
+      'directOn': pb.directOutputActive,
       'showDisc': pb.supportsDiscNav && KotvDiscPlay.looksLike(widget.playUrl),
       'openingSec': widget.openingSec,
       'endingSec': widget.endingSec,
@@ -1164,6 +1162,11 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       _playingForChrome = widget.playback.playing;
       _bindPlaybackStreams(widget.playback);
       _refreshForceLandscapeBtn();
+    }
+    // 片头片尾由父页回写；原生播控只在 update 时取新值。
+    if (KotvWinChrome.isNeeded &&
+        (oldWidget.openingSec != widget.openingSec || oldWidget.endingSec != widget.endingSec)) {
+      _syncWinChrome();
     }
   }
 
