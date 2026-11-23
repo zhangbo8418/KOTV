@@ -284,6 +284,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   String _prefDecodeMode = 'auto';
   String _renderMode = 'surface';
   KotvMpvOpts _mpvOpts = const KotvMpvOpts();
+  /// Win7 直出在本剧集里已失败回退：后续集数和重读设置都按关直出（不落盘）。
+  bool _directFellBack = false;
+
+  KotvMpvOpts _mpvOptsFromSettings(Map<String, dynamic> settings) {
+    final o = KotvMpvOpts.fromSettings(settings, decodeMode: _decodeMode);
+    return _directFellBack ? o.copyWith(direct: false) : o;
+  }
   bool _danmakuOn = false;
   bool _ambientOn = false;
   /// off | audio | pip
@@ -541,7 +548,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
 
   KotvPlayback _ensureMpv() {
     if (kotvUsesNativeMpv()) {
-      _mk ??= NativeMpvPlayback(opts: _mpvOpts.copyWith(decodeMode: _decodeMode));
+      _mk ??= NativeMpvPlayback(
+        opts: _mpvOpts.copyWith(decodeMode: _decodeMode),
+        onWin7SoftOnDirect: _onWin7SoftOnDirect,
+      );
       return _mk!;
     }
     if (_mk != null) {
@@ -992,10 +1002,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     if (!_danmakuOn) setState(() => _danmakuOn = true);
   }
 
-  /// Win7 直出已软解：会话内关直出并换 D3D11 Player（不落盘；in-place MaybeRewrite 会蓝屏）。
+  /// Win7 直出（dxva2）没能硬解：本剧集内关直出，按 hwdec=auto 重开（不落盘）。
   void _onWin7SoftOnDirect() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_mpvOpts.direct) return;
+      _directFellBack = true;
       setState(() => _mpvOpts = _mpvOpts.copyWith(direct: false));
       unawaited(_reopenWithNewMpvPlayer());
     });
@@ -1496,7 +1507,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       _prefDecodeMode = decode;
     }
     _renderMode = kotvNormalizePlayerRender('${settings['playerRender'] ?? 'surface'}');
-    _mpvOpts = KotvMpvOpts.fromSettings(settings, decodeMode: _decodeMode);
+    _mpvOpts = _mpvOptsFromSettings(settings);
     _preloadNextEpisode = kotvSettingsFlag(settings['preloadNextEpisode']);
     _adFilterOn = kotvSettingsMapFlag(settings, 'adFilter', def: true);
     kotvPushPlayerSettings(
@@ -3272,7 +3283,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     try {
       final settings = await KotvSettingsCache.fetch(ref.read(apiProvider));
       if (!mounted) return;
-      _mpvOpts = KotvMpvOpts.fromSettings(settings, decodeMode: _decodeMode);
+      _mpvOpts = _mpvOptsFromSettings(settings);
       kotvPushPlayerSettings(
         settings,
         mpvOpts: _mpvOpts,
@@ -4143,6 +4154,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       setState(() => _ambientOn = v.toLowerCase() == 'true');
     }
     if (k == 'mpvDirect') {
+      _directFellBack = false;
       final prev = _mpvOpts;
       setState(() => _mpvOpts = _mpvOpts.copyWith(direct: kotvSettingsFlag(v)));
       if (_backend == KotvEmbedBackend.mpv && kotvMpvNeedsNewPlayer(prev, _mpvOpts)) {

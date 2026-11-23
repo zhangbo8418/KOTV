@@ -222,19 +222,53 @@ class KotvWinChrome {
   }
 
   /// 播放态（原生按 positionSec + 本地时钟插值弹幕）。
+  /// 页面推全量时顺带跟上这个实例的进度流：播放器只在播停/缓冲变化时 notify，进度要单独推。
   static Map<String, dynamic> playbackFields(KotvPlayback p, {bool forceBuffering = false}) {
-    final dur = p.duration;
-    final bounded = boundedMediaDurationUs(dur.inMicroseconds);
+    _followPosition(p);
     return {
       'playing': p.playing,
       'buffering': forceBuffering || p.buffering || p.stalling,
+      ..._timeFields(p),
+      'rate': p.rate,
+      'volume': p.volume.clamp(0, 100).toDouble(),
+    };
+  }
+
+  static Map<String, dynamic> _timeFields(KotvPlayback p) {
+    final dur = p.duration;
+    final bounded = boundedMediaDurationUs(dur.inMicroseconds);
+    _sentPosSec = p.position.inSeconds;
+    _sentDurSec = bounded ? dur.inSeconds : -1;
+    return {
       'positionSec': p.position.inMilliseconds / 1000.0,
       'durationSec': bounded ? dur.inMilliseconds / 1000.0 : 0.0,
       'bufferedSec': p.buffered.inMilliseconds / 1000.0,
       'bounded': bounded,
-      'rate': p.rate,
-      'volume': p.volume.clamp(0, 100).toDouble(),
     };
+  }
+
+  static KotvPlayback? _posOwner;
+  static StreamSubscription<Duration>? _posSub;
+  static int _sentPosSec = -1;
+  static int _sentDurSec = -1;
+
+  static void _followPosition(KotvPlayback p) {
+    if (!isNeeded || identical(p, _posOwner)) return;
+    _posSub?.cancel();
+    _posOwner = p;
+    _posSub = p.positionStream.listen((_) {
+      // 原生时间显示到秒：秒数或片长变了才推，只带时间字段。
+      final dur = p.duration;
+      final durSec = boundedMediaDurationUs(dur.inMicroseconds) ? dur.inSeconds : -1;
+      if (p.position.inSeconds == _sentPosSec && durSec == _sentDurSec) return;
+      unawaited(update(_timeFields(p)));
+    });
+  }
+
+  static void _stopFollowingPosition() {
+    _posSub?.cancel();
+    _posSub = null;
+    _posOwner = null;
   }
 
   static bool boundedMediaDurationUs(int us) => us > 0 && us <= 9007199254740991;
@@ -278,6 +312,7 @@ class KotvWinChrome {
     if (!isNeeded) return;
     if (token != 0 && token != _ownerToken) return;
     onEvent = null;
+    _stopFollowingPosition();
     _lastDanmakuSig = 0;
     _lastItemsSig = null;
     unawaited(hideSheet());

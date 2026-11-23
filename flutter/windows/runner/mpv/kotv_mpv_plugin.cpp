@@ -463,9 +463,29 @@ EncodableMap PositionEvent(mpv_handle* m) {
 void EventLoop(std::shared_ptr<MpvCore> core, std::shared_ptr<Bridge> bridge) {
   using clock = std::chrono::steady_clock;
   mpv_handle* m = core->mpv.load();
+  const auto id = static_cast<unsigned long long>(core->id);
   auto next_pos = clock::now();
   auto post_event = [&](EncodableMap map) {
     bridge->Post(Posted{Posted::kEvent, core->id, std::move(map)});
+  };
+  // 每个文件各报一次：media-live 常在开播后才定下来；keep-open 下片尾只有 eof-reached，没有 END_FILE。
+  bool live_sent = false;
+  bool completed_sent = false;
+  std::string hwdec_sent;
+  std::string last_log;
+  int log_repeat = 0;
+  auto post_completed = [&] {
+    if (completed_sent) return;
+    completed_sent = true;
+    post_event({{EncodableValue("event"), EncodableValue("completed")}});
+  };
+  auto post_hwdec = [&] {
+    const std::string cur = GetStr(m, "hwdec-current");
+    if (cur.empty() || cur == hwdec_sent) return;
+    hwdec_sent = cur;
+    MpvLog("core %llu: hwdec-current=%s vo=%s", id, cur.c_str(), GetStr(m, "current-vo").c_str());
+    post_event({{EncodableValue("event"), EncodableValue("hwdec")},
+                {EncodableValue("current"), EncodableValue(cur)}});
   };
   while (!core->stop_events.load() && m) {
     mpv_event* ev = mpv_wait_event(m, 0.05);
@@ -474,50 +494,82 @@ void EventLoop(std::shared_ptr<MpvCore> core, std::shared_ptr<Bridge> bridge) {
     if (ev->event_id == MPV_EVENT_NONE) {
       if (clock::now() >= next_pos) {
         post_event(PositionEvent(m));
+        int flag = 0;
+        if (!live_sent && mpv_get_property(m, "media-live", MPV_FORMAT_FLAG, &flag) >= 0 && flag) {
+          live_sent = true;
+          post_event({{EncodableValue("event"), EncodableValue("live")},
+                      {EncodableValue("live"), EncodableValue(true)}});
+        }
+        flag = 0;
+        if (mpv_get_property(m, "eof-reached", MPV_FORMAT_FLAG, &flag) >= 0) {
+          // 片尾后拖回去再播完要能再报一次。
+          if (flag) {
+            post_completed();
+          } else {
+            completed_sent = false;
+          }
+        }
         next_pos = clock::now() + std::chrono::milliseconds(300);
       }
       continue;
     }
-    if (ev->event_id == MPV_EVENT_FILE_LOADED || ev->event_id == MPV_EVENT_PLAYBACK_RESTART) {
+    if (ev->event_id == MPV_EVENT_START_FILE) {
+      live_sent = false;
+      completed_sent = false;
+      hwdec_sent.clear();
+    } else if (ev->event_id == MPV_EVENT_FILE_LOADED ||
+               ev->event_id == MPV_EVENT_PLAYBACK_RESTART) {
       RefreshInfoCache(core.get(), m);
       RefreshTrackCache(core.get(), m);
       int64_t w = 0, h = 0;
       mpv_get_property(m, "dwidth", MPV_FORMAT_INT64, &w);
       mpv_get_property(m, "dheight", MPV_FORMAT_INT64, &h);
+      if (ev->event_id == MPV_EVENT_FILE_LOADED) {
+        MpvLog("core %llu: file-loaded %lldx%lld", id, static_cast<long long>(w),
+               static_cast<long long>(h));
+      }
       post_event({{EncodableValue("event"), EncodableValue("ready")},
                   {EncodableValue("width"), EncodableValue(static_cast<int32_t>(w))},
                   {EncodableValue("height"), EncodableValue(static_cast<int32_t>(h))}});
-      bridge->Post(Posted{Posted::kShowVideo, core->id, {}});
-      int live = 0;
-      if (mpv_get_property(m, "media-live", MPV_FORMAT_FLAG, &live) >= 0 && live) {
-        post_event({{EncodableValue("event"), EncodableValue("live")},
-                    {EncodableValue("live"), EncodableValue(true)}});
-      }
+      // 纯音频没有画面：不亮视频子窗，否则黑块挡住 Flutter 的音频封面层。
+      if (w > 0 && h > 0) bridge->Post(Posted{Posted::kShowVideo, core->id, {}});
       post_event(PositionEvent(m));
     } else if (ev->event_id == MPV_EVENT_VIDEO_RECONFIG) {
       RefreshInfoCache(core.get(), m);
       int64_t w = 0, h = 0;
       mpv_get_property(m, "dwidth", MPV_FORMAT_INT64, &w);
       mpv_get_property(m, "dheight", MPV_FORMAT_INT64, &h);
+      MpvLog("core %llu: video-reconfig %lldx%lld", id, static_cast<long long>(w),
+             static_cast<long long>(h));
       if (w > 0 && h > 0) {
         post_event({{EncodableValue("event"), EncodableValue("size")},
                     {EncodableValue("width"), EncodableValue(static_cast<int32_t>(w))},
                     {EncodableValue("height"), EncodableValue(static_cast<int32_t>(h))}});
+        bridge->Post(Posted{Posted::kShowVideo, core->id, {}});
+        post_hwdec();
       }
     } else if (ev->event_id == MPV_EVENT_LOG_MESSAGE) {
       auto* lm = static_cast<mpv_event_log_message*>(ev->data);
       std::string text = lm && lm->text ? lm->text : "";
       while (!text.empty() && (text.back() == '\n' || text.back() == '\r')) text.pop_back();
-      MpvLog("core %llu: [%s] %s: %s", static_cast<unsigned long long>(core->id),
-             lm ? lm->level : "", lm ? lm->prefix : "", text.c_str());
+      std::string line = std::string(lm ? lm->level : "") + "] " + (lm ? lm->prefix : "") + ": " + text;
+      // 每帧重复的同一条（如 swapchain 失败）只记首条和次数。
+      if (line == last_log) {
+        log_repeat++;
+        continue;
+      }
+      if (log_repeat > 0) MpvLog("core %llu: (last message repeated %d times)", id, log_repeat);
+      log_repeat = 0;
+      last_log = line;
+      MpvLog("core %llu: [%s", id, line.c_str());
     } else if (ev->event_id == MPV_EVENT_END_FILE) {
       auto* e = static_cast<mpv_event_end_file*>(ev->data);
       if (e) {
-        MpvLog("core %llu: end-file reason=%d error=%s", static_cast<unsigned long long>(core->id),
-               static_cast<int>(e->reason), mpv_error_string(e->error));
+        MpvLog("core %llu: end-file reason=%d error=%s", id, static_cast<int>(e->reason),
+               mpv_error_string(e->error));
       }
       if (e && e->reason == MPV_END_FILE_REASON_EOF) {
-        post_event({{EncodableValue("event"), EncodableValue("completed")}});
+        post_completed();
       } else if (e && e->reason == MPV_END_FILE_REASON_ERROR) {
         post_event({{EncodableValue("event"), EncodableValue("error")},
                     {EncodableValue("message"),
@@ -1062,6 +1114,11 @@ class KotvMpvPlugin : public flutter::Plugin {
     } reset{watchdog_};
 #endif
 
+    if (method == "log") {
+      MpvLog("dart: %s", ArgString(args, "message").c_str());
+      result->Success();
+      return;
+    }
     if (method == "isVulkanAvailable") {
       result->Success(EncodableValue(false));
       return;

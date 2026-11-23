@@ -293,9 +293,8 @@ class KotvMpvOpts {
       return hard ? 'mediacodec' : 'mediacodec,no';
     }
     if (kotvIsWindows()) {
-      if (kotvIsWindows7() && direct) {
-        return hard ? 'dxva2' : 'dxva2,no';
-      }
+      // Win7 直出只试 dxva2；落到软解由页面关直出、按 auto 重开（不落盘）。
+      if (kotvIsWindows7() && direct) return 'dxva2';
       return 'auto';
     }
     if (kotvIsMacOS() || kotvIsIOS()) {

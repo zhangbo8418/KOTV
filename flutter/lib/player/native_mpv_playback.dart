@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'buffer_budget.dart';
 import 'kotv_playback.dart';
 import 'kotv_platform.dart';
+import 'kotv_win7_direct.dart';
 import 'mpv_opts.dart';
 import 'mpv_surface.dart';
 import 'mpv_underlay.dart';
@@ -21,7 +22,13 @@ import 'silent_video_guard.dart';
 /// 原生 libmpv（MethodChannel `kotv_mpv`）。
 /// Android：PlatformView；macOS：underlay ASBDL；Win/Linux：原生 runner。
 class NativeMpvPlayback extends KotvPlayback {
-  NativeMpvPlayback({KotvMpvOpts? opts}) : _opts = opts ?? const KotvMpvOpts();
+  /// [onWin7SoftOnDirect]：Win7 直出（dxva2）没能硬解、落到软解时回调一次；由页面关直出重开。
+  NativeMpvPlayback({KotvMpvOpts? opts, VoidCallback? onWin7SoftOnDirect})
+      : _opts = opts ?? const KotvMpvOpts(),
+        _onWin7SoftOnDirect = onWin7SoftOnDirect;
+
+  final VoidCallback? _onWin7SoftOnDirect;
+  bool _softOnDirectReported = false;
 
   static const _ch = MethodChannel('kotv_mpv');
   static const _ev = EventChannel('kotv_mpv/events');
@@ -53,6 +60,8 @@ class NativeMpvPlayback extends KotvPlayback {
   bool _repeatOne = false;
   bool _buffering = false;
   bool _ready = false;
+  /// 本次 open 后引擎已报过 ready（含 0 尺寸）：纯音频没有宽高，靠它和轨表判定。
+  bool _demuxed = false;
   /// 换源递增；旧 [kotvGuardSilentVideo] 会话见 serial 变化即退出。
   int _openSerial = 0;
   double _volume = 80;
@@ -111,6 +120,19 @@ class NativeMpvPlayback extends KotvPlayback {
   @override
   String get engineLabel => '内置 MPV';
 
+  /// Win7 才有「硬解直出」：开 = dxva2，关 = auto。
+  @override
+  bool get supportsDirectOutput => kotvIsWindows7();
+
+  @override
+  bool get directOutput => _opts.direct;
+
+  /// Windows：写进插件的 %TEMP%\kotv_mpv.log，和引擎日志排在一起。
+  void _log(String message) {
+    if (!kotvIsWindows()) return;
+    unawaited(_ch.invokeMethod('log', {'message': message}).catchError((_) => null));
+  }
+
   /// Surface/Texture 切换仅 Android；其它原生平台固定 underlay / HWND / 平面。
   @override
   bool get supportsRenderMode => kotvIsAndroid();
@@ -153,8 +175,10 @@ class NativeMpvPlayback extends KotvPlayback {
   @override
   Duration get position => _position;
 
+  /// 引擎报 media-live 时没有片长：mpv 的 duration 只是已缓冲的长度，会一直涨。
+  /// 不看开播标定 [_live]：回看也按直播标定开，但它有片长、要拖动。
   @override
-  Duration get duration => _duration;
+  Duration get duration => _engineLive ? Duration.zero : _duration;
 
   @override
   Duration get buffered => _buffered;
@@ -230,7 +254,7 @@ class NativeMpvPlayback extends KotvPlayback {
   String? get currentSecondarySubtitleId => _currentSecondarySubtitleId;
 
   Future<void> _refreshTracks() async {
-    if (!_ready) return;
+    if (!_ready && !_demuxed) return;
     try {
       final rawA = await _ch.invokeMethod<String>('getAudioTracks');
       final rawV = await _ch.invokeMethod<String>('getVideoTracks');
@@ -266,7 +290,7 @@ class NativeMpvPlayback extends KotvPlayback {
       (_w > 0 && _h > 0);
 
   bool get _isAudioOnlyUnlocked {
-    if (_lastError != null || !_ready) return false;
+    if (_lastError != null || (!_ready && !_demuxed)) return false;
     if (_w > 0 && _h > 0) return false;
     if (_hasRealVideoTrack) return false;
     return _hasRealAudioTrack;
@@ -446,8 +470,12 @@ class NativeMpvPlayback extends KotvPlayback {
       case 'ready':
         final nw = (m['width'] as num?)?.toInt() ?? _w;
         final nh = (m['height'] as num?)?.toInt() ?? _h;
-        // 忽略 0 尺寸 ready（loadfile/stop 抖动），避免提前揭盖与 silent 误判。
-        if (nw <= 0 || nh <= 0) break;
+        // 0 尺寸 ready 不揭盖（loadfile/stop 抖动，或纯音频）；只拉轨表，纯音频靠轨表认出来。
+        if (nw <= 0 || nh <= 0) {
+          _demuxed = true;
+          unawaited(_refreshTracks());
+          break;
+        }
         _w = nw;
         _h = nh;
         _ready = true;
@@ -483,6 +511,15 @@ class NativeMpvPlayback extends KotvPlayback {
         _engineLive = true;
         notifyListeners();
         break;
+      case 'hwdec':
+        if (_softOnDirectReported ||
+            !kotvWin7SoftOnDirectNeedsNewPlayer(direct: _opts.direct, hwdecCurrent: '${m['current'] ?? ''}')) {
+          break;
+        }
+        _softOnDirectReported = true;
+        _log('直出未能硬解（hwdec-current=${m['current']}），本剧集改回自动');
+        _onWin7SoftOnDirect?.call();
+        break;
       case 'error':
         _lastError = '${m['message'] ?? 'MPV error'}';
         _playing = false;
@@ -510,6 +547,9 @@ class NativeMpvPlayback extends KotvPlayback {
     _headers = kotvNormalizePlayHeaders(headers, url: url);
     _completed = false;
     _ready = false;
+    _demuxed = false;
+    _audioTracks = const [];
+    _videoTracks = const [];
     _underlayCover = true;
     _buffering = true;
     _playing = false;
@@ -604,6 +644,18 @@ class NativeMpvPlayback extends KotvPlayback {
   Future<void> awaitReadyAfterOpen() async {
     final session = _openSerial;
     bool sameSession() => _openSerial == session && _url.isNotEmpty;
+    try {
+      await _guardSilentVideo(sameSession);
+    } on KotvSilentVideoException catch (e) {
+      _log('起播守卫放弃：${e.message} size=${_w}x$_h ready=$_ready demuxed=$_demuxed '
+          'playing=$_playing buffering=$_buffering pos=${_position.inMilliseconds} '
+          'dur=${_duration.inMilliseconds} live=$_live engineLive=$_engineLive '
+          'tracks=a${_audioTracks.length}/v${_videoTracks.length} err=$_lastError');
+      rethrow;
+    }
+  }
+
+  Future<void> _guardSilentVideo(bool Function() sameSession) async {
     await kotvGuardSilentVideo(
       hasVideoSize: () => _w > 0 && _h > 0,
       // 未 loaded 只当缓冲等待；loaded 后才进黑屏窗口。
