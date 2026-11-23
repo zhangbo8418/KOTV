@@ -38,8 +38,13 @@ elif [[ -n "${VSINSTALLDIR:-}" ]]; then
 fi
 if [[ -s "$dest_def" && -n "$libexe" ]]; then
   # Git Bash/MSYS 会把 /nologo 误转成 C:\Program Files\Git\nologo → LNK1181。
-  # 用 -nologo，并对其余 / 开关关闭路径转换。
-  MSYS2_ARG_CONV_EXCL='*' "$libexe" -nologo -machine:x64 "-def:$dest_def" "-out:$dir/mpv.lib" \
+  # 用 -nologo，并对其余 / 开关关闭路径转换；因此路径要先转成 D:/… 形式（否则 LNK1104）。
+  win_def="$dest_def" win_out="$dir/mpv.lib"
+  if command -v cygpath >/dev/null 2>&1; then
+    win_def="$(cygpath -m "$dest_def")"
+    win_out="$(cygpath -m "$dir/mpv.lib")"
+  fi
+  MSYS2_ARG_CONV_EXCL='*' "$libexe" -nologo -machine:x64 "-def:$win_def" "-out:$win_out" \
     && echo "ok windows/mpv.lib (MSVC import, LIBRARY=libmpv-2.dll)"
 fi
 

@@ -55,7 +55,7 @@ is_darwin() { [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; }
 apple_patch_hash() {
   is_darwin || { echo none; return; }
   cat "$ROOT/scripts/patches/ffmpeg/series" "$ROOT/scripts/patches/ffmpeg/pool/"*.patch \
-    | shasum -a 256 | cut -c1-12
+    | kotv_sha256_short
 }
 
 # HTTP/2+3 仍走 mpv libcurl。伪装扩展名分片靠播放器 extension_picky=0。

@@ -410,7 +410,8 @@ ensure_macos_vulkan() {
   for loader in "$PREFIX/lib/libvulkan.1.dylib" "$PREFIX/lib/libvulkan.dylib"; do
     [[ -f "$loader" ]] || continue
     if lipo -archs "$loader" 2>/dev/null | tr ' ' '\n' | grep -qx "$arch" \
-      && pkg-config --exists vulkan 2>/dev/null; then
+      && pkg-config --exists vulkan 2>/dev/null \
+      && [[ -f "$PREFIX/lib/libMoltenVK.dylib" && -f "$PREFIX/include/MoltenVK/mvk_vulkan.h" ]]; then
       echo "ok prefix vulkan ($arch) $(pkg-config --modversion vulkan 2>/dev/null || echo ok)"
       return 0
     fi
@@ -465,8 +466,9 @@ ensure_macos_vulkan() {
     install_name_tool -id "@rpath/libvulkan.dylib" "$PREFIX/lib/libvulkan.dylib" 2>/dev/null || true
   fi
 
-  # 3) MoltenVK ICD：同架构优先从 Homebrew 拷进 PREFIX；交叉则下预编译包。
-  local mvk="" brew_mvk=""
+  # 3) MoltenVK ICD + 头文件（mpv gpu-context=moltenvk 要 MoltenVK/mvk_vulkan.h）：
+  #    同架构优先从 Homebrew 拷进 PREFIX；交叉则下预编译包。
+  local mvk="" mvk_inc="" brew_mvk=""
   if [[ "$arch" == "$(uname -m)" ]]; then
     for brew_mvk in \
       "$(brew --prefix molten-vk 2>/dev/null)/lib/libMoltenVK.dylib" \
@@ -475,39 +477,39 @@ ensure_macos_vulkan() {
       [[ -f "$brew_mvk" ]] || continue
       if lipo -archs "$brew_mvk" 2>/dev/null | tr ' ' '\n' | grep -qx "$arch"; then
         mvk="$brew_mvk"
+        mvk_inc="${brew_mvk%/lib/libMoltenVK.dylib}/include/MoltenVK"
         break
       fi
     done
   fi
   if [[ -z "$mvk" ]]; then
-    local mvk_ver="${KOTV_MOLTENVK_VERSION:-1.2.11}"
+    # 官方 macOS 包：通用 dylib（x86_64 + arm64）+ include/MoltenVK。
+    local mvk_ver="${KOTV_MOLTENVK_VERSION:-1.4.2}"
     local mvk_extract="$BUILD_DIR/MoltenVK-extract"
-    local url cand
+    local tarball="$BUILD_DIR/MoltenVK-macos-${mvk_ver}.tar"
     rm -rf "$mvk_extract"
     mkdir -p "$mvk_extract"
-    for url in \
-      "https://github.com/KhronosGroup/MoltenVK/releases/download/v${mvk_ver}/MoltenVK-macos.tar" \
-      "https://github.com/KhronosGroup/MoltenVK/releases/download/v${mvk_ver}/MoltenVK.tar" \
-      "https://github.com/KhronosGroup/MoltenVK/releases/download/v${mvk_ver}/MoltenVK.xcframework.zip"; do
-      cand="$BUILD_DIR/MoltenVK-dl-${mvk_ver}-$(basename "$url")"
-      echo "  try MoltenVK: $url"
-      if curl -fsSL -o "$cand" "$url"; then
-        case "$cand" in
-          *.zip) unzip -qo "$cand" -d "$mvk_extract" ;;
-          *) tar -xf "$cand" -C "$mvk_extract" 2>/dev/null || true ;;
-        esac
-        # 优先取对应 arch 的 dylib
-        mvk="$(find "$mvk_extract" \( -path "*${arch}*" -o -path '*macos-x86_64*' -o -path '*macos-arm64*' -o -path '*macos*' \) -name 'libMoltenVK.dylib' 2>/dev/null | head -1 || true)"
-        [[ -n "$mvk" ]] || mvk="$(find "$mvk_extract" -name 'libMoltenVK.dylib' 2>/dev/null | head -1 || true)"
-        [[ -n "$mvk" && -f "$mvk" ]] && break
-      fi
-    done
+    if [[ ! -s "$tarball" ]]; then
+      curl -fsSL -o "$tarball.part" \
+        "https://github.com/KhronosGroup/MoltenVK/releases/download/v${mvk_ver}/MoltenVK-macos.tar"
+      mv -f "$tarball.part" "$tarball"
+    fi
+    tar -xf "$tarball" -C "$mvk_extract"
+    mvk="$mvk_extract/MoltenVK/MoltenVK/dynamic/dylib/macOS/libMoltenVK.dylib"
+    mvk_inc="$mvk_extract/MoltenVK/MoltenVK/include/MoltenVK"
+    lipo -archs "$mvk" | tr ' ' '\n' | grep -qx "$arch" \
+      || { echo "ERROR: MoltenVK $mvk_ver dylib lacks $arch" >&2; exit 1; }
   fi
-  if [[ -n "$mvk" && -f "$mvk" ]]; then
-    cp -f "$mvk" "$PREFIX/lib/libMoltenVK.dylib"
-    chmod u+w "$PREFIX/lib/libMoltenVK.dylib" 2>/dev/null || true
-    install_name_tool -id "@rpath/libMoltenVK.dylib" "$PREFIX/lib/libMoltenVK.dylib" 2>/dev/null || true
-    cat >"$PREFIX/share/vulkan/icd.d/MoltenVK_icd.json" <<'EOF'
+  if [[ ! -f "$mvk" || ! -f "$mvk_inc/mvk_vulkan.h" ]]; then
+    echo "ERROR: MoltenVK dylib/headers not found (dylib=$mvk include=$mvk_inc)" >&2
+    exit 1
+  fi
+  rm -rf "$PREFIX/include/MoltenVK"
+  cp -R "$mvk_inc" "$PREFIX/include/MoltenVK"
+  cp -f "$mvk" "$PREFIX/lib/libMoltenVK.dylib"
+  chmod u+w "$PREFIX/lib/libMoltenVK.dylib" 2>/dev/null || true
+  install_name_tool -id "@rpath/libMoltenVK.dylib" "$PREFIX/lib/libMoltenVK.dylib" 2>/dev/null || true
+  cat >"$PREFIX/share/vulkan/icd.d/MoltenVK_icd.json" <<'EOF'
 {
   "file_format_version": "1.0.0",
   "ICD": {
@@ -516,10 +518,7 @@ ensure_macos_vulkan() {
   }
 }
 EOF
-    echo "  + MoltenVK -> $PREFIX/lib/libMoltenVK.dylib"
-  else
-    echo "WARN: MoltenVK dylib not found; Vulkan build will link loader only (runtime ICD may be missing)" >&2
-  fi
+  echo "  + MoltenVK -> $PREFIX/lib/libMoltenVK.dylib (+ include/MoltenVK)"
 
   cat >"$PREFIX/lib/pkgconfig/vulkan.pc" <<EOF
 prefix=$PREFIX

@@ -14,6 +14,8 @@ marker_ok() {
   [[ -f "$f" && "$(wc -c <"$f" | tr -d ' ')" -ge "$min" ]]
 }
 
+# shellcheck source=scripts/kotv-win-build-env.sh
+source "$ROOT/scripts/kotv-win-build-env.sh"
 # shellcheck source=scripts/kotv-resolve-git-ref.sh
 source "$ROOT/scripts/kotv-resolve-git-ref.sh"
 
@@ -28,7 +30,7 @@ kotv_mpv_src_stamp() {
     "${KOTV_LIBPLACEBO_REF:-fongmi}" "${KOTV_LIBPLACEBO_COMMIT:-}")"
   patches="$(find "$ROOT/scripts/patches/ffmpeg" "$ROOT/scripts/patches/mpv-apple" \
     "$ROOT/scripts/patches/mpv-win7-desktop.patch" -type f | LC_ALL=C sort | xargs cat \
-    | shasum -a 256 | cut -c1-12)"
+    | kotv_sha256_short)"
   printf 'mpv=%s ffmpeg=%s libplacebo=%s patches=%s\n' "$mpv" "$ff" "$pl" "$patches"
 }
 

@@ -35,6 +35,11 @@ kotv_verify_sha256() {
   fi
 }
 
+# 标准输入的 sha256 前 12 位，作缓存标记（Windows Git Bash 只有 sha256sum）。
+kotv_sha256_short() {
+  if command -v sha256sum >/dev/null; then sha256sum; else shasum -a 256; fi | cut -c1-12
+}
+
 kotv_win7_cflags() {
   printf '%s' "-D_WIN32_WINNT=0x0601 -DWINVER=0x0601 -DNTDDI_VERSION=0x06010000"
 }
