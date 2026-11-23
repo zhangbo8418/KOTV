@@ -770,7 +770,7 @@ void InitAndOpen(std::shared_ptr<MpvCore> core, std::shared_ptr<Bridge> bridge, 
                             ? LoadfileSync(m, {"loadfile", open.url, "replace"})
                             : LoadfileSync(m, {"loadfile", open.url, "replace", "-1", file_opts});
   if (entry >= 0) {
-    std::lock_guard<std::mutex> lock(core->entry_mu);
+    std::lock_guard<std::mutex> entry_lock(core->entry_mu);
     // 旧台的项查不到时，事件线程沿用上次查到的旧序号，Dart 照样丢弃。
     core->entry_serial.clear();
     core->entry_serial[entry] = open.serial;
