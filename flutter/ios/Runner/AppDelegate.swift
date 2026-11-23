@@ -13,6 +13,9 @@ import Darwin
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "KotvMpvPlugin") {
+      KotvMpvPlugin.register(with: registrar)
+    }
     let channel = FlutterMethodChannel(
       name: "kotv_host",
       binaryMessenger: engineBridge.applicationRegistrar.messenger()

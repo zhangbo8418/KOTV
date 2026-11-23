@@ -36,12 +36,14 @@ bool kotvIsWindows() => !kIsWeb && Platform.isWindows;
 bool kotvIsMacOS() => !kIsWeb && Platform.isMacOS;
 bool kotvIsLinux() => !kIsWeb && Platform.isLinux;
 
+bool kotvIsApple() => kotvIsMacOS() || kotvIsIOS();
+
 /// 原生 libmpv 通道（`kotv_mpv`）。
 ///
-/// Android Surface；macOS ASBDL underlay；Windows 子 HWND（Win8+ DComp 下 Flutter 在上）；
-/// Linux X11 wid（非 X11 暂无画面）。iOS 走 media_kit。
+/// Android Surface；macOS / iOS ASBDL underlay；Windows 子 HWND（Win8+ DComp 下 Flutter 在上）；
+/// Linux X11 wid（非 X11 暂无画面）。
 bool kotvUsesNativeMpv() =>
-    kotvIsAndroid() || kotvIsMacOS() || kotvIsWindows() || kotvIsLinux();
+    kotvIsAndroid() || kotvIsApple() || kotvIsWindows() || kotvIsLinux();
 
 /// Win8+：DComp 补丁引擎把 Flutter 合成在 child HWND 视频之上（洞 clear）。
 /// Win7：无 DComp，走 [kotvUsesWindowsNativeChrome]。

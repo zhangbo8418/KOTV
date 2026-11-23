@@ -1,0 +1,14 @@
+{
+  "originHash" : "f61bd06aabf7bbc8f954a626bd7d5255199759a553ec1d925d574e6d4e98bf89",
+  "pins" : [
+    {
+      "identity" : "mpv-build",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/edde746/mpv-build",
+      "state" : {
+        "revision" : "934cd7c5d55c9adb9da126f9b7b834065899dad5"
+      }
+    }
+  ],
+  "version" : 3
+}

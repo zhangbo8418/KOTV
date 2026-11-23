@@ -18,14 +18,14 @@ import 'position_coalesce.dart';
 import 'silent_video_guard.dart';
 
 /// 原生 libmpv（MethodChannel `kotv_mpv`）。
-/// Android：PlatformView；macOS：underlay ASBDL（Vulkan 时 CAMetalLayer）；Win/Linux：原生 runner。
+/// Android：PlatformView；macOS / iOS：underlay ASBDL（Vulkan 时 CAMetalLayer）；Win/Linux：原生 runner。
 class NativeMpvPlayback extends KotvPlayback {
   NativeMpvPlayback({KotvMpvOpts? opts}) : _opts = opts ?? const KotvMpvOpts();
 
   static const _ch = MethodChannel('kotv_mpv');
   static const _ev = EventChannel('kotv_mpv/events');
 
-  /// 设备能跑 Vulkan 时设置页才露出开关（Android：Vulkan≥1.2；macOS：MoltenVK；Win/Linux：系统 Vulkan loader）。
+  /// 设备能跑 Vulkan 时设置页才露出开关（Android：Vulkan≥1.2；macOS / iOS：MoltenVK；Win/Linux：系统 Vulkan loader）。
   static Future<bool> isVulkanAvailable() async {
     if (!kotvMpvVulkanSupported()) return false;
     if (kotvIsAndroid()) {
@@ -331,7 +331,7 @@ class NativeMpvPlayback extends KotvPlayback {
     );
   }
 
-  /// Android：PlatformView；桌面原生：underlay/HWND 洞（未就绪时黑遮）。
+  /// Android：PlatformView；其它原生：underlay/HWND 洞（未就绪时黑遮）。
   Widget buildView({BoxFit fit = BoxFit.contain}) {
     if (kotvIsAndroid()) {
       return Stack(
@@ -360,7 +360,7 @@ class NativeMpvPlayback extends KotvPlayback {
     if (!kotvUsesNativeMpv()) {
       return const ColoredBox(color: Colors.black);
     }
-    // macOS/Win/Linux：洞显隐不绑 Android Surface 挂载态。
+    // macOS/iOS/Win/Linux：洞显隐不绑 Android Surface 挂载态。
     final holeReady = _ready && !_videoOutputSuppressed;
     return Stack(
       key: const ValueKey('kotv_mpv_underlay'),

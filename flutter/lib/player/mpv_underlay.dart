@@ -61,10 +61,10 @@ class KotvMpvForcedGeom extends InheritedWidget {
   }
 }
 
-/// macOS ASBDL / Win8+ DComp：画面在 Flutter 之下，洞须 clear。
+/// macOS / iOS ASBDL、Win8+ DComp：画面在 Flutter 之下，洞须 clear。
 bool kotvMpvUsesUnderlayHole() =>
     kotvUsesNativeMpv() &&
-    (kotvIsMacOS() || kotvUsesWindowsDcompUnderlay());
+    (kotvIsApple() || kotvUsesWindowsDcompUnderlay());
 
 /// 视频栈 letterbox：underlay 洞必须透明，否则挡住下层视频；其它平台黑底。
 Widget kotvMpvLetterboxFill({Key? key}) => ColoredBox(

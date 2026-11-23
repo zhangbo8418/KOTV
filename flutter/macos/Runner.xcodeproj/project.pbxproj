@@ -91,8 +91,8 @@
 		9740EEB21CF90195004384FC /* Debug.xcconfig */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
 		EC9922EF2FBFD4840178CA5D /* Pods-Runner.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.release.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig"; sourceTree = "<group>"; };
 		AA0000150000000000000001 /* Runner-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Runner-Bridging-Header.h"; sourceTree = "<group>"; };
-		AA1000010000000000000001 /* KotvMpvCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KotvMpvCore.swift; sourceTree = "<group>"; };
-		AA1000020000000000000001 /* KotvMpvPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KotvMpvPlugin.swift; sourceTree = "<group>"; };
+		AA1000010000000000000001 /* KotvMpvCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = KotvMpvCore.swift; path = ../darwin/KotvMpvCore.swift; sourceTree = SOURCE_ROOT; };
+		AA1000020000000000000001 /* KotvMpvPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = KotvMpvPlugin.swift; path = ../darwin/KotvMpvPlugin.swift; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */

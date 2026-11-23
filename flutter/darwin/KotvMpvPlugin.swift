@@ -1,8 +1,13 @@
+import Foundation
+#if os(macOS)
 import Cocoa
 import FlutterMacOS
+#else
+import Flutter
+import UIKit
+#endif
 
-
-/// MethodChannel `kotv_mpv` / EventChannel `kotv_mpv/events`。
+/// MethodChannel `kotv_mpv` / EventChannel `kotv_mpv/events`（macOS / iOS 共用）。
 ///
 /// mpv API 一律经 [KotvMpvCore.asyncMpv]；layer 显隐/几何留在主线程。
 final class KotvMpvPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
@@ -14,21 +19,40 @@ final class KotvMpvPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
   private var conf = ""
   private var diskCache = false
   private var livePlayback = false
-  private weak var hostWindow: NSWindow?
+  private weak var hostWindow: KotvMpvWindow?
   /// Dart 洞（顶左原点）。core 重建间隙 updateFrame 可能落到 nil，须缓存到 ensureCore 后再应用。
   private var pendingHoleFlutter: CGRect?
 
-  static func register(with registrar: FlutterPluginRegistrar, window: NSWindow?) {
+  static func register(with registrar: FlutterPluginRegistrar, window: KotvMpvWindow?) {
     let instance = KotvMpvPlugin()
     instance.hostWindow = window
-    let method = FlutterMethodChannel(name: "kotv_mpv", binaryMessenger: registrar.messenger)
-    let events = FlutterEventChannel(name: "kotv_mpv/events", binaryMessenger: registrar.messenger)
+    #if os(macOS)
+    let messenger = registrar.messenger
+    #else
+    let messenger = registrar.messenger()
+    #endif
+    let method = FlutterMethodChannel(name: "kotv_mpv", binaryMessenger: messenger)
+    let events = FlutterEventChannel(name: "kotv_mpv/events", binaryMessenger: messenger)
     registrar.addMethodCallDelegate(instance, channel: method)
     events.setStreamHandler(instance)
   }
 
   static func register(with registrar: FlutterPluginRegistrar) {
-    register(with: registrar, window: NSApp.mainWindow ?? NSApp.windows.first)
+    register(with: registrar, window: nil)
+  }
+
+  /// 注册时窗口可能还没建好（iOS 隐式引擎），用到时再找。
+  private func resolveWindow() -> KotvMpvWindow? {
+    if let hostWindow { return hostWindow }
+    #if os(macOS)
+    hostWindow = NSApp.mainWindow ?? NSApp.windows.first
+    #else
+    let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+    let windows = scenes.flatMap(\.windows)
+    hostWindow = windows.first(where: \.isKeyWindow)
+      ?? windows.first(where: { $0.rootViewController is FlutterViewController })
+    #endif
+    return hostWindow
   }
 
   func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
@@ -75,8 +99,7 @@ final class KotvMpvPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
       completion(.success(core))
       return
     }
-    let win = hostWindow ?? NSApp.mainWindow ?? NSApp.windows.first
-    guard let win else {
+    guard let win = resolveWindow() else {
       completion(.failure(NSError(
         domain: "kotv_mpv", code: 1,
         userInfo: [NSLocalizedDescriptionKey: "no window"]
@@ -239,32 +262,18 @@ final class KotvMpvPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
         DispatchQueue.main.async { result(nil) }
       }
 
-    case "setAudioTrack":
-      let id = args?["id"] as? String
-      guard let c = core else { result(nil); return }
-      c.asyncMpv {
-        if let id { c.command(["set", "aid", id]) }
-        DispatchQueue.main.async { result(nil) }
+    case "setAudioTrack", "setVideoTrack", "setSubtitleTrack", "setSecondarySubtitleTrack":
+      let prop: String
+      switch call.method {
+      case "setAudioTrack": prop = "aid"
+      case "setVideoTrack": prop = "vid"
+      case "setSubtitleTrack": prop = "sid"
+      default: prop = "secondary-sid"
       }
-    case "setVideoTrack":
       let id = args?["id"] as? String
       guard let c = core else { result(nil); return }
       c.asyncMpv {
-        if let id { c.command(["set", "vid", id]) }
-        DispatchQueue.main.async { result(nil) }
-      }
-    case "setSubtitleTrack":
-      let id = args?["id"] as? String
-      guard let c = core else { result(nil); return }
-      c.asyncMpv {
-        if let id { c.command(["set", "sid", id]) }
-        DispatchQueue.main.async { result(nil) }
-      }
-    case "setSecondarySubtitleTrack":
-      let id = args?["id"] as? String
-      guard let c = core else { result(nil); return }
-      c.asyncMpv {
-        if let id { c.command(["set", "secondary-sid", id]) }
+        if let id { c.command(["set", prop, id]) }
         DispatchQueue.main.async { result(nil) }
       }
 
@@ -282,11 +291,11 @@ final class KotvMpvPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
       }
 
     case "setVisible":
-      // macOS：显隐只由原生 open/stop/occlusion/sleep 驱动；忽略通道，避免洞组件双写。
+      // 显隐只由原生 open/stop/遮挡/前后台驱动；忽略通道，避免洞组件双写。
       result(nil)
 
     case "updateFrame", "setVideoRect":
-      // Dart 逻辑坐标（顶左原点）；Core 内翻成 contentView 底左。
+      // Dart 逻辑坐标（顶左原点）；Core 内转成宿主层坐标。
       if let x = (args?["x"] as? NSNumber)?.doubleValue,
          let y = (args?["y"] as? NSNumber)?.doubleValue,
          let w = (args?["w"] as? NSNumber)?.doubleValue

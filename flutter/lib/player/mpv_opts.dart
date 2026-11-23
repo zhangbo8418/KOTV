@@ -88,13 +88,13 @@ Map<String, String> kotvFvpAvformatProbeOpts() => const {
 const kotvPlaylistExts = '';
 const kotvImageExts = '';
 
-/// MPV 选项：原生 `kotv_mpv`（Android / macOS / Windows / Linux）与 media_kit 遗留路径共用。
+/// MPV 选项：原生 `kotv_mpv`（Android / macOS / iOS / Windows / Linux）与 media_kit 遗留路径共用。
 ///
-/// 自带 libmpv 由 scripts 自编译（Vulkan、AV3A、macOS vo_avfoundation 等），钉 [mpv-build.lock.json]。
-/// FVP 为独立内置播放器，与 MPV 并列可选。
+/// 自带 libmpv 由 scripts 自编译（Vulkan、AV3A、macOS vo_avfoundation 等），钉 [mpv-build.lock.json]；
+/// iOS 用同一提交发布的 MPVKit。FVP 为独立内置播放器，与 MPV 并列可选。
 ///
-/// 原生 MPV 能开 Vulkan 渲染的平台（iOS 仍走 media_kit）。
-bool kotvMpvVulkanSupported() => kotvIsAndroid() || kotvIsMacOS() || kotvIsWindows() || kotvIsLinux();
+/// 原生 MPV 能开 Vulkan 渲染的平台。
+bool kotvMpvVulkanSupported() => kotvUsesNativeMpv();
 
 /// Win7「硬解直出」开：`hwdec=dxva2`；关：`auto`（与 Win10+ 相同）。切换直出见 [kotvMpvNeedsNewPlayer]。
 bool kotvMpvNeedsNewPlayer(KotvMpvOpts from, KotvMpvOpts to) =>
@@ -300,8 +300,8 @@ class KotvMpvOpts {
       if (kotvIsWindows7() && direct) return 'dxva2,no';
       return 'auto';
     }
-    if (kotvIsMacOS() || kotvIsIOS()) {
-      // macOS avfoundation：自动/硬解都走 videotoolbox（软解已在上方返回 no）。
+    if (kotvIsApple()) {
+      // avfoundation：自动/硬解都走 videotoolbox（软解已在上方返回 no）。
       return 'videotoolbox';
     }
     const linuxHw = 'vaapi,vulkan,nvdec,cuda,vdpau';

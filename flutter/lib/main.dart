@@ -7,7 +7,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:media_kit/media_kit.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'desktop/mini_player_window.dart';
@@ -173,13 +172,7 @@ Future<void> main() async {
     _kotvLogUiError(error, stack, where: 'PlatformDispatcher');
     return true;
   };
-  if (!kIsWeb) {
-    // Android 播放走原生 Exo/MPV，不初始化 media_kit（亦未依赖 media_kit_libs）。
-    if (!Platform.isAndroid) {
-      MediaKit.ensureInitialized();
-    }
-    // Android 存储权限仅在选本地配置等文件入口申请，勿冷启动跳系统设置页。
-  }
+  // Android 存储权限仅在选本地配置等文件入口申请，勿冷启动跳系统设置页。
   unawaited(KotvBufferBudget.warm());
   unawaited(_kotvSyncLanguageSetting());
   final client = await KotvClientStore.load();

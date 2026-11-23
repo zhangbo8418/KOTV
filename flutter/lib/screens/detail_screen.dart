@@ -664,8 +664,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         final step = plan.step!;
         if (canRecreateDesktopMpv) {
           await _releaseOwnedMpv();
-        } else if (kotvIsMacOS() && pb is NativeMpvPlayback) {
-          // macOS：停播藏层，保留 libmpv/ASBDL，切回后 EDR 会话仍在。
+        } else if (kotvIsApple() && pb is NativeMpvPlayback) {
+          // macOS / iOS：停播藏层，保留 libmpv/ASBDL，切回后 EDR 会话仍在。
           try {
             await pb.stop();
           } catch (_) {}
@@ -702,7 +702,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   /// 先 pause 再 stop/release；离开 MPV 时桌面也要 dispose Player，避免双引擎抢 AO。
   Future<void> _stopInactiveBackends(KotvEmbedBackend keep) async {
     if (keep != KotvEmbedBackend.mpv) {
-      if (kotvIsMacOS() && _mk is NativeMpvPlayback) {
+      if (kotvIsApple() && _mk is NativeMpvPlayback) {
         // 保留原生 MPV 会话，仅 stop 藏层，避免换引擎后 EDR 从零重建。
         try {
           await _mk!.stop();

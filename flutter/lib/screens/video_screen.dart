@@ -71,8 +71,6 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
   /// 首屏 autofill 连续续页计数（触底用户滚动不计入）。
   int _autofillStreak = 0;
 
-  /// 合并并发 _reload，避免 bootstrap / epoch / 重试叠两次拉仓。
-  Future<void>? _reloadFlight;
   RemoteBridge? _boundRemote;
 
   /// 切走过的分类页短缓存，回来可立刻还原列表与滚动。
@@ -239,16 +237,12 @@ class _VideoScreenState extends ConsumerState<VideoScreen> {
     bool refreshRepo = false,
     bool refreshConfig = false,
   }) {
-    // 不 await 旧 flight：世代作废 + SoftCancel 丢弃旧结果，避免串行等满超时。
-    final run = () async {
-      await _reloadBody(
-        clearContent: clearContent,
-        refreshRepo: refreshRepo,
-        refreshConfig: refreshConfig,
-      );
-    }();
-    _reloadFlight = run;
-    return run;
+    // 不等旧的一轮：世代作废 + SoftCancel 丢弃旧结果，避免串行等满超时。
+    return _reloadBody(
+      clearContent: clearContent,
+      refreshRepo: refreshRepo,
+      refreshConfig: refreshConfig,
+    );
   }
 
   /// [afterRecover]：引擎刚重新拉起后的重试，不再二次重试。

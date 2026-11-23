@@ -17,6 +17,9 @@
 		97C146FE1CF9000F007C117D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FD1CF9000F007C117D /* Assets.xcassets */; };
 		97C147011CF9000F007C117D /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FF1CF9000F007C117D /* LaunchScreen.storyboard */; };
 		9EC5C3723F2B31C78845C836 /* Pods_Runner.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 3CED8356EF19B4F46277FB29 /* Pods_Runner.framework */; };
+		BB1000110000000000000001 /* KotvMpvCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB1000010000000000000001 /* KotvMpvCore.swift */; };
+		BB1000120000000000000001 /* KotvMpvPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB1000020000000000000001 /* KotvMpvPlugin.swift */; };
+		BB1000130000000000000001 /* MPVKit in Frameworks */ = {isa = PBXBuildFile; productRef = BB1000210000000000000001 /* MPVKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -67,6 +70,8 @@
 		C30B69C229F0B3611837AC50 /* Pods-RunnerTests.profile.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-RunnerTests.profile.xcconfig"; path = "Target Support Files/Pods-RunnerTests/Pods-RunnerTests.profile.xcconfig"; sourceTree = "<group>"; };
 		D1E08B4BB91F4E2AD23BBB88 /* Pods-RunnerTests.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-RunnerTests.release.xcconfig"; path = "Target Support Files/Pods-RunnerTests/Pods-RunnerTests.release.xcconfig"; sourceTree = "<group>"; };
 		DE1CC8718C3E266E22FC8193 /* Pods-Runner.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.release.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig"; sourceTree = "<group>"; };
+		BB1000010000000000000001 /* KotvMpvCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = KotvMpvCore.swift; path = ../darwin/KotvMpvCore.swift; sourceTree = SOURCE_ROOT; };
+		BB1000020000000000000001 /* KotvMpvPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = KotvMpvPlugin.swift; path = ../darwin/KotvMpvPlugin.swift; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -74,6 +79,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				BB1000130000000000000001 /* MPVKit in Frameworks */,
 				9EC5C3723F2B31C78845C836 /* Pods_Runner.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -140,6 +146,8 @@
 				1498D2331E8E89220040F4C2 /* GeneratedPluginRegistrant.m */,
 				74858FAE1ED2DC5600515810 /* AppDelegate.swift */,
 				7884E8672EC3CC0400C636F2 /* SceneDelegate.swift */,
+				BB1000010000000000000001 /* KotvMpvCore.swift */,
+				BB1000020000000000000001 /* KotvMpvPlugin.swift */,
 				74858FAD1ED2DC5600515810 /* Runner-Bridging-Header.h */,
 			);
 			path = Runner;
@@ -208,6 +216,9 @@
 			dependencies = (
 			);
 			name = Runner;
+			packageProductDependencies = (
+				BB1000210000000000000001 /* MPVKit */,
+			);
 			productName = Runner;
 			productReference = 97C146EE1CF9000F007C117D /* Runner.app */;
 			productType = "com.apple.product-type.application";
@@ -241,6 +252,9 @@
 				Base,
 			);
 			mainGroup = 97C146E51CF9000F007C117D;
+			packageReferences = (
+				BB1000200000000000000001 /* XCRemoteSwiftPackageReference "mpv-build" */,
+			);
 			productRefGroup = 97C146EF1CF9000F007C117D /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -382,6 +396,8 @@
 			files = (
 				74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */,
 				7884E8682EC3CC0700C636F2 /* SceneDelegate.swift in Sources */,
+				BB1000110000000000000001 /* KotvMpvCore.swift in Sources */,
+				BB1000120000000000000001 /* KotvMpvPlugin.swift in Sources */,
 				1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -727,6 +743,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		BB1000200000000000000001 /* XCRemoteSwiftPackageReference "mpv-build" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/edde746/mpv-build";
+			requirement = {
+				kind = revision;
+				revision = 934cd7c5d55c9adb9da126f9b7b834065899dad5;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		BB1000210000000000000001 /* MPVKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = BB1000200000000000000001 /* XCRemoteSwiftPackageReference "mpv-build" */;
+			productName = MPVKit;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 97C146E61CF9000F007C117D /* Project object */;
 }

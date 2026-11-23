@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 未签名 iOS IPA。flutter build ipa --no-codesign 不会导出 IPA，
 # 且归档产物里的动态库经常是指向 DerivedData 的符号链接，zip -y 会把链接打进包、真身留在外面。
-# 这里把设备端框架收成包内的实体文件，缺 mdk / Mpv / App 就失败。
+# 这里把设备端框架收成包内的实体文件，缺 mdk / App 或 Runner 未静态链入 libmpv 就失败。
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=kotv-release-name.sh
@@ -103,12 +103,10 @@ kotv_ios_prepare_app() {
   local app="$1"
   local fw name built
   kotv_ios_materialize_outside_links "$app"
-  local pub_cache="${PUB_CACHE:-${PUB_CACHE_DIR:-$HOME/.pub-cache}}"
   local -a slice_roots=(
     "${KOTV_MDK_POD_PATH:-}"
     "$ROOT/flutter/ios/.symlinks/plugins"
     "$ROOT/flutter/ios/Pods"
-    "$pub_cache/hosted"
   )
   while IFS= read -r fw; do
     [[ -n "$fw" ]] || continue
@@ -127,7 +125,6 @@ kotv_ios_prepare_app() {
   local -a built_names=(
     file_selector_ios
     fvp
-    media_kit_libs_ios_video
     media_kit_video
     package_info_plus
     shared_preferences_foundation
@@ -149,7 +146,7 @@ kotv_ios_prepare_app() {
     kotv_ios_copy_framework "$built" "$app/Frameworks"
   done
 
-  local -a required=(App Flutter mdk Mpv fvp)
+  local -a required=(App Flutter mdk fvp)
   for name in "${required[@]}"; do
     if ! kotv_ios_framework_ok "$app" "$name"; then
       echo "error: $app is missing a real $name.framework" >&2
@@ -171,6 +168,37 @@ kotv_ios_strip_unused_assets() {
   kotv_flutter_strip_placeholder_assets "$assets"
 }
 
+# Xcode 工程里 MPVKit 钉的提交必须与 mpv-build.lock.json 相同（桌面补丁同源）。
+kotv_ios_check_mpvkit_pin() {
+  local want pbx
+  want="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["commit"])' "$ROOT/mpv-build.lock.json")"
+  pbx="$ROOT/flutter/ios/Runner.xcodeproj/project.pbxproj"
+  if ! grep -q "revision = ${want};" "$pbx"; then
+    echo "error: $pbx does not pin MPVKit (edde746/mpv-build) to ${want}" >&2
+    grep -n "revision = " "$pbx" >&2 || true
+    return 1
+  fi
+  echo "ok MPVKit pinned to ${want:0:12}"
+}
+
+# MPVKit 是静态库，链进 Runner 主程序（Frameworks 里同名 Lib*.framework 是 Xcode 留的空壳）；
+# 查 avfoundation 输出、MoltenVK 与 VideoToolbox 杜比视界补丁的字符串。
+kotv_ios_require_libmpv() {
+  local app="$1" bin
+  bin="$app/Runner"
+  local needle
+  for needle in \
+    "AVFoundation AVSampleBufferDisplayLayer" \
+    "-Dmoltenvk=enabled" \
+    "Converting Dolby Vision profile 7 to profile 8.1 for VideoToolbox."; do
+    if ! strings "$bin" | grep -F -- "$needle" >/dev/null; then
+      echo "error: $bin lacks libmpv/FFmpeg string: $needle" >&2
+      return 1
+    fi
+  done
+  echo "ok libmpv (avfoundation + VideoToolbox Dolby Vision) linked into Runner"
+}
+
 kotv_ios_require_ipa_entry() {
   local ipa="$1" path="$2" min="$3"
   local size
@@ -188,6 +216,7 @@ main() {
   fi
   pod --version
 
+  kotv_ios_check_mpvkit_pin
   flutter config --no-enable-swift-package-manager || true
   # 须先 pub get：本地 mdk.podspec 的 s.version 要从 fvp darwin podspec 的
   # `mdk ~> X.Y` 下限写入；先拉最新 SDK 再 pub get 会把 version 写成 0.40.x，
@@ -208,6 +237,7 @@ main() {
     exit 1
   }
   kotv_ios_prepare_app "$ROOT/flutter/$app"
+  kotv_ios_require_libmpv "$ROOT/flutter/$app"
 
   local ver stage out
   ver="$(kotv_release_version "$ROOT/flutter/pubspec.yaml")"
@@ -223,9 +253,8 @@ main() {
   kotv_ios_require_ipa_entry "$out" "Payload/Runner.app/Frameworks/App.framework/App" 5000000
   kotv_ios_require_ipa_entry "$out" "Payload/Runner.app/Frameworks/Flutter.framework/Flutter" 1000000
   kotv_ios_require_ipa_entry "$out" "Payload/Runner.app/Frameworks/mdk.framework/mdk" 1000000
-  kotv_ios_require_ipa_entry "$out" "Payload/Runner.app/Frameworks/Mpv.framework/Mpv" 500000
   kotv_ios_require_ipa_entry "$out" "Payload/Runner.app/Frameworks/fvp.framework/fvp" 50000
-  kotv_ios_require_ipa_entry "$out" "Payload/Runner.app/Frameworks/Avcodec.framework/Avcodec" 500000
+  kotv_ios_require_ipa_entry "$out" "Payload/Runner.app/Runner" 20000000
   kotv_flutter_asset_engines_reject "$out"
   kotv_ios_reject_asset_clutter "$out"
 }
