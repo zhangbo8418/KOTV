@@ -1,5 +1,6 @@
 #include "kotv_mpv_plugin.h"
 
+#include <dlfcn.h>
 #include <mpv/client.h>
 
 #include <atomic>
@@ -23,8 +24,10 @@ struct KotvMpvState {
   mpv_handle* mpv = nullptr;
   std::thread event_thread;
   std::atomic<bool> stop{false};
-  std::string decode_mode = "auto";
-  std::string hwdec;
+  // Dart KotvMpvOpts.hwdecValue()。
+  std::string hwdec = "auto";
+  // 建 mpv 时生效：gpu-api 先试 Vulkan，失败回到默认探测。
+  bool vulkan = false;
   GtkWidget* view_widget = nullptr;
   int64_t wid = 0;
   bool visible = true;
@@ -79,19 +82,18 @@ void emit_position() {
 
 void apply_decode() {
   if (!g_state || !g_state->mpv) return;
-  // 优先 Dart KotvMpvOpts.hwdecValue；无则按 decode 兜底。
-  if (!g_state->hwdec.empty()) {
-    mpv_set_property_string(g_state->mpv, "hwdec", g_state->hwdec.c_str());
-    return;
-  }
-  if (g_state->decode_mode == "soft" || g_state->decode_mode == "no" ||
-      g_state->decode_mode == "sw") {
-    mpv_set_property_string(g_state->mpv, "hwdec", "no");
-  } else if (g_state->decode_mode == "hard" || g_state->decode_mode == "hw") {
-    mpv_set_property_string(g_state->mpv, "hwdec", "vaapi,vulkan,nvdec,cuda,vdpau");
-  } else {
-    mpv_set_property_string(g_state->mpv, "hwdec", "auto");
-  }
+  mpv_set_property_string(g_state->mpv, "hwdec", g_state->hwdec.c_str());
+}
+
+bool vulkan_loader_present() {
+  static const bool present = [] {
+    void* h = dlopen("libvulkan.so.1", RTLD_NOW | RTLD_LOCAL);
+    if (!h) return false;
+    const bool ok = dlsym(h, "vkGetInstanceProcAddr") != nullptr;
+    dlclose(h);
+    return ok;
+  }();
+  return present;
 }
 
 void command(const std::vector<std::string>& args) {
@@ -126,7 +128,9 @@ bool ensure_mpv() {
     if (gw && GDK_IS_X11_WINDOW(gw)) {
       g_state->wid = static_cast<int64_t>(gdk_x11_window_get_xid(gw));
       mpv_set_option(g_state->mpv, "wid", MPV_FORMAT_INT64, &g_state->wid);
-      mpv_set_option_string(g_state->mpv, "vo", "x11");
+      // gpu-next 才能做杜比视界重塑；x11 仅作无 GPU 时的兜底。
+      mpv_set_option_string(g_state->mpv, "vo", "gpu-next,gpu,x11");
+      mpv_set_option_string(g_state->mpv, "gpu-api", g_state->vulkan ? "vulkan,auto" : "auto");
     }
   }
 #endif
@@ -135,7 +139,7 @@ bool ensure_mpv() {
     mpv_set_option_string(g_state->mpv, "vo", "libmpv");
     mpv_set_option_string(g_state->mpv, "gpu-context", "auto");
   }
-  mpv_set_option_string(g_state->mpv, "hwdec", "auto");
+  mpv_set_option_string(g_state->mpv, "hwdec", g_state->hwdec.c_str());
   mpv_set_option_string(g_state->mpv, "hwdec-software-fallback", "yes");
   mpv_set_option_string(g_state->mpv, "keep-open", "yes");
   mpv_set_option_string(g_state->mpv, "idle", "yes");
@@ -145,7 +149,6 @@ bool ensure_mpv() {
     destroy_mpv();
     return false;
   }
-  apply_decode();
   g_state->stop = false;
   g_state->event_thread = std::thread([] {
     while (g_state && !g_state->stop) {
@@ -200,13 +203,6 @@ std::string map_str(FlValue* args, const char* key, const std::string& def = "")
   return fl_value_get_string(v);
 }
 
-void ingest_decode_args(FlValue* args) {
-  if (!g_state) return;
-  g_state->decode_mode = map_str(args, "decode", g_state->decode_mode);
-  const std::string hw = map_str(args, "hwdec");
-  if (!hw.empty()) g_state->hwdec = hw;
-}
-
 bool map_bool(FlValue* args, const char* key, bool def = false) {
   if (!args || fl_value_get_type(args) != FL_VALUE_TYPE_MAP) return def;
   FlValue* v = fl_value_lookup_string(args, key);
@@ -234,12 +230,19 @@ double map_double(FlValue* args, const char* key, double def = 0) {
   return def;
 }
 
+void ingest_decode_args(FlValue* args) {
+  if (!g_state) return;
+  const std::string hw = map_str(args, "hwdec");
+  if (!hw.empty()) g_state->hwdec = hw;
+  g_state->vulkan = map_bool(args, "vulkan", g_state->vulkan) && vulkan_loader_present();
+}
+
 void method_call(FlMethodChannel*, FlMethodCall* call, gpointer) {
   const gchar* method = fl_method_call_get_name(call);
   FlValue* args = fl_method_call_get_args(call);
 
   if (strcmp(method, "isVulkanAvailable") == 0) {
-    fl_method_call_respond_success(call, fl_value_new_bool(FALSE), nullptr);
+    fl_method_call_respond_success(call, fl_value_new_bool(vulkan_loader_present()), nullptr);
     return;
   }
   if (strcmp(method, "create") == 0) {

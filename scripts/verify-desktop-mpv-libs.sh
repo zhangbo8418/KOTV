@@ -169,6 +169,33 @@ check_dovi() {
   fail=1
 }
 
+# Apple：VideoToolbox 以 dvh1 会话解杜比视界，帧上带 RPU 交给显示层。
+check_vt_dovi() {
+  local f="$1"
+  local name="$2"
+  [[ -f "$f" ]] || return
+  if has_str "$f" "Using Dolby Vision HEVC VideoToolbox format" \
+    && has_str "$f" "Dolby Vision profile 5 software frames carry their RPU"; then
+    echo "ok $name: VideoToolbox Dolby Vision"
+    return
+  fi
+  echo "ERROR: $name lacks the VideoToolbox / vo_avfoundation Dolby Vision patches" >&2
+  fail=1
+}
+
+# macOS Vulkan：gpu-context=moltenvk（CAMetalLayer 作 wid）。
+check_moltenvk() {
+  local f="$1"
+  local name="$2"
+  [[ -f "$f" ]] || return
+  if has_str "$f" "Failed creating MoltenVK surface"; then
+    echo "ok $name: gpu-context=moltenvk"
+    return
+  fi
+  echo "ERROR: $name lacks gpu-context=moltenvk (mpv-apple 0001)" >&2
+  fail=1
+}
+
 # Windows：FFmpeg Schannel 负责播流 HTTPS；mpv 也要有 libcurl（HTTP/2+3）。
 check_win_https() {
   local f="$1"
@@ -228,6 +255,8 @@ if [[ -z "${KOTV_VERIFY_PLAT:-}" || "${KOTV_VERIFY_PLAT}" == macos* ]]; then
     check_iso "$ASSET/macos/libmpv.dylib" "macos/libmpv.dylib"
     check_android_parity "$ASSET/macos/libmpv.dylib" "macos/libmpv.dylib"
     check_dovi "$ASSET/macos/libmpv.dylib" "macos/libmpv.dylib"
+    check_vt_dovi "$ASSET/macos/libmpv.dylib" "macos/libmpv.dylib"
+    check_moltenvk "$ASSET/macos/libmpv.dylib" "macos/libmpv.dylib"
     check_no_avdevice "$ASSET/macos/libmpv.dylib" "macos/libmpv.dylib"
     # libmpv 常以 @rpath/libcurl 链接；打包前 assets 必须已有 curl 栈
     if [[ ! -f "$ASSET/macos/libcurl.4.dylib" && ! -f "$ASSET/macos/libcurl.dylib" ]]; then

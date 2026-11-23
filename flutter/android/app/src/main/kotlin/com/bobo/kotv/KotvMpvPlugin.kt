@@ -94,6 +94,12 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var createdDirect: Boolean? = null
   /** mpv 正在用直出 vo（含杜比视界自动换成的直出）；此时画面比例由宿主摆放 SurfaceView。 */
   private var directActive = false
+  /** mpv current-vo。 */
+  @Volatile private var currentVo = ""
+  /** 当前视频轨的杜比视界 profile；非杜比视界为 0。 */
+  @Volatile private var dvProfile = 0L
+  /** 因杜比视界 P5 临时把 vo=gpu 换成了 gpu-next。 */
+  private var dvGpuNext = false
   /** 片源显示比例（video-params/aspect）。 */
   private var videoAspect = 0.0
   /** 已交给 mpv 的 OSD Surface（android-osd-wid）。 */
@@ -1765,6 +1771,32 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     MPVLib.observeProperty("video-params/h", MPVLib.MpvFormat.MPV_FORMAT_INT64)
     MPVLib.observeProperty("video-params/aspect", MPVLib.MpvFormat.MPV_FORMAT_DOUBLE)
     MPVLib.observeProperty("current-vo", MPVLib.MpvFormat.MPV_FORMAT_STRING)
+    MPVLib.observeProperty("current-tracks/video/dolby-vision-profile", MPVLib.MpvFormat.MPV_FORMAT_INT64)
+  }
+
+  /**
+   * 杜比视界 P5 没有兼容的基础层，不直出时要由渲染器按 RPU 重塑，只有 gpu-next 能做；
+   * vo=gpu 下 MediaCodec 也会拒绝 P5。正在用 vo=gpu 播 P5 时换成 gpu-next（连同解码器重建），
+   * 之后不是 P5 再换回。用户本来就选了 gpu-next 时不动。
+   */
+  private fun syncDolbyVisionRenderer() {
+    if (!created.get() || gpuNext) return
+    val wantNext = dvProfile == 5L
+    when {
+      wantNext && currentVo == "gpu" -> Unit
+      !wantNext && dvGpuNext && currentVo == "gpu-next" -> Unit
+      else -> return
+    }
+    val vulkan = appContext?.let { vulkanEnabled && MPVLib.isVulkanRendererAvailable(it) } == true
+    val code = MPVLib.command(
+      arrayOf("android-set-gpu-output", if (wantNext) "yes" else "no", if (vulkan) "yes" else "no"),
+    )
+    if (code < 0) {
+      Log.w(TAG, "android-set-gpu-output gpu-next=$wantNext failed ($code)")
+      return
+    }
+    dvGpuNext = wantNext
+    Log.i(TAG, "Dolby Vision P5 renderer: vo=${if (wantNext) "gpu-next" else "gpu"}")
   }
 
   private fun effectiveDurationSec(): Double =
@@ -2150,10 +2182,19 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     emitOnMain(main, eventSink, payload)
   }
 
-  override fun eventProperty(property: String) {}
+  override fun eventProperty(property: String) {
+    if (property == "current-tracks/video/dolby-vision-profile") {
+      dvProfile = 0L
+      main.post { syncDolbyVisionRenderer() }
+    }
+  }
 
   override fun eventProperty(property: String, value: Long) {
     when (property) {
+      "current-tracks/video/dolby-vision-profile" -> {
+        dvProfile = value
+        main.post { syncDolbyVisionRenderer() }
+      }
       // 排好的下一集追加在第 2 项（下标 1）。
       "playlist-pos" -> {
         val next = queuedNext
@@ -2204,9 +2245,12 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         val nextDirect = value == "mediacodec_embed"
         val changed = nextDirect != directActive
         directActive = nextDirect
+        currentVo = value
         main.post {
+          if (value == "gpu") dvGpuNext = false
           applyVideoFrame()
           if (changed) applyEqualizer()
+          syncDolbyVisionRenderer()
         }
       }
     }

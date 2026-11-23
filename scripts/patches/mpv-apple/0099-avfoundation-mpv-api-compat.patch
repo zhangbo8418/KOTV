@@ -1,0 +1,43 @@
+vo_avfoundation: build against FongMi mpv
+
+vo_set_queue_params() takes num_frame_refs; mp_splitext() became
+mp_strip_ext(). Same results as before on the upstream pin.
+
+diff --git a/video/out/avf_shaders.m b/video/out/avf_shaders.m
+index a738e00..c660a5e 100644
+--- a/video/out/avf_shaders.m
++++ b/video/out/avf_shaders.m
+@@ -302,10 +302,7 @@ static void update_hook_opts(struct avf_shaders *s, char **opts, const char *sha
+     if (!opts)
+         return;
+ 
+-    const char *basename = mp_basename(shaderpath);
+-    struct bstr shadername;
+-    if (!mp_splitext(basename, &shadername))
+-        shadername = bstr0(basename);
++    struct bstr shadername = mp_strip_ext(mp_basename_bstr(bstr0(shaderpath)));
+ 
+     for (int n = 0; opts[n * 2]; n++) {
+         struct bstr k = bstr0(opts[n * 2 + 0]);
+diff --git a/video/out/vo_avfoundation.m b/video/out/vo_avfoundation.m
+index 01999c2..30c708e 100644
+--- a/video/out/vo_avfoundation.m
++++ b/video/out/vo_avfoundation.m
+@@ -1647,7 +1647,7 @@ static void update_avfoundation_options(struct vo *vo)
+         return;
+ 
+     if (old_queue_lead_ms != p->opts->queue_lead_ms)
+-        vo_set_queue_params(vo, MP_TIME_MS_TO_NS(p->opts->queue_lead_ms), 1);
++        vo_set_queue_params(vo, MP_TIME_MS_TO_NS(p->opts->queue_lead_ms), 1, 1);
+ 
+     bool composite_changed =
+         old_composite_osd != p->opts->composite_osd ||
+@@ -4740,7 +4740,7 @@ static int preinit(struct vo *vo)
+         displayLayer.controlTimebase = timebase;
+     });
+     [displayLayer release];
+-    vo_set_queue_params(vo, MP_TIME_MS_TO_NS(p->opts->queue_lead_ms), 1);
++    vo_set_queue_params(vo, MP_TIME_MS_TO_NS(p->opts->queue_lead_ms), 1, 1);
+     p->ready_queue = dispatch_queue_create("avfoundation ready",
+         dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL,
+                                                 QOS_CLASS_USER_INTERACTIVE, 0));

@@ -1,8 +1,13 @@
 import AVFoundation
 import Cocoa
+import Metal
 import QuartzCore
 
-/// macOS 原生 libmpv：`vo=avfoundation`，ASBDL 插在 `contentView.layer` 最底层。
+/// macOS 原生 libmpv，视频层插在 `contentView.layer` 最底层：
+/// - 默认 `vo=avfoundation`：AVSampleBufferDisplayLayer（ASBDL），VideoToolbox 帧连同杜比视界 RPU
+///   交给系统显示层；
+/// - Vulkan：`vo=gpu-next` + `gpu-context=moltenvk`，wid 传 CAMetalLayer。libmpv 以 drawableSize 为
+///   渲染尺寸、以层上的 `mpvEDRHeadroom` 判断屏幕能否显示 HDR、层隐藏时不出帧，EDR 由 MoltenVK 设置。
 ///
 /// 窗口不透明黑底 + Flutter VC `.clear`；`attachContainerLayer` 把 contentView.layer
 /// 涂黑并 `insertSublayer(..., at: 0)`，透明洞露出画面、洞外不透桌面。
@@ -11,9 +16,20 @@ import QuartzCore
 /// 开 EDR 易色偏（根因在 CV 附件路径，非整窗/洞几何）；故硬解保持关 EDR。
 /// 所有 `mpv_*` 仅在 [mpvQueue]（VO 会 `dispatch_sync` 主队列，主线程同步调 mpv 会死锁）。
 final class KotvMpvCore {
+  /// 包里带了 MoltenVK ICD（AppDelegate 已写入 VK_ICD_FILENAMES）且有 Metal 设备。
+  static var isVulkanAvailable: Bool {
+    guard MTLCreateSystemDefaultDevice() != nil, let raw = getenv("VK_ICD_FILENAMES") else { return false }
+    return String(cString: raw).split(separator: ":").contains {
+      FileManager.default.fileExists(atPath: String($0))
+    }
+  }
+
+  let vulkan: Bool
   private weak var window: NSWindow?
   private var containerLayer: KotvMpvContainerLayer?
-  private var videoLayer: AVSampleBufferDisplayLayer?
+  private var videoLayer: CALayer?
+  private var displayLayer: AVSampleBufferDisplayLayer? { videoLayer as? AVSampleBufferDisplayLayer }
+  private var metalLayer: CAMetalLayer? { videoLayer as? CAMetalLayer }
   private let mpvQueue = DispatchQueue(label: "com.bobo.kotv.mpv")
   private var mpv: OpaquePointer?
   private var wakeup: (() -> Void)?
@@ -39,6 +55,10 @@ final class KotvMpvCore {
 
   var onEvent: (([String: Any]) -> Void)?
   var isReady: Bool { mpv != nil && !destroyed }
+
+  init(vulkan: Bool) {
+    self.vulkan = vulkan
+  }
 
   /// 运行期开关 HDR 直出（影响 EDR 与 target-colorspace-hint）。
   func setHdrEnabled(_ enabled: Bool) {
@@ -72,11 +92,17 @@ final class KotvMpvCore {
     container.isOpaque = true
     container.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
 
-    let layer = AVSampleBufferDisplayLayer()
+    let layer: CALayer
+    if vulkan {
+      layer = CAMetalLayer()
+    } else {
+      let asbdl = AVSampleBufferDisplayLayer()
+      asbdl.videoGravity = .resizeAspect
+      layer = asbdl
+    }
     layer.frame = container.bounds
     layer.isOpaque = true
     layer.backgroundColor = NSColor.black.cgColor
-    layer.videoGravity = .resizeAspect
     container.addSublayer(layer)
     container.videoLayer = layer
 
@@ -99,6 +125,10 @@ final class KotvMpvCore {
     center.addObserver(
       self, selector: #selector(windowDidChangeBacking),
       name: NSWindow.didChangeBackingPropertiesNotification, object: window
+    )
+    center.addObserver(
+      self, selector: #selector(windowDidChangeBacking),
+      name: NSWindow.didChangeScreenNotification, object: window
     )
     center.addObserver(
       self, selector: #selector(windowDidEnterFullScreen),
@@ -295,7 +325,7 @@ final class KotvMpvCore {
       setProperty("video-aspect-override", "no")
     }
     DispatchQueue.main.async { [weak self] in
-      self?.videoLayer?.videoGravity = gravity
+      self?.displayLayer?.videoGravity = gravity
     }
   }
 
@@ -385,15 +415,21 @@ final class KotvMpvCore {
 
   // MARK: - private
 
-  private func setupMpv(layer: AVSampleBufferDisplayLayer) -> Bool {
+  private func setupMpv(layer: CALayer) -> Bool {
     guard let handle = mpv_create() else { return false }
     mpv = handle
 
     var wid = Int64(Int(bitPattern: Unmanaged.passUnretained(layer).toOpaque()))
     mpv_set_option(handle, "wid", MPV_FORMAT_INT64, &wid)
-    mpv_set_option_string(handle, "vo", "avfoundation")
-    mpv_set_option_string(handle, "avfoundation-presentation", "host")
-    mpv_set_option_string(handle, "avfoundation-composite-osd", "no")
+    let vo = vulkan ? "gpu-next" : "avfoundation"
+    mpv_set_option_string(handle, "vo", vo)
+    if vulkan {
+      mpv_set_option_string(handle, "gpu-api", "vulkan")
+      mpv_set_option_string(handle, "gpu-context", "moltenvk")
+    } else {
+      mpv_set_option_string(handle, "avfoundation-presentation", "host")
+      mpv_set_option_string(handle, "avfoundation-composite-osd", "no")
+    }
     // 默认 videotoolbox；会话仍可由 Dart 覆盖为 soft/auto。
     mpv_set_option_string(handle, "hwdec", "videotoolbox")
     mpv_set_option_string(handle, "hwdec-codecs", "all")
@@ -414,7 +450,7 @@ final class KotvMpvCore {
 
     var voRaw: UnsafeMutablePointer<CChar>?
     let voOk = mpv_get_property(handle, "vo", MPV_FORMAT_STRING, &voRaw) >= 0 && voRaw != nil
-      && String(cString: voRaw!) == "avfoundation"
+      && String(cString: voRaw!) == vo
     if let voRaw { mpv_free(voRaw) }
     if !voOk {
       mpv_terminate_destroy(handle)
@@ -589,13 +625,14 @@ final class KotvMpvCore {
     return false
   }
 
-  /// 见类型注释：仅软解 + sigPeak>1 开 EDR。
+  /// 见类型注释：仅软解 + sigPeak>1 开 EDR。Vulkan 由 MoltenVK 按交换链色彩空间开关 EDR。
   private func updateEDRMode(sigPeak: Double) {
     lastSigPeak = sigPeak
+    guard !vulkan else { return }
     let soft = isSoftDecode()
     let shouldEnableEDR = hdrEnabled && soft && sigPeak > 1.0
     let apply: () -> Void = { [weak self] in
-      guard let self, let videoLayer = self.videoLayer else { return }
+      guard let self, let videoLayer = self.displayLayer else { return }
       self.withoutLayerAnimations {
         // macOS 26+：preferredDynamicRange；14–25：wantsExtendedDynamicRangeContent。
         if #available(macOS 26.0, *) {
@@ -700,10 +737,15 @@ final class KotvMpvCore {
     if let videoLayer, videoLayer.superlayer === containerLayer, videoLayer.contentsScale != scale {
       videoLayer.contentsScale = scale
     }
+    if let metalLayer {
+      let headroom = (window?.screen ?? NSScreen.main)?.maximumPotentialExtendedDynamicRangeColorComponentValue ?? 1
+      metalLayer.setValue(NSNumber(value: Double(headroom)), forKey: "mpvEDRHeadroom")
+      containerLayer.setNeedsLayout()
+    }
   }
 
   private func recoverDisplayLayerIfNeeded() {
-    guard let videoLayer, containerLayer?.isHidden == false else { return }
+    guard let videoLayer = displayLayer, containerLayer?.isHidden == false else { return }
     guard videoLayer.status == .failed || videoLayer.requiresFlushToResumeDecoding else { return }
     videoLayer.flush()
     // 暂停时 flush 后补一帧，否则 ASBDL 可能一直空。
@@ -727,6 +769,7 @@ final class KotvMpvCore {
   private func setContainerHidden(_ hidden: Bool) {
     withoutLayerAnimations {
       containerLayer?.isHidden = hidden
+      metalLayer?.isHidden = hidden
     }
   }
 
@@ -750,6 +793,10 @@ private final class KotvMpvContainerLayer: CALayer {
     CATransaction.setDisableActions(true)
     videoLayer.bounds = CGRect(origin: .zero, size: bounds.size)
     videoLayer.position = CGPoint(x: bounds.midX, y: bounds.midY)
+    if let metal = videoLayer as? CAMetalLayer {
+      let scale = metal.contentsScale
+      metal.drawableSize = CGSize(width: bounds.width * scale, height: bounds.height * scale)
+    }
     CATransaction.commit()
   }
 }

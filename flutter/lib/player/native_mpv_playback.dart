@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -19,23 +18,25 @@ import 'position_coalesce.dart';
 import 'silent_video_guard.dart';
 
 /// 原生 libmpv（MethodChannel `kotv_mpv`）。
-/// Android：PlatformView；macOS：underlay ASBDL；Win/Linux：原生 runner。
+/// Android：PlatformView；macOS：underlay ASBDL（Vulkan 时 CAMetalLayer）；Win/Linux：原生 runner。
 class NativeMpvPlayback extends KotvPlayback {
   NativeMpvPlayback({KotvMpvOpts? opts}) : _opts = opts ?? const KotvMpvOpts();
 
   static const _ch = MethodChannel('kotv_mpv');
   static const _ev = EventChannel('kotv_mpv/events');
 
-  /// 设备宣称 Vulkan≥1.2 时设置页可露出开关。
+  /// 设备能跑 Vulkan 时设置页才露出开关（Android：Vulkan≥1.2；macOS：MoltenVK；Win/Linux：系统 Vulkan loader）。
   static Future<bool> isVulkanAvailable() async {
-    if (!kotvIsAndroid()) return false;
-    // 优先 MainActivity 通道（不依赖 MPV 插件 attach）。
-    try {
-      const android = MethodChannel('kotv_android');
-      if (await android.invokeMethod<bool>('isVulkanAvailable') == true) {
-        return true;
-      }
-    } catch (_) {}
+    if (!kotvMpvVulkanSupported()) return false;
+    if (kotvIsAndroid()) {
+      // 优先 MainActivity 通道（不依赖 MPV 插件 attach）。
+      try {
+        const android = MethodChannel('kotv_android');
+        if (await android.invokeMethod<bool>('isVulkanAvailable') == true) {
+          return true;
+        }
+      } catch (_) {}
+    }
     try {
       return await _ch.invokeMethod<bool>('isVulkanAvailable') == true;
     } catch (_) {
@@ -401,15 +402,7 @@ class NativeMpvPlayback extends KotvPlayback {
     if (_nativeReady && _createdAsLive == live) return;
     try {
       await _ch.invokeMethod<dynamic>('create', {
-        ..._sessionDecodeArgs(),
-        'gpuNext': _opts.gpuNext,
-        'vulkan': _opts.vulkan,
-        'conf': _opts.conf,
-        'tlsVerify': _opts.tlsVerify,
-        'audioPassThrough': _opts.audioPassThrough,
-        'diskCache': _opts.diskCache && !live,
-        'dolbyVisionPolicy': _opts.dolbyVisionPolicy,
-        'bufferBytes': KotvBufferBudget.bytes(),
+        ..._sessionArgs(live: live),
         'render': _renderMode,
         // 直播须在 create 时写入，磁盘缓存和 cache-pause 按这次会话来。
         'live': live,
@@ -598,19 +591,9 @@ class NativeMpvPlayback extends KotvPlayback {
         'headers': _headers,
         if (mime != null) 'mime': mime,
         'live': live,
-        ..._sessionDecodeArgs(),
-        'gpuNext': _opts.gpuNext,
-        'vulkan': _opts.vulkan,
-        'conf': _opts.conf,
+        ..._sessionArgs(live: live),
         'props': openProps,
         if (loadOpts.isNotEmpty) 'loadOptions': kotvEncodeMpvLoadfileOptions(loadOpts),
-        'tlsVerify': _opts.tlsVerify,
-        'audioPassThrough': _opts.audioPassThrough,
-        'diskCache': _opts.diskCache && !live,
-        'bufferBytes': KotvBufferBudget.bytes(),
-        'dolbyVisionPolicy': _opts.dolbyVisionPolicy,
-        'preferredTextLangs': _opts.preferredTextLangs,
-        'audioOffsetMs': _opts.audioOffsetMs,
         'render': _renderMode,
         if (startAt > Duration.zero) 'startAtMs': startAt.inMilliseconds,
         ..._opts.equalizerChannelArgs(),
@@ -803,11 +786,25 @@ class NativeMpvPlayback extends KotvPlayback {
     } catch (_) {}
   }
 
-  /// decode / direct / hwdec 单点下发（桌面原生认 [KotvMpvOpts.hwdecValue]）。
+  /// 解码参数：Android 认 decode，其它原生端认 [KotvMpvOpts.hwdecValue]。
   Map<String, Object?> _sessionDecodeArgs() => {
         'decode': kotvNormalizeDecodeMode(_opts.decodeMode),
-        'direct': _opts.direct,
         'hwdec': _opts.hwdecValue(),
+      };
+
+  /// create / open / setOpts 共用的会话参数。
+  Map<String, Object?> _sessionArgs({required bool live}) => {
+        ..._sessionDecodeArgs(),
+        'gpuNext': _opts.gpuNext,
+        'vulkan': _opts.vulkan,
+        'conf': _opts.conf,
+        'tlsVerify': _opts.tlsVerify,
+        'audioPassThrough': _opts.audioPassThrough,
+        'diskCache': _opts.diskCache && !live,
+        'bufferBytes': KotvBufferBudget.bytes(),
+        'dolbyVisionPolicy': _opts.dolbyVisionPolicy,
+        'preferredTextLangs': _opts.preferredTextLangs,
+        'audioOffsetMs': _opts.audioOffsetMs,
       };
 
   /// 原生只排点播、请求头与当前集相同的下一集（DRM 已在 [open] 拒绝，无当前 DRM 会话）。
@@ -938,17 +935,7 @@ class NativeMpvPlayback extends KotvPlayback {
     try {
       await KotvBufferBudget.warm(force: true);
       await _ch.invokeMethod('setOpts', {
-        ..._sessionDecodeArgs(),
-        'gpuNext': opts.gpuNext,
-        'vulkan': opts.vulkan,
-        'conf': opts.conf,
-        'tlsVerify': opts.tlsVerify,
-        'audioPassThrough': opts.audioPassThrough,
-        'diskCache': opts.diskCache && !_live,
-        'bufferBytes': KotvBufferBudget.bytes(),
-        'dolbyVisionPolicy': opts.dolbyVisionPolicy,
-        'preferredTextLangs': opts.preferredTextLangs,
-        'audioOffsetMs': opts.audioOffsetMs,
+        ..._sessionArgs(live: _live),
         ...opts.equalizerChannelArgs(),
       });
     } catch (_) {}

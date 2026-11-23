@@ -1,6 +1,5 @@
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
@@ -94,6 +93,9 @@ const kotvImageExts = '';
 /// 自带 libmpv 由 scripts 自编译（Vulkan、AV3A、macOS vo_avfoundation 等），钉 [mpv-build.lock.json]。
 /// FVP 为独立内置播放器，与 MPV 并列可选。
 ///
+/// 原生 MPV 能开 Vulkan 渲染的平台（iOS 仍走 media_kit）。
+bool kotvMpvVulkanSupported() => kotvIsAndroid() || kotvIsMacOS() || kotvIsWindows() || kotvIsLinux();
+
 /// Win7「硬解直出」开：`hwdec=dxva2`；关：`auto`（与 Win10+ 相同）。切换直出见 [kotvMpvNeedsNewPlayer]。
 bool kotvMpvNeedsNewPlayer(KotvMpvOpts from, KotvMpvOpts to) =>
     kotvIsWindows7() && from.direct != to.direct;
@@ -132,7 +134,8 @@ class KotvMpvOpts {
 
   final String decodeMode;
   final bool gpuNext;
-  /// Android 原生：Vulkan 渲染（Kotlin 端再看设备是否支持）。
+  /// Vulkan 渲染（原生端再看设备是否支持）：Android gpu-api=vulkan；macOS gpu-next+MoltenVK；
+  /// Win/Linux gpu-api 先试 Vulkan。
   final bool vulkan;
   final String conf;
   /// Android 原生：HTTPS 校验证书（cacert.pem）；坏 CA 可关。
@@ -168,10 +171,10 @@ class KotvMpvOpts {
 
   factory KotvMpvOpts.fromSettings(Map<String, dynamic> settings, {String? decodeMode}) {
     final decode = (decodeMode ?? '${settings['playerDecode'] ?? 'auto'}').trim();
-    // gpu-next / Vulkan 只有 Android 原生 MPV 用得上。
+    // gpu/gpu-next 开关只有 Android 有（桌面固定 gpu-next，macOS 默认 avfoundation）。
     final android = kotvIsAndroid();
     final gpuNext = android && '${settings['mpvGpuNext'] ?? ''}'.toLowerCase() == 'true';
-    final vulkan = android && '${settings['mpvVulkan'] ?? ''}'.toLowerCase() == 'true';
+    final vulkan = kotvMpvVulkanSupported() && '${settings['mpvVulkan'] ?? ''}'.toLowerCase() == 'true';
     // 默认开；显式 false/off/0/no 才关。
     final tlsVerify = kotvSettingsFlag(settings['mpvTlsVerify'] ?? 'true', def: true);
     // 只有 Android 原生 MPV 写 audio-spdif；其它平台没有直通，不能因此挡掉音效。

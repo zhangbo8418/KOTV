@@ -17,17 +17,19 @@ marker_ok() {
 # shellcheck source=scripts/kotv-resolve-git-ref.sh
 source "$ROOT/scripts/kotv-resolve-git-ref.sh"
 
-# stamp 写入解析到的真实 SHA（跟 tip 时与构建一致，避免误命中旧缓存）。
+# stamp 写入解析到的真实 SHA 与补丁哈希（跟 tip 时与构建一致，避免误命中旧缓存）。
 kotv_mpv_src_stamp() {
-  local mpv_repo="${KOTV_MPV_REPO:-https://github.com/FongMi/mpv.git}"
-  local mpv_ref="${KOTV_MPV_REF:-fongmi}"
-  local ff_repo="${KOTV_FFMPEG_REPO:-https://github.com/FongMi/FFmpeg.git}"
-  local ff_ref="${KOTV_FFMPEG_REF:-release-9.1-fongmi}"
-  local mpv ff pl
-  mpv="$(kotv_resolve_git_ref "$mpv_repo" "$mpv_ref" "${KOTV_MPV_COMMIT:-}")"
-  ff="$(kotv_resolve_git_ref "$ff_repo" "$ff_ref" "${KOTV_FFMPEG_COMMIT:-}")"
-  pl="${KOTV_LIBPLACEBO_TAG:-v7.387.0}"
-  printf 'mpv=%s ffmpeg=%s libplacebo=%s\n' "$mpv" "$ff" "$pl"
+  local mpv ff pl patches
+  mpv="$(kotv_resolve_git_ref "${KOTV_MPV_REPO:-https://github.com/FongMi/mpv.git}" \
+    "${KOTV_MPV_REF:-fongmi}" "${KOTV_MPV_COMMIT:-}")"
+  ff="$(kotv_resolve_git_ref "${KOTV_FFMPEG_REPO:-https://github.com/FongMi/FFmpeg.git}" \
+    "${KOTV_FFMPEG_REF:-release-9.1-fongmi}" "${KOTV_FFMPEG_COMMIT:-}")"
+  pl="$(kotv_resolve_git_ref "${KOTV_LIBPLACEBO_REPO:-https://github.com/FongMi/libplacebo.git}" \
+    "${KOTV_LIBPLACEBO_REF:-fongmi}" "${KOTV_LIBPLACEBO_COMMIT:-}")"
+  patches="$(find "$ROOT/scripts/patches/ffmpeg" "$ROOT/scripts/patches/mpv-apple" \
+    "$ROOT/scripts/patches/mpv-win7-desktop.patch" -type f | LC_ALL=C sort | xargs cat \
+    | shasum -a 256 | cut -c1-12)"
+  printf 'mpv=%s ffmpeg=%s libplacebo=%s patches=%s\n' "$mpv" "$ff" "$pl" "$patches"
 }
 
 kotv_mpv_src_stamp_ok() {
@@ -94,11 +96,13 @@ fetch_macos() {
   local src_stamp="$ASSET/macos/.kotv-mpv-src"
   local kind_file="$ASSET/macos/.kind"
   # vo-avfoundation：Apple 侧用 AVSampleBufferDisplayLayer，勿走 Texture/libmpv OpenGL。
-  local want_kind="av3a-dav1d-vulkan-vo-avfoundation-osc-dovi-lcms-xxhash-v1"
+  local want_kind="av3a-dav1d-vulkan-moltenvk-shaderc-vo-avfoundation-osc-dovi-lcms-xxhash-v2"
   if marker_ok "$out" 500000 && grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$out" 2>/dev/null \
     && grep -aqE 'dovi_parse_unspec62_nalu|pl_hdr_metadata_from_dovi_rpu' "$out" 2>/dev/null \
     && grep -aqE 'dav1d_data_props|dav1d_get_picture|libdav1d' "$out" 2>/dev/null \
     && grep -aq 'vo_avfoundation' "$out" 2>/dev/null \
+    && grep -aq 'Using Dolby Vision HEVC VideoToolbox format' "$out" 2>/dev/null \
+    && grep -aq 'Failed creating MoltenVK surface' "$out" 2>/dev/null \
     && ! grep -aq 'opengl-next' "$out" 2>/dev/null \
     && [[ "$(cat "$kind_file" 2>/dev/null || true)" == "$want_kind" ]] \
     && kotv_mpv_src_stamp_ok "$src_stamp"; then

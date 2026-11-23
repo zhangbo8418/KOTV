@@ -29,6 +29,7 @@ kotv_resolve_git_ref() {
 }
 
 # 检出已 clone 的仓库到指定 commit（浅取）。
+# 强制检出：上次构建打的补丁会改动受控文件，不能挡住切换；未跟踪文件（依赖、SDK）保留。
 kotv_git_checkout_commit() {
   local dir="${1:?dir}"
   local repo="${2:?repo}"
@@ -38,10 +39,9 @@ kotv_git_checkout_commit() {
   fi
   git -C "$dir" fetch --depth 1 origin "$commit" \
     || git -C "$dir" fetch --depth 1 origin "$commit"
-  git -C "$dir" checkout -q "$commit" \
-    || git -C "$dir" checkout -q FETCH_HEAD
+  git -C "$dir" checkout -qf "$commit"
   if [[ "$(git -C "$dir" rev-parse HEAD)" != "$commit" ]]; then
-    git -C "$dir" fetch --depth 1 origin "$commit"
-    git -C "$dir" checkout -q "$commit"
+    echo "ERROR: $dir HEAD is not $commit after checkout" >&2
+    return 1
   fi
 }

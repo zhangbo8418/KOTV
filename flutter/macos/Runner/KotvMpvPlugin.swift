@@ -8,12 +8,12 @@ import FlutterMacOS
 final class KotvMpvPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
   private var core: KotvMpvCore?
   private var eventSink: FlutterEventSink?
-  private var decodeMode = "auto"
-  private var hwdecOverride = ""
+  /// Dart [KotvMpvOpts.hwdecValue]。
+  private var hwdec = ""
+  private var vulkan = false
   private var conf = ""
   private var diskCache = false
   private var livePlayback = false
-  private var dolbyVisionPolicy = 0
   private weak var hostWindow: NSWindow?
   /// Dart 洞（顶左原点）。core 重建间隙 updateFrame 可能落到 nil，须缓存到 ensureCore 后再应用。
   private var pendingHoleFlutter: CGRect?
@@ -47,35 +47,15 @@ final class KotvMpvPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
 
   private func ingest(_ args: [String: Any]?) {
     guard let args else { return }
-    if let d = args["decode"] as? String, !d.isEmpty { decodeMode = d }
-    if let h = args["hwdec"] as? String, !h.isEmpty { hwdecOverride = h }
+    if let h = args["hwdec"] as? String, !h.isEmpty { hwdec = h }
+    if let v = args["vulkan"] as? Bool { vulkan = v && KotvMpvCore.isVulkanAvailable }
     if let c = args["conf"] as? String { conf = c }
     if let v = args["diskCache"] as? Bool { diskCache = v }
     if let v = args["live"] as? Bool { livePlayback = v }
-    if let v = args["dolbyVisionPolicy"] as? Int { dolbyVisionPolicy = v }
-    if let v = args["dolbyVisionPolicy"] as? NSNumber { dolbyVisionPolicy = v.intValue }
   }
 
   private func applySessionOpts(_ core: KotvMpvCore) {
-    if !hwdecOverride.isEmpty {
-      core.setProperty("hwdec", hwdecOverride)
-    } else {
-      switch decodeMode {
-      case "soft", "no", "sw":
-        core.setProperty("hwdec", "no")
-      default:
-        // 自动/硬解：videotoolbox（软解 DV 在 avfoundation 上易黑帧）。
-        core.setProperty("hwdec", "videotoolbox")
-      }
-    }
-    switch dolbyVisionPolicy {
-    case 2:
-      core.setProperty("demuxer-dovi-profile7", "no")
-    case 1:
-      core.setProperty("demuxer-dovi-profile7", "yes")
-    default:
-      core.setProperty("demuxer-dovi-profile7", "auto")
-    }
+    if !hwdec.isEmpty { core.setProperty("hwdec", hwdec) }
     if livePlayback || !diskCache {
       core.setProperty("cache", "no")
       core.setProperty("cache-pause", "no")
@@ -89,6 +69,7 @@ final class KotvMpvPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
   }
 
   /// 主线程建 layer，mpvQueue 上 init；完成后再回主线程 result。
+  /// Vulkan 开关只在新建 core 时生效（dispose 后下次播放）。
   private func ensureCore(completion: @escaping (Result<KotvMpvCore, Error>) -> Void) {
     if let core, core.isReady {
       completion(.success(core))
@@ -102,7 +83,7 @@ final class KotvMpvPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
       )))
       return
     }
-    let created = core ?? KotvMpvCore()
+    let created = core ?? KotvMpvCore(vulkan: vulkan)
     created.onEvent = { [weak self] map in self?.emit(map) }
     guard created.prepareLayers(in: win) else {
       completion(.failure(NSError(
@@ -142,7 +123,7 @@ final class KotvMpvPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
     let args = call.arguments as? [String: Any]
     switch call.method {
     case "isVulkanAvailable":
-      result(false)
+      result(KotvMpvCore.isVulkanAvailable)
 
     case "create":
       ingest(args)

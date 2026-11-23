@@ -129,7 +129,7 @@ kotv_libplacebo_profile() {
       echo "win-vulkan-d3d11-opengl-dovi-lcms-xxhash-v1"
     fi
   elif [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
-    echo "macos-vulkan-prefix-opengl-dovi-lcms-xxhash-v1"
+    echo "macos-vulkan-shaderc-opengl-dovi-lcms-xxhash-v2"
   else
     echo "vulkan-opengl-dovi-lcms-xxhash-v1"
   fi
@@ -668,49 +668,10 @@ apply_mpv_win7_patches() {
   fi
 }
 
-# macOS：vo_avfoundation（AVSampleBufferDisplayLayer）。
-# 补丁取自 edde746/mpv-build pool，顺序：osd_ahead → 0004（依赖 osd_ahead.h）。
-# 与 ao_avfoundation 共用 avfoundation 探测，另开 vo-avfoundation。
-apply_mpv_apple_vo_patch() {
+# Apple：vo_avfoundation、moltenvk 等补丁，顺序见 patches/mpv-apple/series。
+apply_mpv_apple_patches() {
   local dir="$ROOT/scripts/patches/mpv-apple"
-  local p0031="$dir/0031-vo-osd-ahead-shared-subtitle-render-pipeline.patch"
-  local p0031a="$dir/0031a-osd-ahead-tip-compat.patch"
-  local p0214="$dir/0214-osd-ahead-repeat-an-unchanged-frame-on-request.patch"
-  local p0004="$dir/0004-avfoundation-video-output.patch"
-  [[ -f "$p0031" && -f "$p0031a" && -f "$p0214" && -f "$p0004" ]] \
-    || { echo "ERROR: missing mpv Apple patches under $dir" >&2; exit 1; }
-
-  kotv_apply_mpv_patch() {
-    local patch="$1" label="$2"
-    if patch -p1 --forward --batch <"$patch"; then
-      echo "ok applied $label"
-    elif patch -p1 -R --dry-run --batch <"$patch" >/dev/null 2>&1; then
-      echo "ok $label already applied"
-    else
-      echo "ERROR: failed to apply $label" >&2
-      exit 1
-    fi
-  }
-
-  if [[ -f video/out/vo_avfoundation.m && -f video/out/osd_ahead.h ]] \
-    && grep -q 'osd_get_sub_render_horizon' sub/osd.h 2>/dev/null; then
-    echo "ok mpv Apple vo_avfoundation + osd_ahead already present"
-    return 0
-  fi
-  kotv_apply_mpv_patch "$p0031" "mpv osd_ahead (0031)"
-  kotv_apply_mpv_patch "$p0031a" "mpv osd_ahead tip-compat (0031a)"
-  kotv_apply_mpv_patch "$p0214" "mpv osd_ahead repeat (0214)"
-  kotv_apply_mpv_patch "$p0004" "mpv vo_avfoundation (0004)"
-  # tip：vo_set_queue_params 多了 num_frame_refs；旧三参补丁需适配。
-  if grep -q 'vo_set_queue_params(vo, MP_TIME_MS_TO_NS(p->opts->queue_lead_ms), 1);' \
-      video/out/vo_avfoundation.m 2>/dev/null; then
-    sed -i.bak 's/vo_set_queue_params(vo, MP_TIME_MS_TO_NS(p->opts->queue_lead_ms), 1);/vo_set_queue_params(vo, MP_TIME_MS_TO_NS(p->opts->queue_lead_ms), 1, 1);/g' \
-      video/out/vo_avfoundation.m
-    rm -f video/out/vo_avfoundation.m.bak
-    echo "ok tip-compat vo_set_queue_params arity"
-  fi
-  [[ -f video/out/vo_avfoundation.m && -f video/out/osd_ahead.h ]] \
-    || { echo "ERROR: vo_avfoundation / osd_ahead missing after patch" >&2; exit 1; }
+  "$ROOT/scripts/kotv-apply-patch-series.sh" "$dir/series" "$dir" "$PWD"
 }
 
 # 非 Win7 构建：源码目录可能被 Win7 构建打过补丁，按补丁里的文件从 git 还原。
@@ -1084,20 +1045,20 @@ ensure_libplacebo() {
       -Dcpp_args="['-D_WIN32_WINNT=0x0601','-DWINVER=0x0601','-DNTDDI_VERSION=0x06010000']"
   elif [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
     ensure_macos_vulkan
+    ensure_shaderc
     export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
     export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
     local native_ini
     native_ini="$(kotv_macos_write_meson_native)"
-    echo "==> macOS: libplacebo vulkan+opengl+dovi+lcms+xxhash ($want_profile, arch=$(kotv_macos_target_arch))"
-    # shaderc 仍关：可选，且 Homebrew 版易带错架构绝对路径；Vulkan 在 mac 上可走无 SPIR-V 编译器路径受限功能，
-    # 若后续要完整 gpu-next 再自前缀编 shaderc。
+    echo "==> macOS: libplacebo vulkan+shaderc+opengl+dovi+lcms+xxhash ($want_profile, arch=$(kotv_macos_target_arch))"
+    cd "$BUILD_DIR/libplacebo"
     meson setup build \
       --prefix="$PREFIX" \
       --libdir=lib \
       --native-file="$native_ini" \
       -Ddefault_library="$placebo_lib" \
       -Dvulkan=enabled \
-      -Dshaderc=disabled \
+      -Dshaderc=enabled \
       -Dopengl=enabled \
       "${placebo_common[@]}"
   else
@@ -1131,19 +1092,16 @@ ensure_libplacebo() {
     echo "ERROR: installed libplacebo lacks pl_dispatch_prepared" >&2
     exit 1
   fi
-  # 确认真正编进了 libdovi / lcms / xxhash。
-  local cfgh
-  cfgh="$(find "$PREFIX/include" "$BUILD_DIR/libplacebo/build" -name 'config.h' 2>/dev/null | head -1 || true)"
-  if [[ -n "$cfgh" ]]; then
-    for feat in LIBDOVI LCMS XXHASH; do
-      if ! grep -Eq "^#define PL_HAVE_${feat} 1" "$cfgh"; then
-        echo "ERROR: libplacebo built without PL_HAVE_${feat}=1 ($cfgh)" >&2
-        grep -E "PL_HAVE_.*${feat}|${feat}" "$cfgh" 2>/dev/null || true
-        exit 1
-      fi
-    done
-  fi
-  echo "ok libplacebo $(pkg-config --modversion libplacebo) (built ${LIBPLACEBO_COMMIT:0:12}, libdovi+lcms+xxhash)"
+  # 确认真正编进了 Vulkan + shaderc（GLSL 编译器）与 libdovi / lcms / xxhash。
+  local cfgh="$PREFIX/include/libplacebo/config.h"
+  for feat in VULKAN SHADERC LIBDOVI LCMS XXHASH; do
+    if ! grep -Eq "^#define PL_HAVE_${feat} 1" "$cfgh"; then
+      echo "ERROR: libplacebo built without PL_HAVE_${feat}=1 ($cfgh)" >&2
+      grep -E "PL_HAVE_" "$cfgh" 2>/dev/null || true
+      exit 1
+    fi
+  done
+  echo "ok libplacebo $(pkg-config --modversion libplacebo) (built ${LIBPLACEBO_COMMIT:0:12}, vulkan+shaderc+libdovi+lcms+xxhash)"
 }
 
 ensure_lua_pkg() {
@@ -1397,96 +1355,104 @@ EOF
   echo "ok libass $(pkg-config --modversion libass) (built)"
 }
 
-# Windows：mpv/libplacebo 的 d3d11 需要 shaderc + spirv-cross（Win7 / Win10+ 都要）。
-ensure_windows_d3d11_shader_deps() {
-  kotv_is_windows_build || return 0
+# Vulkan / D3D11 的 GLSL→SPIR-V 编译器：shaderc 静态编进 PREFIX（Windows、macOS）。
+# macOS 交叉编 x86_64 时不能用 Homebrew 的本机架构 bottle。
+ensure_shaderc() {
   export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
-  local need_shaderc=0 need_spirv=0
-  pkg-config --exists shaderc 2>/dev/null || need_shaderc=1
-  pkg-config --exists spirv-cross-c-shared 2>/dev/null || need_spirv=1
-  if [[ "$need_shaderc" == 0 && "$need_spirv" == 0 ]]; then
-    echo "ok shaderc $(pkg-config --modversion shaderc 2>/dev/null || echo found) + spirv-cross (Win D3D11)"
-    return 0
+  local darwin=0 arch=""
+  if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
+    darwin=1
+    arch="$(kotv_macos_target_arch)"
+  fi
+  if pkg-config --exists shaderc 2>/dev/null; then
+    if [[ "$darwin" == 0 ]] \
+      || lipo -archs "$PREFIX/lib/libshaderc_combined.a" 2>/dev/null | tr ' ' '\n' | grep -qx "$arch"; then
+      echo "ok shaderc $(pkg-config --modversion shaderc)"
+      return 0
+    fi
   fi
   need git
   need cmake
   need ninja
   mkdir -p "$BUILD_DIR" "$PREFIX"
-  local w7cflags
-  w7cflags="$(kotv_windows_mpv_cflags)"
-
-  if [[ "$need_spirv" == 1 ]]; then
-    local tag="${KOTV_SPIRV_CROSS_TAG:-vulkan-sdk-1.4.321.0}"
-    echo "==> build SPIRV-Cross $tag (shared, Win D3D11)"
-    cd "$BUILD_DIR"
-    if [[ ! -d SPIRV-Cross/.git ]]; then
-      git clone --depth 1 --branch "$tag" https://github.com/KhronosGroup/SPIRV-Cross.git SPIRV-Cross \
-        || git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Cross.git SPIRV-Cross
-    fi
-    rm -rf SPIRV-Cross/build
-    cmake -S SPIRV-Cross -B SPIRV-Cross/build -G Ninja \
-      -DCMAKE_BUILD_TYPE=Release \
-      -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-      -DCMAKE_C_FLAGS="$w7cflags" \
-      -DCMAKE_CXX_FLAGS="$w7cflags" \
-      -DSPIRV_CROSS_SHARED=ON \
-      -DSPIRV_CROSS_STATIC=OFF \
-      -DSPIRV_CROSS_CLI=OFF \
-      -DSPIRV_CROSS_ENABLE_TESTS=OFF
-    cmake --build SPIRV-Cross/build -j"$JOBS"
-    cmake --install SPIRV-Cross/build
+  local stag="${KOTV_SHADERC_TAG:-v2024.1}"
+  echo "==> build shaderc $stag (static${arch:+, arch=$arch})"
+  cd "$BUILD_DIR"
+  if [[ ! -d shaderc/.git ]]; then
+    git clone --depth 1 --branch "$stag" https://github.com/google/shaderc.git shaderc \
+      || git clone --depth 1 https://github.com/google/shaderc.git shaderc
   fi
-
-  if [[ "$need_shaderc" == 1 ]]; then
-    local stag="${KOTV_SHADERC_TAG:-v2024.1}"
-    echo "==> build shaderc $stag (static, Win D3D11)"
-    cd "$BUILD_DIR"
-    if [[ ! -d shaderc/.git ]]; then
-      git clone --depth 1 --branch "$stag" https://github.com/google/shaderc.git shaderc \
-        || git clone --depth 1 https://github.com/google/shaderc.git shaderc
-    fi
-    if [[ ! -f shaderc/third_party/glslang/CMakeLists.txt ]]; then
-      (cd shaderc && python3 ./utils/git-sync-deps) \
-        || (cd shaderc && python ./utils/git-sync-deps)
-    fi
-    # GCC15：glslang SpvBuilder.h 用 uint32_t 却未 include cstdint
-    local hdr="shaderc/third_party/glslang/SPIRV/SpvBuilder.h"
-    if [[ -f "$hdr" ]] && ! grep -q '#include <cstdint>' "$hdr"; then
-      if command -v python3 >/dev/null; then
-        python3 - "$hdr" <<'PY'
-import sys
-p = sys.argv[1]
-t = open(p, encoding='utf-8', errors='replace').read()
-if '#include <cstdint>' not in t:
-    t = t.replace('#include <algorithm>', '#include <cstdint>\n#include <algorithm>', 1)
-    if '#include <cstdint>' not in t:
-        t = '#include <cstdint>\n' + t
-    open(p, 'w', encoding='utf-8').write(t)
-print('patched', p, 'for cstdint')
-PY
-      fi
-    fi
-    rm -rf shaderc/build
-    # -include cstdint：兜底 MinGW/GCC15 对第三方头的严格性
-    cmake -S shaderc -B shaderc/build -G Ninja \
-      -DCMAKE_BUILD_TYPE=Release \
-      -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-      -DCMAKE_C_FLAGS="$w7cflags" \
-      -DCMAKE_CXX_FLAGS="$w7cflags -include cstdint" \
-      -DBUILD_SHARED_LIBS=OFF \
-      -DSHADERC_SKIP_TESTS=ON \
-      -DSHADERC_SKIP_EXAMPLES=ON \
-      -DSHADERC_SKIP_COPYRIGHT_CHECK=ON
-    cmake --build shaderc/build -j"$JOBS"
-    cmake --install shaderc/build
+  if [[ ! -f shaderc/third_party/glslang/CMakeLists.txt ]]; then
+    (cd shaderc && python3 ./utils/git-sync-deps) \
+      || (cd shaderc && python ./utils/git-sync-deps)
   fi
-
-  export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
-  pkg-config --exists spirv-cross-c-shared \
-    || { echo "ERROR: spirv-cross-c-shared not visible to pkg-config after build" >&2; exit 1; }
+  local -a cmake_extra=()
+  if kotv_is_windows_build; then
+    # GCC15：glslang SpvBuilder.h 用 uint32_t 却未 include cstdint。
+    local w7cflags
+    w7cflags="$(kotv_windows_mpv_cflags)"
+    cmake_extra+=(-DCMAKE_C_FLAGS="$w7cflags" -DCMAKE_CXX_FLAGS="$w7cflags -include cstdint")
+  elif [[ "$darwin" == 1 ]]; then
+    cmake_extra+=(-DCMAKE_OSX_ARCHITECTURES="$arch")
+  fi
+  rm -rf shaderc/build
+  cmake -S shaderc -B shaderc/build -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+    -DBUILD_SHARED_LIBS=OFF \
+    -DSHADERC_SKIP_TESTS=ON \
+    -DSHADERC_SKIP_EXAMPLES=ON \
+    -DSHADERC_SKIP_COPYRIGHT_CHECK=ON \
+    "${cmake_extra[@]}"
+  cmake --build shaderc/build -j"$JOBS"
+  cmake --install shaderc/build
+  if [[ "$darwin" == 1 ]]; then
+    # libplacebo.dylib 静态链 shaderc_combined，不再随包带 libshaderc_shared。
+    rm -f "$PREFIX/lib/"libshaderc_shared*.dylib
+    sed 's/-lshaderc_combined/-lshaderc_combined -lc++/' \
+      "$PREFIX/lib/pkgconfig/shaderc_combined.pc" >"$PREFIX/lib/pkgconfig/shaderc.pc"
+  fi
   pkg-config --exists shaderc \
     || { echo "ERROR: shaderc not visible to pkg-config after build" >&2; ls -la "$PREFIX/lib/pkgconfig" >&2; exit 1; }
-  echo "ok Win D3D11 deps: shaderc=$(pkg-config --modversion shaderc) spirv-cross=$(pkg-config --modversion spirv-cross-c-shared 2>/dev/null || echo ok)"
+  echo "ok shaderc $(pkg-config --modversion shaderc) (built)"
+}
+
+# Windows：mpv/libplacebo 的 d3d11 需要 shaderc + spirv-cross（Win7 / Win10+ 都要）。
+ensure_windows_d3d11_shader_deps() {
+  kotv_is_windows_build || return 0
+  ensure_shaderc
+  export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+  if pkg-config --exists spirv-cross-c-shared 2>/dev/null; then
+    echo "ok spirv-cross $(pkg-config --modversion spirv-cross-c-shared 2>/dev/null || echo found) (Win D3D11)"
+    return 0
+  fi
+  need git
+  need cmake
+  need ninja
+  local w7cflags
+  w7cflags="$(kotv_windows_mpv_cflags)"
+  local tag="${KOTV_SPIRV_CROSS_TAG:-vulkan-sdk-1.4.321.0}"
+  echo "==> build SPIRV-Cross $tag (shared, Win D3D11)"
+  cd "$BUILD_DIR"
+  if [[ ! -d SPIRV-Cross/.git ]]; then
+    git clone --depth 1 --branch "$tag" https://github.com/KhronosGroup/SPIRV-Cross.git SPIRV-Cross \
+      || git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Cross.git SPIRV-Cross
+  fi
+  rm -rf SPIRV-Cross/build
+  cmake -S SPIRV-Cross -B SPIRV-Cross/build -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+    -DCMAKE_C_FLAGS="$w7cflags" \
+    -DCMAKE_CXX_FLAGS="$w7cflags" \
+    -DSPIRV_CROSS_SHARED=ON \
+    -DSPIRV_CROSS_STATIC=OFF \
+    -DSPIRV_CROSS_CLI=OFF \
+    -DSPIRV_CROSS_ENABLE_TESTS=OFF
+  cmake --build SPIRV-Cross/build -j"$JOBS"
+  cmake --install SPIRV-Cross/build
+  pkg-config --exists spirv-cross-c-shared \
+    || { echo "ERROR: spirv-cross-c-shared not visible to pkg-config after build" >&2; exit 1; }
+  echo "ok spirv-cross $(pkg-config --modversion spirv-cross-c-shared 2>/dev/null || echo ok) (built)"
 }
 
 ensure_windows_vulkan() {
@@ -1605,7 +1571,7 @@ build_mpv_macos() {
   mkdir -p "$BUILD_DIR"
   kotv_checkout_mpv_src
   cd "$BUILD_DIR/mpv"
-  apply_mpv_apple_vo_patch
+  apply_mpv_apple_patches
   rm -rf build
   export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
   export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
@@ -1637,6 +1603,7 @@ build_mpv_macos() {
     -Dlua=enabled \
     -Davfoundation=enabled \
     -Dvo-avfoundation=enabled \
+    -Dmoltenvk=enabled \
     -Dlibavdevice=disabled
   kotv_meson_compile build "mpv-macos"
   cp -f build/libmpv.dylib "$ASSET/macos/libmpv.dylib"

@@ -376,7 +376,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .runtime-cache
-          key: runtime-cache-macos-${{ hashFiles('scripts/prepare-runtime.sh', 'mpv-build.lock.json', 'scripts/patches/ffmpeg/**', 'scripts/patches/mpv-apple/**', 'scripts/build-desktop-mpv-from-source.sh', 'scripts/build-desktop-ffmpeg-av3a-prefix.sh', 'scripts/kotv-apply-ffmpeg-apple-patches.sh') }}
+          key: runtime-cache-macos-${{ hashFiles('scripts/prepare-runtime.sh', 'mpv-build.lock.json', 'scripts/patches/ffmpeg/**', 'scripts/patches/mpv-apple/**', 'scripts/build-desktop-mpv-from-source.sh', 'scripts/build-desktop-ffmpeg-av3a-prefix.sh', 'scripts/kotv-apply-patch-series.sh') }}
           restore-keys: |
             runtime-cache-macos-
 

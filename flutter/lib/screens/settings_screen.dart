@@ -76,7 +76,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _canManageShared = true;
 
   /// 安卓：设备支持 Vulkan≥1.2 时才显示开关。
-  bool _androidVulkanOk = false;
+  bool _mpvVulkanOk = false;
   final _engineCtrl = TextEditingController();
 
   @override
@@ -133,9 +133,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         _deviceIp = '';
       }
       kotvApplyPlayUaSetting(g('ua'));
-      if (kotvIsAndroid()) {
-        _androidVulkanOk = await NativeMpvPlayback.isVulkanAvailable();
-      }
+      _mpvVulkanOk = await NativeMpvPlayback.isVulkanAvailable();
       final base = ref.read(engineLauncherProvider).baseUrl;
       _canManageShared =
           await kotvCanManageShared(ref.read(apiProvider), base);
@@ -2388,8 +2386,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         kotvEmbedBackend(livePlayerVal) == KotvEmbedBackend.mpv;
     final showMpvOpts =
         usesMpv && (kotvIsAndroid() || kotvIsDesktop() || kotvIsIOS());
-    // 只有 Android 原生 MPV 能走 Vulkan；桌面/iOS 的 media_kit 渲染 API 固定为 OpenGL。
-    final showMpvVulkan = usesMpv && kotvIsAndroid() && _androidVulkanOk;
+    // 原生 MPV（Android / 桌面）且设备能跑 Vulkan 才露出；iOS 仍是 media_kit。
+    final showMpvVulkan = usesMpv && _mpvVulkanOk;
     final showMpvGpuNext = usesMpv && kotvIsAndroid();
     final showMpvTls = usesMpv && kotvIsAndroid();
     // 软解没有硬解可言，与播放器页一致隐藏。

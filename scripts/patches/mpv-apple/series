@@ -1,0 +1,28 @@
+# Apple（macOS / iOS）mpv 补丁，按行顺序应用。
+# 来源 edde746/mpv-build patches/mpv/pool（版本见仓库根 mpv-build.lock.json）；
+# 0031a 与 0099 是本仓库为 FongMi mpv 接口差异写的适配。
+
+# 字幕提前渲染管线，vo_avfoundation 依赖它。
+0031-vo-osd-ahead-shared-subtitle-render-pipeline.patch
+0031a-osd-ahead-tip-compat.patch
+0214-osd-ahead-repeat-an-unchanged-frame-on-request.patch
+
+# vo_avfoundation：VideoToolbox 帧直接交给 AVSampleBufferDisplayLayer，杜比视界由系统重塑。
+0004-avfoundation-video-output.patch
+0043-avfoundation-clear-and-blend-the-osd-canvas-for-less.patch
+0049-avfoundation-let-osd-changes-wait-as-bitmap-lists.patch
+0050-avfoundation-stamp-media-frames-after-every-frame-before.patch
+0051-avfoundation-prime-the-osd-layer-before-its-first-subtitle.patch
+0052-avfoundation-show-subtitles-in-the-colour-of-their-video.patch
+0053-avfoundation-decode-untagged-videotoolbox-frames-as-mpv-does.patch
+
+# gpu-context=moltenvk：wid 传 CAMetalLayer，gpu-next 走 Vulkan（MoltenVK）。
+0001-player-add-moltenvk-context.patch
+# iOS 没有 CoreAudio HAL。
+0003-fix-coreaudio-hal-guards-for-non-macos.patch
+# 已出过帧的硬解遇到连续解码错误时，先等两个关键帧恢复，仍失败才退软解。
+0025-vd-lavc-recover-hwdec-after-decode-error-burst.patch
+# 首帧不等音频输出打开。
+0046-player-first-video-frame-before-the-audio-output-opens.patch
+
+0099-avfoundation-mpv-api-compat.patch

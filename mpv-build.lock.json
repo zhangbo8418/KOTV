@@ -1,5 +1,5 @@
 {
   "repo": "edde746/mpv-build",
-  "commit": "6dbda06021b128b7adc30161bf7870977e575135",
-  "note": "KOTV desktop/Apple libmpv patches and pins; AV3A layered via scripts/build-desktop-ffmpeg-av3a-prefix.sh"
+  "commit": "934cd7c5d55c9adb9da126f9b7b834065899dad5",
+  "note": "Source of scripts/patches/ffmpeg/pool and scripts/patches/mpv-apple; AV3A layered via scripts/build-desktop-ffmpeg-av3a-prefix.sh"
 }

@@ -49,13 +49,23 @@ clone_ffmpeg() {
   kotv_git_checkout_commit "$BUILD_DIR/ffmpeg" "$FFMPEG_REPO" "$FFMPEG_COMMIT"
 }
 
-# v22: 默认跟 release-9.1-fongmi tip（含 libarcdav3a / libear）。
-# v21: bdf17191 avs3a 链 libear；曾默认 release-9.0-fongmi。
+is_darwin() { [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; }
+
+# Apple 补丁内容变了也要重编，所以把补丁哈希放进标记。
+apple_patch_hash() {
+  is_darwin || { echo none; return; }
+  cat "$ROOT/scripts/patches/ffmpeg/series" "$ROOT/scripts/patches/ffmpeg/pool/"*.patch \
+    | shasum -a 256 | cut -c1-12
+}
+
 # HTTP/2+3 仍走 mpv libcurl。伪装扩展名分片靠播放器 extension_picky=0。
-STAMP_FILE="$PREFIX/.kotv-ffmpeg-av3a-v22-${FFMPEG_COMMIT:0:12}"
+STAMP_FILE="$PREFIX/.kotv-ffmpeg-av3a-v23-${FFMPEG_COMMIT:0:12}-$(apple_patch_hash)"
 
 marker_ok() {
   [[ -f "$STAMP_FILE" ]] || return 1
+  if is_darwin; then
+    grep -aq 'Using Dolby Vision HEVC VideoToolbox format' "$PREFIX/lib/libavcodec.a" 2>/dev/null || return 1
+  fi
   [[ -f "$PREFIX/lib/libavcodec.a" ]] \
     || [[ -f "$PREFIX/lib/libavcodec.dll.a" ]] \
     || [[ -f "$PREFIX/lib/libavcodec.dylib" ]] \
@@ -109,13 +119,14 @@ promote_static_libs_in_avcodec_pc() {
   [[ -f "$pc" ]] || return 0
   local win=0
   kotv_is_windows_build && win=1
-  python3 - "$pc" "$win" <<'PY'
+  python3 - "$pc" "$win" "$(dovi_static_libs)" <<'PY'
 import sys
 from pathlib import Path
 p = Path(sys.argv[1])
 win = sys.argv[2] == "1"
 lines = p.read_text(encoding="utf-8", errors="replace").splitlines(True)
 need = ["-larcdav3a", "-lear", "-ldav1d", "-laribcaption", "-lxml2", "-lz", "-llzma"]
+need += sys.argv[3].split()
 if win:
     need += ["-lstdc++", "-ld2d1", "-ldwrite", "-lole32", "-luuid"]
 else:
@@ -136,6 +147,13 @@ for line in lines:
 p.write_text("".join(out), encoding="utf-8")
 PY
   echo "ok patched $pc (+ arcdav3a/ear/dav1d/aribcaption/xml2/zlib/lzma${win:+/d2d1} on Libs)"
+}
+
+# Apple 上 VideoToolbox 的 P7 → P8.1 转换链 libdovi（静态库连同 Rust 运行库依赖）。
+dovi_static_libs() {
+  is_darwin || return 0
+  PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig" PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig" \
+    pkg-config --libs --static dovi 2>/dev/null | sed "s#-L[^ ]*##g"
 }
 
 promote_arcdav3a_in_avcodec_pc() {
@@ -270,10 +288,15 @@ cmake --install arcdav3a-build
 
 setup_pkg_config
 
-echo "==> configure FFmpeg (static PIC + libarcdav3a; Apple 另打 mpv-build VT/DV 补丁)"
+echo "==> configure FFmpeg (static PIC + libarcdav3a; Apple 另打 VideoToolbox 杜比视界补丁)"
+if is_darwin; then
+  KOTV_MPV_BUILD_DIR="$BUILD_DIR" KOTV_DESKTOP_FFMPEG_PREFIX="$PREFIX" \
+    "$ROOT/scripts/ensure-desktop-libdovi.sh"
+fi
 cd ffmpeg
-if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
-  "$ROOT/scripts/kotv-apply-ffmpeg-apple-patches.sh" "$PWD"
+if is_darwin; then
+  "$ROOT/scripts/kotv-apply-patch-series.sh" "$ROOT/scripts/patches/ffmpeg/series" \
+    "$ROOT/scripts/patches/ffmpeg/pool" "$PWD"
 fi
 $MAKE distclean 2>/dev/null || true
 
@@ -351,8 +374,9 @@ elif [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
   FFMPEG_EXTRA+=(--disable-x86asm)
   FFMPEG_EXTRA+=(--enable-securetransport)
   FFMPEG_EXTRA+=(--enable-videotoolbox)
+  FFMPEG_EXTRA+=(--enable-libdovi)
   # arib/ear 是 C++；探测阶段也会链 extra-libs。
-  FFMPEG_EXTRA+=(--extra-libs="-larcdav3a -lear -ldav1d -laribcaption -lxml2 -lz -llzma -lm -lc++")
+  FFMPEG_EXTRA+=(--extra-libs="-larcdav3a -lear -ldav1d -laribcaption -lxml2 -lz -llzma -lm -lc++ $(dovi_static_libs)")
   export CC="${CC:-clang}"
   export CXX="${CXX:-clang++}"
 else
@@ -494,6 +518,14 @@ if kotv_is_windows_build; then
 elif [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
   if ! kotv_ffmpeg_config_has '^#define CONFIG_VIDEOTOOLBOX 1$'; then
     echo "ERROR: FFmpeg missing CONFIG_VIDEOTOOLBOX=1" >&2
+    fail_proto=1
+  fi
+  if ! kotv_ffmpeg_config_has '^#define CONFIG_LIBDOVI 1$'; then
+    echo "ERROR: FFmpeg missing CONFIG_LIBDOVI=1 (VideoToolbox P7 conversion)" >&2
+    fail_proto=1
+  fi
+  if ! grep -aq 'Using Dolby Vision HEVC VideoToolbox format' "$lib"; then
+    echo "ERROR: $lib lacks the VideoToolbox Dolby Vision patches" >&2
     fail_proto=1
   fi
 else

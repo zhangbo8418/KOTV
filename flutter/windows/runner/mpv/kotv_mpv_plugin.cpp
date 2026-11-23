@@ -61,6 +61,18 @@ void MpvLog(const char* fmt, ...) {
   fclose(f);
 }
 
+// 显卡驱动装的 Vulkan loader（System32\vulkan-1.dll）；不认应用目录里随包的那份。
+bool VulkanLoaderPresent() {
+  static const bool present = [] {
+    HMODULE h = LoadLibraryExW(L"vulkan-1.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    if (!h) return false;
+    const bool ok = GetProcAddress(h, "vkGetInstanceProcAddr") != nullptr;
+    FreeLibrary(h);
+    return ok;
+  }();
+  return present;
+}
+
 // Win7 = 6.1。GetVersionEx 受清单影响，直接问 ntdll。
 bool IsWindows7() {
   using RtlGetVersionFn = LONG(WINAPI*)(PRTL_OSVERSIONINFOW);
@@ -283,13 +295,13 @@ struct MpvCore {
 
 // 会话级选项（UI 线程维护，快照后交给后台）。
 struct SessionOpts {
-  std::string decode_mode = "auto";
-  std::string hwdec;
-  bool direct = false;
+  // Dart KotvMpvOpts.hwdecValue()。
+  std::string hwdec = "auto";
+  // 建 mpv 时生效：gpu-api 先试 Vulkan，失败回到默认探测。
+  bool vulkan = false;
   std::string conf;
   bool disk_cache = false;
   bool live = false;
-  int dovi_policy = 0;
   std::string volume;
   std::string speed;
   std::string aspect = "default";
@@ -351,13 +363,6 @@ void CommandSync(mpv_handle* m, const std::vector<std::string>& args) {
   mpv_command(m, c.data());
 }
 
-std::string ResolveHwdec(const SessionOpts& o) {
-  if (!o.hwdec.empty()) return o.hwdec;
-  if (o.decode_mode == "soft" || o.decode_mode == "no" || o.decode_mode == "sw") return "no";
-  if (o.direct) return "dxva2";
-  return "auto";
-}
-
 // 与 Android applyAspectMode 同映射。
 void ApplyAspect(mpv_handle* m, const std::string& mode) {
   if (mode == "fill") {
@@ -392,11 +397,9 @@ void ApplyEqualizer(mpv_handle* m, const SessionOpts& o) {
   if (!o.sub_scale.empty()) SetProp(m, "sub-scale", o.sub_scale);
 }
 
-// 运行期会话选项（hwdec / dovi / cache / conf），与 macOS applySessionOpts 同口径。
+// 运行期会话选项（hwdec / cache / conf / 播放状态）。
 void ApplySession(mpv_handle* m, const SessionOpts& o) {
-  SetProp(m, "hwdec", ResolveHwdec(o));
-  SetProp(m, "demuxer-dovi-profile7",
-          o.dovi_policy == 2 ? "no" : (o.dovi_policy == 1 ? "yes" : "auto"));
+  SetProp(m, "hwdec", o.hwdec);
   if (o.live || !o.disk_cache) {
     SetProp(m, "cache", "no");
     SetProp(m, "cache-pause", "no");
@@ -724,13 +727,13 @@ void InitAndOpen(std::shared_ptr<MpvCore> core, std::shared_ptr<Bridge> bridge, 
     mpv_set_option(m, "wid", MPV_FORMAT_INT64, &wid);
     // Win7 上 d3d11 / gpu-next 可能不可用：按顺序回退到 gpu、direct3d，避免探测卡死。
     mpv_set_option_string(m, "vo", "gpu-next,gpu,direct3d");
-    mpv_set_option_string(m, "gpu-api", "auto");
+    mpv_set_option_string(m, "gpu-api", opts.vulkan ? "vulkan,auto" : "auto");
     mpv_set_option_string(m, "gpu-context", "auto");
     // Win7 换不成 10bit 交换链：libplacebo 默认挑 R10G10B10A2，每帧 ResizeBuffers 都 E_INVALIDARG，画面全黑。
     if (IsWindows7()) mpv_set_option_string(m, "d3d11-output-format", "rgba8");
     // 本集将完时提前打开排队的下一集（无缝换集）。
     mpv_set_option_string(m, "prefetch-playlist", "yes");
-    mpv_set_option_string(m, "hwdec", ResolveHwdec(opts).c_str());
+    mpv_set_option_string(m, "hwdec", opts.hwdec.c_str());
     mpv_set_option_string(m, "hwdec-software-fallback", "yes");
     mpv_set_option_string(m, "keep-open", "yes");
     mpv_set_option_string(m, "idle", "yes");
@@ -1087,16 +1090,12 @@ class KotvMpvPlugin : public flutter::Plugin {
   }
 
   void IngestSession(const EncodableMap* args) {
-    opts_.decode_mode = ArgString(args, "decode", opts_.decode_mode);
-    opts_.direct = ArgBool(args, "direct", opts_.direct);
     const auto hw = ArgString(args, "hwdec");
     if (!hw.empty()) opts_.hwdec = hw;
+    if (HasArg(args, "vulkan")) opts_.vulkan = ArgBool(args, "vulkan") && VulkanLoaderPresent();
     if (HasArg(args, "conf")) opts_.conf = ArgString(args, "conf");
     if (HasArg(args, "diskCache")) opts_.disk_cache = ArgBool(args, "diskCache");
     if (HasArg(args, "live")) opts_.live = ArgBool(args, "live");
-    if (HasArg(args, "dolbyVisionPolicy")) {
-      opts_.dovi_policy = static_cast<int>(ArgInt64(args, "dolbyVisionPolicy"));
-    }
     if (HasArg(args, "repeatOne")) opts_.repeat_one = ArgBool(args, "repeatOne");
     if (HasArg(args, "audioOffsetMs")) {
       opts_.audio_delay = FmtNum(ArgDouble(args, "audioOffsetMs") / 1000.0);
@@ -1259,7 +1258,7 @@ class KotvMpvPlugin : public flutter::Plugin {
       return;
     }
     if (method == "isVulkanAvailable") {
-      result->Success(EncodableValue(false));
+      result->Success(EncodableValue(VulkanLoaderPresent()));
       return;
     }
     if (method == "create") {
