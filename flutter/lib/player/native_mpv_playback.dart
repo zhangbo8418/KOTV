@@ -116,19 +116,34 @@ class NativeMpvPlayback extends KotvPlayback {
   @override
   String get engineLabel => '内置 MPV';
 
-  /// Win7 才有「硬解直出」：开 = dxva2，关 = auto。
+  /// Win7 才有「硬解直出」：开 = dxva2，关 = auto。hwdec 运行期就地切换，不重建播放器。
   @override
   bool get supportsDirectOutput => kotvIsWindows7();
 
-  @override
-  bool get directOutput => _opts.direct;
+  /// 直出开着但 dxva2 落到了软解：本会话自动改回 auto（仍可拷贝硬解），用户再点开关才重试。
+  bool _directFailed = false;
 
-  /// mpv 实际在用的 hwdec（`no` = 软解）；每个文件起播后由引擎报一次。
+  /// 实际下发给引擎的选项（直出失败后按关处理）。
+  KotvMpvOpts get _effectiveOpts => _directFailed ? _opts.copyWith(direct: false) : _opts;
+
+  @override
+  bool get directOutput => _effectiveOpts.direct;
+
+  /// mpv 实际在用的 hwdec（`no` = 软解）；每次视频重配后由引擎报。
   String _hwdecCurrent = '';
 
-  /// 直出开着但 dxva2 没起来、落到了软解：图标临时显示为关。
   @override
-  bool get directOutputActive => _opts.direct && _hwdecCurrent != 'no';
+  bool get directOutputActive => directOutput && _hwdecCurrent != 'no';
+
+  @override
+  Future<void> setDirectOutput(bool on) async {
+    _directFailed = false;
+    _opts = _opts.copyWith(direct: on);
+    notifyListeners();
+    try {
+      await _ch.invokeMethod('setDecode', _sessionDecodeArgs());
+    } catch (_) {}
+  }
 
   /// Windows：写进插件的 %TEMP%\kotv_mpv.log，和引擎日志排在一起。
   void _log(String message) {
@@ -498,6 +513,11 @@ class NativeMpvPlayback extends KotvPlayback {
         final v = '${m['value'] ?? ''}';
         if (v == _hwdecCurrent) break;
         _hwdecCurrent = v;
+        if (v == 'no' && supportsDirectOutput && directOutput && !_opts.soft) {
+          _directFailed = true;
+          _log('硬解直出未生效（dxva2 落到软解），本会话改回自动硬解');
+          unawaited(_ch.invokeMethod('setDecode', _sessionDecodeArgs()).catchError((_) => null));
+        }
         notifyListeners();
         break;
       case 'completed':
@@ -789,7 +809,7 @@ class NativeMpvPlayback extends KotvPlayback {
   /// 解码参数：Android 认 decode，其它原生端认 [KotvMpvOpts.hwdecValue]。
   Map<String, Object?> _sessionDecodeArgs() => {
         'decode': kotvNormalizeDecodeMode(_opts.decodeMode),
-        'hwdec': _opts.hwdecValue(),
+        'hwdec': _effectiveOpts.hwdecValue(),
       };
 
   /// create / open / setOpts 共用的会话参数。
@@ -931,6 +951,7 @@ class NativeMpvPlayback extends KotvPlayback {
   }
 
   Future<void> applyOpts(KotvMpvOpts opts) async {
+    if (opts.direct != _opts.direct) _directFailed = false;
     _opts = opts;
     try {
       await KotvBufferBudget.warm(force: true);

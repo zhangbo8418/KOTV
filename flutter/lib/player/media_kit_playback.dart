@@ -399,7 +399,7 @@ class MediaKitPlayback extends KotvPlayback {
   }
 
   Future<void> applyOpts(KotvMpvOpts opts) async {
-    // Win7 建控制器时已按 hwdec 选定 ANGLE 后端，直出与否不能再改，改它要换 Player（见 [kotvMpvNeedsNewPlayer]）。
+    // Win7 建控制器时已按 hwdec 选定 ANGLE 后端，直出与否不能再改，改它要换 Player。
     _opts = kotvIsWindows7() ? opts.copyWith(direct: _opts.direct) : opts;
     // 缓冲只跟开播标定 _live；引擎 media-live 不改写属性。
     await _opts.applyAfterAttach(player, live: _live);

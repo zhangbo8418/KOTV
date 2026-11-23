@@ -136,12 +136,16 @@ abstract class KotvPlayback extends ChangeNotifier {
   Future<void> setDecodeMode(String mode);
 
   /// 硬解直出开关（仅 Win7 MPV：开=dxva2；关=hwdec=auto）。非 Win7 不显示。
-  /// 切换要换播放器（见 [kotvMpvNeedsNewPlayer]），由页面按新选项重建。
   bool get supportsDirectOutput => false;
+
+  /// 当前会话生效的直出（失败自动关掉后为 false）；开关按它取反。
   bool get directOutput => true;
 
-  /// 图标显示用：直出开着且确实在硬解（落到软解时为 false）。切换仍按 [directOutput]。
+  /// 图标显示用：直出开着且确实在硬解。
   bool get directOutputActive => directOutput;
+
+  /// 就地切换直出（不重建播放器）；不支持的后端忽略。
+  Future<void> setDirectOutput(bool on) async {}
 
   /// Android Exo / 原生 MPV：Surface / Texture；其它后端忽略。
   Future<void> setRenderMode(String mode) async {}

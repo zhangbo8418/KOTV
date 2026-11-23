@@ -1,7 +1,8 @@
 #include "kotv_mpv_plugin.h"
 
-#include <dlfcn.h>
 #include <mpv/client.h>
+
+#include "../../../native/kotv_vulkan_probe.h"
 
 #include <atomic>
 #include <chrono>
@@ -83,17 +84,6 @@ void emit_position() {
 void apply_decode() {
   if (!g_state || !g_state->mpv) return;
   mpv_set_property_string(g_state->mpv, "hwdec", g_state->hwdec.c_str());
-}
-
-bool vulkan_loader_present() {
-  static const bool present = [] {
-    void* h = dlopen("libvulkan.so.1", RTLD_NOW | RTLD_LOCAL);
-    if (!h) return false;
-    const bool ok = dlsym(h, "vkGetInstanceProcAddr") != nullptr;
-    dlclose(h);
-    return ok;
-  }();
-  return present;
 }
 
 void command(const std::vector<std::string>& args) {
@@ -234,7 +224,7 @@ void ingest_decode_args(FlValue* args) {
   if (!g_state) return;
   const std::string hw = map_str(args, "hwdec");
   if (!hw.empty()) g_state->hwdec = hw;
-  g_state->vulkan = map_bool(args, "vulkan", g_state->vulkan) && vulkan_loader_present();
+  g_state->vulkan = map_bool(args, "vulkan", g_state->vulkan) && KotvVulkanUsable();
 }
 
 void method_call(FlMethodChannel*, FlMethodCall* call, gpointer) {
@@ -242,7 +232,7 @@ void method_call(FlMethodChannel*, FlMethodCall* call, gpointer) {
   FlValue* args = fl_method_call_get_args(call);
 
   if (strcmp(method, "isVulkanAvailable") == 0) {
-    fl_method_call_respond_success(call, fl_value_new_bool(vulkan_loader_present()), nullptr);
+    fl_method_call_respond_success(call, fl_value_new_bool(KotvVulkanUsable()), nullptr);
     return;
   }
   if (strcmp(method, "create") == 0) {

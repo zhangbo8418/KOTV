@@ -2386,7 +2386,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         kotvEmbedBackend(livePlayerVal) == KotvEmbedBackend.mpv;
     final showMpvOpts =
         usesMpv && (kotvIsAndroid() || kotvIsDesktop() || kotvIsIOS());
-    // 原生 MPV（Android / 桌面）且设备能跑 Vulkan 才露出；iOS 仍是 media_kit。
+    // 原生 MPV 且设备真能跑 Vulkan（原生侧实测）才露出。
     final showMpvVulkan = usesMpv && _mpvVulkanOk;
     final showMpvGpuNext = usesMpv && kotvIsAndroid();
     final showMpvTls = usesMpv && kotvIsAndroid();

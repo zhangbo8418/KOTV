@@ -992,7 +992,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     if (!_danmakuOn) setState(() => _danmakuOn = true);
   }
 
-  /// Win7 直出已软解：会话内关直出并换 D3D11 Player（不落盘；in-place MaybeRewrite 会蓝屏）。
+  /// media_kit Win7 直出已软解：会话内关直出并换 D3D11 Player（不落盘；in-place MaybeRewrite 会蓝屏）。
   void _onWin7SoftOnDirect() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_mpvOpts.direct) return;
@@ -1001,7 +1001,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     });
   }
 
-  /// 换 MPV 会话（见 [kotvMpvNeedsNewPlayer]）；正在播就按当前进度重开本集。
+  /// 换 media_kit 会话；正在播就按当前进度重开本集。
   /// 没在播也要拆掉旧的，否则下次起播仍复用按旧选项建的 Player。
   Future<void> _reopenWithNewMpvPlayer() async {
     final playing = _epIdx >= 0 && _playUrl.isNotEmpty;
@@ -3425,20 +3425,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         onNext: () => unawaited(_advanceToNextEpisode(fromEnd: false)),
         onPrev: () => unawaited(_onEpisodeTap(_epIdx - 1)),
         onDecodeChanged: (mode) {
-          final prev = _decodeMode;
-          if (mounted) {
-            setState(() {
-              _decodeMode = mode;
-              _prefDecodeMode = mode;
-            });
-          }
-          if (_backend == KotvEmbedBackend.mpv &&
-              kotvMpvNeedsNewPlayer(
-                _mpvOpts.copyWith(decodeMode: prev),
-                _mpvOpts.copyWith(decodeMode: mode),
-              )) {
-            unawaited(_reopenWithNewMpvPlayer());
-          }
+          if (!mounted) return;
+          setState(() {
+            _decodeMode = mode;
+            _prefDecodeMode = mode;
+          });
         },
         onRenderChanged: (mode) {
           // 须在 persist/setSetting 完成前重建画面，否则 Texture↔Surface 会音画分离定格。
@@ -4144,11 +4135,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       setState(() => _ambientOn = v.toLowerCase() == 'true');
     }
     if (k == 'mpvDirect') {
-      final prev = _mpvOpts;
-      setState(() => _mpvOpts = _mpvOpts.copyWith(direct: kotvSettingsFlag(v)));
-      if (_backend == KotvEmbedBackend.mpv && kotvMpvNeedsNewPlayer(prev, _mpvOpts)) {
-        unawaited(_reopenWithNewMpvPlayer());
-      }
+      final on = kotvSettingsFlag(v);
+      setState(() => _mpvOpts = _mpvOpts.copyWith(direct: on));
+      unawaited(_existingPlayback?.setDirectOutput(on));
     }
     if (k == 'playerBackground') {
       final bg = v.trim().toLowerCase();

@@ -96,14 +96,6 @@ const kotvImageExts = '';
 /// 原生 MPV 能开 Vulkan 渲染的平台。
 bool kotvMpvVulkanSupported() => kotvUsesNativeMpv();
 
-/// Win7「硬解直出」开：`hwdec=dxva2`；关：`auto`（与 Win10+ 相同）。切换直出见 [kotvMpvNeedsNewPlayer]。
-bool kotvMpvNeedsNewPlayer(KotvMpvOpts from, KotvMpvOpts to) =>
-    kotvIsWindows7() && from.direct != to.direct;
-
-/// @nodoc 旧名，等同 [kotvMpvNeedsNewPlayer]。
-bool kotvMediaKitNeedsNewPlayer(KotvMpvOpts from, KotvMpvOpts to) =>
-    kotvMpvNeedsNewPlayer(from, to);
-
 class KotvMpvOpts {
   const KotvMpvOpts({
     this.decodeMode = 'auto',

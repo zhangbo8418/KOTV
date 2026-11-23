@@ -8,6 +8,8 @@
 #include <flutter/standard_method_codec.h>
 #include <mpv/client.h>
 
+#include "../../../native/kotv_vulkan_probe.h"
+
 #include <algorithm>
 #include <cctype>
 #include <atomic>
@@ -59,18 +61,6 @@ void MpvLog(const char* fmt, ...) {
   va_end(ap);
   fputc('\n', f);
   fclose(f);
-}
-
-// 显卡驱动装的 Vulkan loader（System32\vulkan-1.dll）；不认应用目录里随包的那份。
-bool VulkanLoaderPresent() {
-  static const bool present = [] {
-    HMODULE h = LoadLibraryExW(L"vulkan-1.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
-    if (!h) return false;
-    const bool ok = GetProcAddress(h, "vkGetInstanceProcAddr") != nullptr;
-    FreeLibrary(h);
-    return ok;
-  }();
-  return present;
 }
 
 // Win7 = 6.1。GetVersionEx 受清单影响，直接问 ntdll。
@@ -1092,7 +1082,7 @@ class KotvMpvPlugin : public flutter::Plugin {
   void IngestSession(const EncodableMap* args) {
     const auto hw = ArgString(args, "hwdec");
     if (!hw.empty()) opts_.hwdec = hw;
-    if (HasArg(args, "vulkan")) opts_.vulkan = ArgBool(args, "vulkan") && VulkanLoaderPresent();
+    if (HasArg(args, "vulkan")) opts_.vulkan = ArgBool(args, "vulkan") && KotvVulkanUsable();
     if (HasArg(args, "conf")) opts_.conf = ArgString(args, "conf");
     if (HasArg(args, "diskCache")) opts_.disk_cache = ArgBool(args, "diskCache");
     if (HasArg(args, "live")) opts_.live = ArgBool(args, "live");
@@ -1258,7 +1248,7 @@ class KotvMpvPlugin : public flutter::Plugin {
       return;
     }
     if (method == "isVulkanAvailable") {
-      result->Success(EncodableValue(VulkanLoaderPresent()));
+      result->Success(EncodableValue(KotvVulkanUsable()));
       return;
     }
     if (method == "create") {

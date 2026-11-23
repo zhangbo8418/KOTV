@@ -29,7 +29,6 @@ import '../player/mini_playback.dart';
 import '../player/kotv_player_factory.dart';
 import '../player/media_kit_playback.dart';
 import '../player/mpv_opts.dart';
-import '../player/kotv_win7_direct.dart';
 import '../player/playback_settings.dart';
 import '../player/native_mpv_playback.dart';
 import '../player/play_headers.dart';
@@ -3271,20 +3270,14 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
 
   bool get _directOutputOn => kotvDirectOutputOn(_playback, _decodeMode);
 
-  /// 切换硬解直出：Win7 上换 ANGLE 后端，须换 Player 并按当前进度重开。
+  /// 切换硬解直出：按当前会话实际状态取反，就地改 hwdec。
   Future<void> _toggleDirectOutput() async {
-    final prev = _mpvOpts;
-    final next = !_mpvOpts.direct;
-    final pos = _playUrl.isNotEmpty ? _playback.position : Duration.zero;
+    final next = !_playback.directOutput;
     setState(() => _mpvOpts = _mpvOpts.copyWith(direct: next));
+    unawaited(_playback.setDirectOutput(next));
     try {
-      await _persistLiveSetting('mpvDirect', kotvWin7DirectNextValue(prev.direct));
+      await _persistLiveSetting('mpvDirect', next ? 'true' : 'false');
     } catch (_) {}
-    if (_backend == KotvEmbedBackend.mpv &&
-        kotvWin7DirectToggleNeedsNewPlayer(from: prev, nextDirect: next)) {
-      await _releaseMpv();
-      await _reopenCurrent(pos);
-    }
   }
 
   Future<void> _pickDecode() async {
@@ -3307,22 +3300,12 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   }
 
   Future<void> _applyDecode(String v) async {
-    final prev = _decodeMode;
     final pos = _playUrl.isNotEmpty ? _playback.position : Duration.zero;
     setState(() {
       _decodeMode = v;
       _prefDecodeMode = v;
     });
-    if (_backend == KotvEmbedBackend.mpv &&
-        kotvMpvNeedsNewPlayer(
-          _mpvOpts.copyWith(decodeMode: prev),
-          _mpvOpts.copyWith(decodeMode: v),
-        )) {
-      // 下面按当前进度重开时由 [_playback] 用新的解码方式建 Player。
-      await _releaseMpv();
-    } else {
-      await _playback.setDecodeMode(v);
-    }
+    await _playback.setDecodeMode(v);
     try {
       await _persistLiveSetting('playerDecode', v);
     } catch (_) {}
