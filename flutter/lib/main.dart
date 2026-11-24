@@ -18,6 +18,7 @@ import 'player/buffer_budget.dart';
 import 'player/play_headers.dart';
 import 'player/kotv_playback.dart';
 import 'player/mpv_underlay.dart';
+import 'player/native_mpv_playback.dart';
 import 'engine/engine_status.dart';
 import 'providers.dart';
 import 'screens/shell.dart';
@@ -328,6 +329,7 @@ class _KotvAppState extends ConsumerState<KotvApp> with WindowListener, WidgetsB
       } catch (_) {}
     }
     if (Platform.isWindows) {
+      await NativeMpvPlayback.shutdownAll().timeout(const Duration(seconds: 3), onTimeout: () {});
       exit(0);
     }
     try {

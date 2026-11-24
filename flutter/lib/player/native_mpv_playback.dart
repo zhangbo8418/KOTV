@@ -44,6 +44,13 @@ class NativeMpvPlayback extends KotvPlayback {
     }
   }
 
+  /// Windows 退出前：销毁所有实例并等原生侧做完（随后 exit(0) 直接结束进程，Vulkan 设备须先释放）。
+  static Future<void> shutdownAll() async {
+    try {
+      await _ch.invokeMethod<void>('shutdown');
+    } catch (_) {}
+  }
+
   KotvMpvOpts _opts;
   bool _previewVideoOriginal = false;
   bool _previewAudioOriginal = false;

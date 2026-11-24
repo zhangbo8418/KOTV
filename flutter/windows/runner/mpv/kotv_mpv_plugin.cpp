@@ -240,7 +240,8 @@ struct Bridge {
     if (h) PostMessageW(h, kMsgDrain, 0, 0);
   }
 
-  // 新实例初始化前调用（后台线程）：最多等 kTeardownWait，避免 Win7 DXVA 会话被旧实例占着。
+  // 新实例初始化前（后台线程）与退出前（UI 线程）调用：最多等 kTeardownWait。
+  // 前者避免 Win7 DXVA 会话被旧实例占着；后者让 Vulkan 设备在进程退出前释放完，否则驱动卸载时崩。
   void WaitTeardownIdle() {
     std::unique_lock<std::mutex> lock(td_mu);
     td_cv.wait_for(lock, kTeardownWait, [this] { return td_busy == 0; });
@@ -886,6 +887,7 @@ class KotvMpvPlugin : public flutter::Plugin {
     watchdog_.Stop();
 #endif
     DisposeCurrent();
+    bridge_->WaitTeardownIdle();
     {
       std::lock_guard<std::mutex> lock(bridge_->td_mu);
       bridge_->td_quit = true;
@@ -1300,8 +1302,10 @@ class KotvMpvPlugin : public flutter::Plugin {
       result->Success();
       return;
     }
-    if (method == "dispose") {
+    if (method == "dispose" || method == "shutdown") {
       DisposeCurrent();
+      // shutdown：随后 exit(0) 直接结束进程，须等 mpv_terminate_destroy 做完。
+      if (method == "shutdown") bridge_->WaitTeardownIdle();
       have_frame_ = false;
       visible_ = false;
       frame_x_ = frame_y_ = frame_w_ = frame_h_ = 0;
