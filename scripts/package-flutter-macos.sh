@@ -218,9 +218,19 @@ if otool -l "$OUT_APP/Contents/Frameworks/libmpv.dylib" | awk '
 fi
 # 随包库的最低系统不得高于应用本身，否则旧系统启动即被 dyld 杀掉（Symbol not found）。
 MIN_OS="$(kotv_macos_deployment_target)"
-TOO_NEW="$(find "$OUT_APP/Contents/Frameworks" "$OUT_APP/Contents/MacOS" -type f \( -name '*.dylib' -o -perm -u+x \) -print0 \
-  | xargs -0 -I{} sh -c 'm=$(otool -l "$1" 2>/dev/null | awk "/LC_BUILD_VERSION/{f=1} f&&\$1==\"minos\"{print \$2; exit}"); [ -n "$m" ] && printf "%s %s\n" "$m" "$1"' _ {} \
-  | awk -v want="$MIN_OS" '{ split($1,a,"."); split(want,b,"."); if (a[1]+0 > b[1]+0 || (a[1]+0 == b[1]+0 && a[2]+0 > b[2]+0)) print }')"
+TOO_NEW=""
+while IFS= read -r -d '' f; do
+  # 新工具链写 LC_BUILD_VERSION.minos，旧的写 LC_VERSION_MIN_MACOSX.version；fat 包每个切片各一条。
+  while read -r m; do
+    if awk -v have="$m" -v want="$MIN_OS" 'BEGIN { split(have,a,"."); split(want,b,".");
+        exit !(a[1]+0 > b[1]+0 || (a[1]+0 == b[1]+0 && a[2]+0 > b[2]+0)) }'; then
+      TOO_NEW+="$m $f"$'\n'
+    fi
+  done < <(otool -arch all -l "$f" 2>/dev/null | awk '
+    $1 == "cmd" { cmd = $2; next }
+    cmd == "LC_BUILD_VERSION" && $1 == "minos" { print $2 }
+    cmd == "LC_VERSION_MIN_MACOSX" && $1 == "version" { print $2 }')
+done < <(find "$OUT_APP/Contents/Frameworks" "$OUT_APP/Contents/MacOS" -type f \( -name '*.dylib' -o -perm -u+x \) -print0)
 if [[ -n "$TOO_NEW" ]]; then
   echo "ERROR: bundled Mach-O requires newer macOS than $MIN_OS:" >&2
   echo "$TOO_NEW" >&2
