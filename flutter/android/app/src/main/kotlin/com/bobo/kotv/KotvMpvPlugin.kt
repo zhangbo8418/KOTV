@@ -109,10 +109,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var preferredTextLangs = ""
   /** 开播标定的直播会话；点播勿被引擎 media-live 改写（否则 queueNext 被拒）。 */
   private var livePlayback = false
-  /** 引擎 media-live：只影响缓冲/磁盘缓存，不挡无缝排队。 */
+  /** 本项 media-live：只用于通知页面，不改上下文与缓冲。 */
   private var engineLive = false
-  /** 已按 media-live 升过会话，避免重复重建。 */
-  private var upgradedLiveFromMedia = false
   /** 错误恢复后 seek 到该秒；&lt;0 表示不恢复。 */
   private var retrySeekSec = -1.0
   /** open(startAtMs)：loadfile 后、unpause 前 seek，避免 play 后再 seek。 */
@@ -412,7 +410,6 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             durationSec = 0.0
             durationFullSec = 0.0
             engineLive = false
-            upgradedLiveFromMedia = livePlayback
             width = 0
             height = 0
             maxPlayedSec = 0.0
@@ -533,7 +530,6 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             durationSec = 0.0
             durationFullSec = 0.0
             engineLive = false
-            upgradedLiveFromMedia = false
             loadedUrl = ""
             currentMime = null
             retriedHlsMime = false
@@ -1058,9 +1054,8 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
     var rebuilt = false
     // 点播↔直播 demuxer/cache 选项在 init 时写入；模式变了必须重建上下文。
-    val wantLiveBuffer = liveBufferSession()
-    if (created.get() && createdAsLive != null && createdAsLive != wantLiveBuffer) {
-      Log.i(TAG, "recreate MPV context: liveBuffer $createdAsLive -> $wantLiveBuffer")
+    if (created.get() && createdAsLive != null && createdAsLive != livePlayback) {
+      Log.i(TAG, "recreate MPV context: live $createdAsLive -> $livePlayback")
       destroyPlayer()
       rebuilt = true
     }
@@ -1125,8 +1120,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       MPVLib.setOptionString("image-exts", "")
       // ytdl_hook aborts load on devices without youtube-dl; disable.
       MPVLib.setOptionString("ytdl", "no")
-      val liveBuf = liveBufferSession()
-      if (liveBuf) {
+      if (livePlayback) {
         MPVLib.setOptionString("cache-pause", "no")
       }
       // Do not force gpu-api=vulkan on API 25: GLES path for picture;
@@ -1138,7 +1132,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       // 预加载下一集：本集将完时提前打开排在后面的一项。
       MPVLib.setOptionString("prefetch-playlist", "yes")
       MPVLib.setOptionString("loop-file", loopFile())
-      if (!liveBuf) {
+      if (!livePlayback) {
         if (diskCache) {
           val dir = File(ctx.cacheDir, "mpv-cache").apply { mkdirs() }
           MPVLib.setOptionString("cache-on-disk", "yes")
@@ -1169,7 +1163,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       MPVLib.addObserver(this)
       observeProps()
       created.set(true)
-      createdAsLive = liveBufferSession()
+      createdAsLive = livePlayback
       createdTlsVerify = tlsVerify
       createdDiskCache = diskCache
       createdBufferBytes = bufferBytes
@@ -1184,9 +1178,6 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     }
     return rebuilt
   }
-
-  /** 标定直播或引擎 media-live：关 cache-pause / 磁盘缓存。 */
-  private fun liveBufferSession(): Boolean = livePlayback || engineLive
 
   /** 从 assets 拷 cacert.pem，设 tls-ca-file；关闭校验时 tls-verify=no。 */
   private fun applyTlsOptions(ctx: Context) {
@@ -1895,7 +1886,6 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
       pendingStartAtMs = 0L
       maxPlayedSec = 0.0
       durationFullSec = 0.0
-      upgradedLiveFromMedia = livePlayback || engineLive
       loadWallMs = SystemClock.elapsedRealtime()
       // lavf / headers / start 只挂在这一次 loadfile 上，播完恢复。
       loadfile(url, "replace", buildLoadfileOpts(url, currentMime, headers, startMs))
@@ -2017,7 +2007,6 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     currentMime = next.mime
     retriedHlsMime = false
     retriedDecodeFallback = false
-    upgradedLiveFromMedia = false
     engineLive = false
     eof = false
     durationSec = 0.0
@@ -2233,7 +2222,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         val gen = activeLoadGen
         main.post {
           if (loadGen.get() != gen) return@post
-          maybeUpgradeLiveFromMedia()
+          markEngineLive()
         }
       }
     }
@@ -2269,29 +2258,14 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   }
 
   /**
-   * 引擎报告 media-live：升直播缓冲（关磁盘缓存 / cache-pause），保留进度再开。
-   * 不改 [livePlayback]（开播标定），避免点播无缝 queueNext 被拒。
+   * 引擎报告 media-live：只置位并通知页面（不拖动、只记访问），上下文与缓冲照旧，不重开。
    * 只信引擎信号，不用 duration==0 启发式。
    */
-  private fun maybeUpgradeLiveFromMedia() {
-    if (engineLive || upgradedLiveFromMedia) return
-    if (!created.get() || loadedUrl.isBlank()) return
-    upgradedLiveFromMedia = true
+  private fun markEngineLive() {
+    if (engineLive || !created.get() || loadedUrl.isBlank()) return
     engineLive = true
-    emit(mapOf("event" to "live", "live" to true, "engineOnly" to true))
-    Log.i(TAG, "upgrade live buffer from media-live url=$loadedUrl")
-    retrySeekSec = positionSec.coerceAtLeast(0.0)
-    // startLoad 会清 queuedNext；升缓冲后按保留项再 append，避免无缝排队被拆掉。
-    val keepQueued = queuedNext
-    try {
-      ensurePlayerAndReload()
-      if (keepQueued != null && !livePlayback) {
-        queueNext(keepQueued)
-      }
-    } catch (t: Throwable) {
-      Log.w(TAG, "live upgrade reload failed", t)
-      emitLoadFailure(t)
-    }
+    Log.i(TAG, "media-live url=$loadedUrl")
+    emit(mapOf("event" to "live", "live" to true))
   }
 
   override fun event(eventId: Int) {

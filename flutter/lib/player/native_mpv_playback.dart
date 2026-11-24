@@ -93,7 +93,7 @@ class NativeMpvPlayback extends KotvPlayback {
   /// create 时写入的标定 live（与 [_live] 同步）；供 [_ensureNative] 决定是否重建。
   /// 勿与引擎 media-live 混用，否则 Surface 再挂会按点播 recreate 清掉引擎 live 态。
   bool _createdAsLive = false;
-  /// 引擎 media-live（守卫用）；不挡 queueNext，也不参与 create 比较。
+  /// 引擎 media-live：[isLive] 与守卫用；不挡 queueNext，也不参与 create 比较。
   bool _engineLive = false;
   String _url = '';
   Map<String, String> _headers = const {};
@@ -219,6 +219,9 @@ class NativeMpvPlayback extends KotvPlayback {
   /// 不看开播标定 [_live]：回看也按直播标定开，但它有片长、要拖动。
   @override
   Duration get duration => _engineLive ? Duration.zero : _duration;
+
+  @override
+  bool get isLive => _engineLive;
 
   @override
   Duration get buffered => _buffered;

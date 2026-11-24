@@ -139,6 +139,7 @@ bool ensure_mpv() {
     destroy_mpv();
     return false;
   }
+  mpv_observe_property(g_state->mpv, 0, "media-live", MPV_FORMAT_FLAG);
   g_state->stop = false;
   g_state->event_thread = std::thread([] {
     while (g_state && !g_state->stop) {
@@ -154,6 +155,17 @@ bool ensure_mpv() {
         continue;
       }
       if (ev->event_id == MPV_EVENT_SHUTDOWN) break;
+      if (ev->event_id == MPV_EVENT_PROPERTY_CHANGE) {
+        auto* p = static_cast<mpv_event_property*>(ev->data);
+        if (p && p->format == MPV_FORMAT_FLAG && p->data && *static_cast<int*>(p->data) &&
+            std::strcmp(p->name, "media-live") == 0) {
+          g_autoptr(FlValue) m = fl_value_new_map();
+          fl_value_set_string_take(m, "event", fl_value_new_string("live"));
+          fl_value_set_string_take(m, "live", fl_value_new_bool(true));
+          emit_map(m);
+        }
+        continue;
+      }
       if (ev->event_id == MPV_EVENT_FILE_LOADED ||
           ev->event_id == MPV_EVENT_PLAYBACK_RESTART) {
         int64_t w = 0, h = 0;

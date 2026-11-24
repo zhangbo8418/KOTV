@@ -40,6 +40,10 @@ abstract class KotvPlayback extends ChangeNotifier {
   bool get repeatOne => false;
   Duration get position;
   Duration get duration;
+  /// 引擎报告当前媒体是直播（Exo isCurrentMediaItemLive / mpv media-live / mdk isLive）。
+  /// 只看引擎信号、不看开播标定：回看按直播标定开，但有片长、要拖动。
+  /// 点播页据此不拖动/快进快退、不给倍速菜单，历史只记访问不记进度；此时 [duration] 为 zero。
+  bool get isLive => false;
   /// 已缓冲到的位置（用于进度条 secondary track）；未知时为 zero。
   Duration get buffered => Duration.zero;
   /// 是否正在缓冲（卡顿补缓冲 / 起播缓冲）。

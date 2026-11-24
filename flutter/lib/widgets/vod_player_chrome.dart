@@ -499,6 +499,7 @@ class VodInlineControlsState extends State<VodInlineControls> {
                     return KotvSeekSlider(
                       player: player,
                       maxMs: total,
+                      enabled: !player.isLive,
                       focusNode: _seekFocus,
                       secondaryMs: _sliderBuffered(player, total),
                       theme: _sliderTheme(context),
@@ -2542,6 +2543,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                 child: KotvSeekSlider(
                                   player: widget.player,
                                   maxMs: total,
+                                  enabled: !widget.player.isLive,
                                   secondaryMs: _sliderBuffered(widget.player, total),
                                   theme: _sliderTheme(context),
                                   onInteraction: widget.onBump,
@@ -2588,6 +2590,7 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
                                       _IconAct(icon: Icons.skip_next, tip: '下一集', size: land ? 32.0 : 40.0, scrollIntoView: true, focusNode: _iconNodes.of('next'), onTap: () {
                                         widget.onNext?.call();
                                       }),
+                                      if (!widget.player.isLive)
                                       _IconAct(
                                         icon: Icons.fast_forward,
                                         tip: '倍速（长按细调）',

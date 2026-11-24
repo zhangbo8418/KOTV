@@ -834,21 +834,21 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         unawaited(_playback.playOrPause());
         break;
       case 'seek':
-        if (_playUrl.isEmpty) return;
+        if (_playUrl.isEmpty || _playback.isLive) return;
         if (seekMs > 0) {
           unawaited(_playback.seek(Duration(milliseconds: seekMs)));
         }
         break;
       case 'forward':
       case 'forward10':
-        if (_playUrl.isEmpty) return;
+        if (_playUrl.isEmpty || _playback.isLive) return;
         final ms = seekMs > 0 ? seekMs : 10000;
         unawaited(_playback.seek(_playback.position + Duration(milliseconds: ms)));
         break;
       case 'backward':
       case 'rewind':
       case 'back10':
-        if (_playUrl.isEmpty) return;
+        if (_playUrl.isEmpty || _playback.isLive) return;
         final ms = seekMs > 0 ? seekMs : 10000;
         final next = _playback.position - Duration(milliseconds: ms);
         unawaited(_playback.seek(next.isNegative ? Duration.zero : next));
@@ -1216,8 +1216,15 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   Future<void> _writeWatchProgress(int positionMs, int durationMs, {required bool force, String? episodeName}) async {
     final d = _detail;
     if (d == null) return;
-    if (!force && positionMs < 5000) return;
-    if (force && positionMs <= 0) return;
+    // 直播只记访问：不留续播点，下次从直播点开。
+    final live = _playback.isLive;
+    if (live) {
+      positionMs = 0;
+      durationMs = 0;
+    } else {
+      if (!force && positionMs < 5000) return;
+      if (force && positionMs <= 0) return;
+    }
     final epName = (episodeName ?? _currentEpisodeName() ?? '').trim();
     if (epName.isEmpty) return;
     final flagIdx = _playFlagIdx.clamp(0, d.flags.isEmpty ? 0 : d.flags.length - 1);
@@ -3281,13 +3288,14 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         },
         onPlayerStatus: api.playerStatus,
         onExternalPlayer: (player) async {
+          final live = _playback.isLive;
           final result = await kotvLaunchExternalPlayer(
             player: player,
             url: _playUrl,
             headers: _playHeaders,
             title: _detail?.name ?? '',
-            positionMs: _playback.position.inMilliseconds,
-            vod: true,
+            positionMs: live ? 0 : _playback.position.inMilliseconds,
+            vod: !live,
             context: context,
           );
           if (!mounted || !result.opened) return false;
@@ -3295,7 +3303,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             await _advanceToNextEpisode(fromEnd: false);
             return true;
           }
-          if (result.endBy == 'user' && result.positionMs > 0) {
+          if (result.endBy == 'user' && !live && result.positionMs > 0) {
             await _playback.seek(Duration(milliseconds: result.positionMs));
             await _playback.play();
           }
@@ -3449,7 +3457,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       context,
       ref.read(apiProvider),
       playUrl: _playUrl,
-      positionMs: _playback.position.inMilliseconds,
+      positionMs: _playback.isLive ? 0 : _playback.position.inMilliseconds,
       isMounted: () => mounted,
       setStatus: (m) => setState(() => _status = m),
       pauseLocal: _playback.pause,
@@ -4098,6 +4106,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     final key = event.logicalKey;
 
     void seekBy(Duration delta) {
+      if (_playback.isLive) return;
       final next = _playback.position + delta;
       unawaited(_playback.seek(next.isNegative ? Duration.zero : next));
     }

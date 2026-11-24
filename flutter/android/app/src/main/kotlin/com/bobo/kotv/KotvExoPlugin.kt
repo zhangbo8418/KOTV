@@ -111,9 +111,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   private var formatRetried = false
   /** 本集是否已做过一次解码 soft/hard 回退。 */
   private var retriedDecodeFallback = false
-  /** 本集是否已按 isCurrentMediaItemLive 升过 live 缓冲。 */
-  private var upgradedLiveFromMedia = false
-  /** 引擎判 live：只影响缓冲/磁盘缓存，不挡 queueNext。 */
+  /** 本项 isCurrentMediaItemLive：只用于通知页面，不改播放器与缓冲。 */
   private var engineLive = false
   /** auto | soft | hard；硬/自动优先 MediaCodec 硬解直出。 */
   private var decodeMode: String = "auto"
@@ -1049,7 +1047,6 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     if (resetRecovery) {
       formatRetried = false
       retriedDecodeFallback = false
-      upgradedLiveFromMedia = false
       engineLive = false
     }
     secondaryAutoApplied = false
@@ -1066,7 +1063,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
 
     val nextDrmKey = drmKey(drm)
     val wantSecondary = secondarySubtitleMode != "off"
-    val wantLiveBuffer = liveBufferSession()
+    val wantLiveBuffer = livePlayback
     val needRebuild =
       player == null ||
         playerBuiltLive != wantLiveBuffer ||
@@ -1118,43 +1115,18 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     main.post(tick)
   }
 
-  /** 标定直播或引擎判 live：去点播磁盘缓存。 */
-  private fun liveBufferSession(): Boolean = livePlayback || engineLive
-
   /**
-   * 点播页打开滑窗直播：`isCurrentMediaItemLive` 为真时按直播缓冲再开（去磁盘缓存），
-   * 不改开播标定的 [livePlayback]，避免点播 queueNext 被拒。
+   * 点播页打开的直播（`isCurrentMediaItemLive`）：只置位并通知页面（不拖动、只记访问），
+   * 播放器与缓冲照旧，不重开；停掉对这一项的磁盘预读。
    */
-  private fun maybeUpgradeLiveFromMedia() {
-    if (livePlayback || engineLive || upgradedLiveFromMedia) return
+  private fun markEngineLive() {
+    if (livePlayback || engineLive) return
     val p = player ?: return
     if (!p.isCurrentMediaItemLive) return
-    val url = currentUrl
-    if (url.isBlank()) return
-    upgradedLiveFromMedia = true
     engineLive = true
-    val pos = p.currentPosition.coerceAtLeast(0L)
-    // openInternal 会清 queuedNext；升缓冲后按保留项再 append。
-    val keepQueued = queuedNext
-    Log.i(TAG, "upgrade live buffer from isCurrentMediaItemLive")
-    try {
-      p.stop()
-    } catch (_: Throwable) {
-    }
-    // live=false 保留点播标定；engineLive 让 rebuild 走直播缓冲。
-    openInternal(
-      url = url,
-      headers = currentHeaders,
-      mime = currentMime,
-      drm = currentDrm,
-      live = false,
-      startPositionMs = pos,
-      resetRecovery = false,
-    )
-    if (keepQueued != null && !livePlayback) {
-      queueNext(keepQueued)
-    }
-    emit(mapOf("event" to "live", "live" to true, "engineOnly" to true))
+    diskPreload.stop()
+    Log.i(TAG, "isCurrentMediaItemLive url=$currentUrl")
+    emit(mapOf("event" to "live", "live" to true))
   }
 
   /** 解码失败：非 soft → soft 再开一次；已 soft 返回 false（上抛给页面换引擎）。 */
@@ -1247,7 +1219,6 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     currentSubs = next.subs
     formatRetried = false
     retriedDecodeFallback = false
-    upgradedLiveFromMedia = false
     engineLive = false
     secondaryAutoApplied = false
     transferredBytes.set(0)
@@ -1269,7 +1240,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     val ctx = appContext ?: return
     val upstream = preloadUpstream
     val renderers = preloadRenderers
-    if (livePlayback || !diskCacheEnabled || diskPreloadMs <= 0L || upstream == null || renderers == null) {
+    if (livePlayback || engineLive || !diskCacheEnabled || diskPreloadMs <= 0L || upstream == null || renderers == null) {
       diskPreload.stop()
       return
     }
@@ -1479,7 +1450,7 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             }
           }
           if (playbackState == Player.STATE_READY) {
-            maybeUpgradeLiveFromMedia()
+            markEngineLive()
             applyVideoEq()
             val f = cur.videoSize
             if (f.width > 0 && f.height > 0) {
@@ -2448,7 +2419,6 @@ class KotvExoPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     currentDrm = null
     formatRetried = false
     retriedDecodeFallback = false
-    upgradedLiveFromMedia = false
     // Flutter Texture 跨 open 复用；仅 dispose/detach 时 releaseFlutterTexture。
   }
 

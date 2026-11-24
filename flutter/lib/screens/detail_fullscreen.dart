@@ -1099,6 +1099,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       'episodes': List<String>.from(widget.episodes),
       'episodeSelected': _epIdx,
       'speedBadge': KotvWinChrome.rateBadge(pb.rate),
+      'showSpeed': !pb.isLive,
       'aspectBadge': KotvWinChrome.aspectBadge(_aspect.key),
       'decodeBadge': KotvWinChrome.decodeBadge(_decodeMode),
       'showPlayer': kotvCanSwitchPlayer(live: false),
@@ -1645,6 +1646,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     }
     switch (mode) {
       case KotvFsMode.seek:
+        if (widget.playback.isLive) break;
         _gMode = KotvFsMode.seek;
         _seekPreviewBase = widget.playback.position;
         _seekPreviewDelta = Duration.zero;
@@ -1960,6 +1962,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   }
 
   void _seekByRemote(Duration delta) {
+    if (widget.playback.isLive) return;
     final next = widget.playback.position + delta;
     widget.playback.seek(next.isNegative ? Duration.zero : next);
   }
@@ -1976,6 +1979,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   }
 
   void _nudgeSeekPreview(Duration step) {
+    if (widget.playback.isLive) return;
     _seekPreviewBase ??= widget.playback.position;
     _seekPreviewDelta += step;
     if (mounted) setState(() {});

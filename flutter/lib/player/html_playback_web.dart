@@ -98,6 +98,9 @@ class HtmlPlayback extends KotvPlayback {
   }
 
   @override
+  bool get isLive => _video.duration.isInfinite;
+
+  @override
   Duration get buffered {
     final b = _video.buffered;
     if (b.length == 0) return Duration.zero;

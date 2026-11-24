@@ -111,7 +111,10 @@ class FvpPlayback extends KotvPlayback {
   Duration get position => _c?.value.position ?? Duration.zero;
 
   @override
-  Duration get duration => _c?.value.duration ?? Duration.zero;
+  Duration get duration => _engineLive ? Duration.zero : (_c?.value.duration ?? Duration.zero);
+
+  @override
+  bool get isLive => _engineLive;
 
   @override
   Duration get buffered {
@@ -850,7 +853,7 @@ class FvpPlayback extends KotvPlayback {
     return sum;
   }
 
-  /// 引擎 `isLive()`：只记 [_engineLive] 供守卫；不改 [_live]、不改缓冲。
+  /// 引擎 `isLive()`：只记 [_engineLive] 供 [isLive] 与守卫；不改 [_live]、不改缓冲。
   void _maybeMarkEngineLive(VideoPlayerController c) {
     if (_live || !identical(_c, c)) return;
     var reported = false;

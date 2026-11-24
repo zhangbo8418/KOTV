@@ -420,7 +420,7 @@ void Win7ChromeShell::PaintFullscreenBottom(Canvas& cv, std::vector<Hit>& hits) 
   x += PaintIconAct(cv, hits, "prev", x, iy, box, ic::kSkipPrev, L"");
   x += PaintIconAct(cv, hits, "toggle", x, iy, box, playing_ ? ic::kPause : ic::kPlay, L"");
   x += PaintIconAct(cv, hits, "next", x, iy, box, ic::kSkipNext, L"");
-  x += PaintIconAct(cv, hits, "speed", x, iy, box, ic::kFastForward, speed_badge_);
+  if (show_speed_) x += PaintIconAct(cv, hits, "speed", x, iy, box, ic::kFastForward, speed_badge_);
   x += PaintIconAct(cv, hits, "replay", x, iy, box, ic::kReplay, L"");
   x += PaintIconAct(cv, hits, "aspect", x, iy, box, ic::kAspect, aspect_badge_);
   x += PaintIconAct(cv, hits, "decode", x, iy, box, ic::kMemory, decode_badge_);

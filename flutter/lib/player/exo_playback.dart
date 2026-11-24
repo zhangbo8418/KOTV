@@ -65,7 +65,7 @@ class ExoPlayback extends KotvPlayback {
   bool _videoOutputSuppressed = false;
   String _videoScale = 'default';
   bool _live = false;
-  /// 引擎 isCurrentMediaItemLive（守卫用）；不挡 queueNext。
+  /// 引擎 isCurrentMediaItemLive：[isLive] 与守卫用；不挡 queueNext。
   bool _engineLive = false;
   String? _format;
   String? _lastError;
@@ -165,8 +165,11 @@ class ExoPlayback extends KotvPlayback {
   bool get repeatOne => _repeatOne;
   @override
   Duration get position => _position;
+  /// 引擎判直播时 Exo 的 duration 是滑窗长度，不是片长。
   @override
-  Duration get duration => _duration;
+  Duration get duration => _engineLive ? Duration.zero : _duration;
+  @override
+  bool get isLive => _engineLive;
   @override
   Duration get buffered => _buffered;
   @override

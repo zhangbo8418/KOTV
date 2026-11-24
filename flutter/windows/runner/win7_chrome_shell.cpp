@@ -938,6 +938,7 @@ bool Win7ChromeShell::ApplyUpdate(const ChromeMap& a) {
   if (HasKey(a, "showDirect")) show_direct_ = GetBool(a, "showDirect", show_direct_);
   if (HasKey(a, "directOn")) direct_on_ = GetBool(a, "directOn", direct_on_);
   if (HasKey(a, "showDisc")) show_disc_ = GetBool(a, "showDisc", show_disc_);
+  if (HasKey(a, "showSpeed")) show_speed_ = GetBool(a, "showSpeed", show_speed_);
   if (HasKey(a, "hasCast")) has_cast_ = GetBool(a, "hasCast", has_cast_);
   if (HasKey(a, "hasMini")) has_mini_ = GetBool(a, "hasMini", has_mini_);
   if (HasKey(a, "openingSec")) opening_sec_ = GetInt(a, "openingSec", opening_sec_);

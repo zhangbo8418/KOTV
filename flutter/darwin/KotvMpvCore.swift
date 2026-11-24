@@ -455,6 +455,7 @@ final class KotvMpvCore {
     mpv_observe_property(handle, 0, "video-params/h", MPV_FORMAT_INT64)
     mpv_observe_property(handle, 0, "video-params/sig-peak", MPV_FORMAT_DOUBLE)
     mpv_observe_property(handle, 0, "hwdec-current", MPV_FORMAT_STRING)
+    mpv_observe_property(handle, 0, "media-live", MPV_FORMAT_FLAG)
 
     let box = Unmanaged.passRetained(self)
     mpv_set_wakeup_callback(handle, { ctx in
@@ -504,6 +505,12 @@ final class KotvMpvCore {
       case "hwdec-current":
         emitVideoInfo()
         updateEDRMode(sigPeak: lastSigPeak)
+      case "media-live":
+        // 没有该属性的 libmpv（iOS MPVKit）只报 NONE，不会走到这里。
+        if prop.format == MPV_FORMAT_FLAG,
+           prop.data?.assumingMemoryBound(to: Int32.self).pointee != 0 {
+          emit(["event": "live", "live": true])
+        }
       default:
         break
       }

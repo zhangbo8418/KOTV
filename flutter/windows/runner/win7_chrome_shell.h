@@ -301,6 +301,7 @@ class Win7ChromeShell {
   bool show_direct_ = false;
   bool direct_on_ = false;
   bool show_disc_ = false;
+  bool show_speed_ = true;
   bool show_player_ = true;
   bool has_cast_ = false;
   bool has_mini_ = false;
