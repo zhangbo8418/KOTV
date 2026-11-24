@@ -2591,29 +2591,15 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     );
   }
 
-  /// 仅 Android Hybrid：解析/无帧/起播缓冲盖住防叠影。
-  /// 勿用 stalling：中途补缓存会盖黑最后一帧。换台不盖，保留上一台帧。
-  Widget _buildLiveSurfaceCover() {
-    if (kotvIsDesktop()) return const SizedBox.shrink();
-    return ListenableBuilder(
-      listenable: _playback,
-      builder: (context, _) {
-        final loading = _loading ||
+  /// Android Hybrid 盖黑；换台 keepLastFrame 保留上一台帧。
+  Widget _buildLiveSurfaceCover() => kotvAndroidSurfaceBlankCover(
+        playback: _playback,
+        parsing: _loading ||
             _status.contains('解析') ||
             _status.contains('加载') ||
-            _status.contains('嗅探');
-        // 纯音频无尺寸是正常态，勿盖黑挡掉音频叠层。
-        final noFrame = kotvNeedsBlankSurfaceCover(_playback);
-        final startBuf = !_playback.playing && _playback.buffering;
-        // 换台中若仍有上一帧尺寸，不盖黑。
-        final cover = loading ||
-            (noFrame && !_status.contains('换台')) ||
-            (startBuf && !_status.contains('换台'));
-        if (!cover) return const SizedBox.shrink();
-        return const IgnorePointer(child: ColoredBox(color: Colors.black));
-      },
-    );
-  }
+            _status.contains('嗅探'),
+        keepLastFrame: _status.contains('换台'),
+      );
 
   String _liveScaleLabel(String key) {
     return switch (key) {

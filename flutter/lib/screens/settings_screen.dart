@@ -798,7 +798,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               label: 'Vulkan',
               value: mpvVulkan,
               onChanged: (v) async {
-                await _set('mpvVulkan', v ? 'true' : 'false', msg: '重启播放生效');
+                await _set(
+                  'mpvVulkan',
+                  v ? 'true' : 'false',
+                  // vo/显示层在建核时固化；applyOpts 会拆核并按需重开，无需杀进程。
+                  msg: '已切换，播放器将重建',
+                );
                 setSheet(() {});
               },
             ),

@@ -3,11 +3,34 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../widgets/kotv_network_image.dart';
+import 'kotv_platform.dart';
 import 'kotv_playback.dart';
 
 /// 无视频尺寸且非纯音频时，Android Hybrid 才需要盖黑防叠影。
 bool kotvNeedsBlankSurfaceCover(KotvPlayback pb) =>
     !pb.isAudioOnlyContent && pb.width <= 0 && pb.height <= 0;
+
+/// Android Hybrid 视频栈上的 Flutter 黑盖（解析/无帧/起播缓冲）。
+/// MediaOverlay 镂空仍靠原生 clearVideoLayer；本层挡 Texture 与盖不住时的叠影。
+Widget kotvAndroidSurfaceBlankCover({
+  required KotvPlayback playback,
+  required bool parsing,
+  bool keepLastFrame = false,
+}) {
+  if (!kotvIsAndroid()) return const SizedBox.shrink();
+  return ListenableBuilder(
+    listenable: playback,
+    builder: (context, _) {
+      final noFrame = kotvNeedsBlankSurfaceCover(playback);
+      final startBuf = !playback.playing && playback.buffering;
+      final cover = parsing ||
+          (!keepLastFrame && noFrame) ||
+          (!keepLastFrame && startBuf);
+      if (!cover) return const SizedBox.shrink();
+      return const IgnorePointer(child: ColoredBox(color: Colors.black));
+    },
+  );
+}
 
 /// 纯音频封面/动效叠层：只重建本层，不重建底层 Texture。
 /// 不在此画标题——详情顶栏/正文、全屏顶栏、直播台名已有片名，避免小画幅里标题压住底栏控件。

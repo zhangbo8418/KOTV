@@ -517,6 +517,8 @@ final class KotvMpvCore {
 
     var wid = Int64(Int(bitPattern: Unmanaged.passUnretained(layer).toOpaque()))
     mpv_set_option(handle, "wid", MPV_FORMAT_INT64, &wid)
+    // Vulkan：gpu-next + CAMetalLayer（MoltenVK）；默认：avfoundation + ASBDL。
+    // 两条路径不兼容，开关只能随新建 core；underlay 上 Metal 未 present 时洞揭开即黑屏。
     let vo = vulkan ? "gpu-next" : "avfoundation"
     mpv_set_option_string(handle, "vo", vo)
     if vulkan {

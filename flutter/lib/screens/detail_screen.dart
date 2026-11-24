@@ -2973,9 +2973,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           child: layer,
         );
       },
-      // Win7 全屏/铺满：命中交给原生 gesture HWND，Flutter 视频层不抢点。
+      // 退出沉浸 hold 整窗几何时勿抢点（否则 macOS 详情按钮全死）；
+      // Win7 沉浸中也让出命中给原生播控 HWND。
       child: IgnorePointer(
-        ignoring: KotvWinChrome.isNeeded && holdFullscreen,
+        ignoring: _holdImmersiveVideoGeom ||
+            (KotvWinChrome.isNeeded && _immersiveFullscreen),
         child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: () {
@@ -3000,23 +3002,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             // letterbox：Texture/HWND 用黑底；macOS underlay 洞后透明（洞外 contentView.layer 黑）。
             kotvMpvLetterboxFill(),
             ExcludeFocus(child: _buildSharedVideo(fit: _aspect.fit)),
-            // 仅 Android：解析/无帧/起播缓冲盖住 Hybrid Surface，防叠影。
-            // 勿用 stalling：中途 STATE_BUFFERING 也会盖黑最后一帧（Exo 点播极卡）。
-            if (kotvIsAndroid())
-              ListenableBuilder(
-                listenable: _playback,
-                builder: (context, _) {
-                  final parsing = _status.contains('解析') ||
-                      _status.contains('嗅探') ||
-                      _status.contains('换集中');
-                  // 纯音频无尺寸是正常态，勿盖黑挡掉音频叠层。
-                  final noFrame = kotvNeedsBlankSurfaceCover(_playback);
-                  final startBuf = !_playback.playing && _playback.buffering;
-                  final cover = parsing || noFrame || startBuf;
-                  if (!cover) return const SizedBox.shrink();
-                  return const ColoredBox(color: Colors.black);
-                },
-              ),
+            // Android Hybrid：解析/无帧/起播缓冲盖黑（与直播共用；MediaOverlay 镂空靠原生清层）。
+            kotvAndroidSurfaceBlankCover(
+              playback: _playback,
+              parsing: _status.contains('解析') ||
+                  _status.contains('嗅探') ||
+                  _status.contains('换集中'),
+            ),
             if (_immersiveFullscreen) ...[
               // 全屏控件在外层；此处不叠内嵌解析/中心钮。
             ] else ...[
@@ -3429,23 +3421,28 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       } else {
         _holdImmersiveVideoGeom = true;
       }
-      await kotvExitSystemFullscreen(wasDisplayFullscreen: wasDisplay);
-      if (!mounted) {
-        _holdImmersiveVideoGeom = false;
-        return;
+      try {
+        await kotvExitSystemFullscreen(wasDisplayFullscreen: wasDisplay);
+        if (!mounted || _immersiveFullscreen) return;
+        await WidgetsBinding.instance.endOfFrame;
+        if (!mounted || _immersiveFullscreen) return;
+        _syncVideoSlotRect();
+        await WidgetsBinding.instance.endOfFrame;
+      } finally {
+        // 无论中途 return/异常，都清 hold，避免整窗视频层一直挡详情点击。
+        if (_holdImmersiveVideoGeom) {
+          if (mounted && !_immersiveFullscreen) {
+            setState(() => _holdImmersiveVideoGeom = false);
+          } else {
+            _holdImmersiveVideoGeom = false;
+          }
+        }
       }
-      if (_immersiveFullscreen) return;
-      await WidgetsBinding.instance.endOfFrame;
-      if (!mounted || _immersiveFullscreen) return;
-      _syncVideoSlotRect();
-      await WidgetsBinding.instance.endOfFrame;
-      if (!mounted || _immersiveFullscreen) return;
-      if (_holdImmersiveVideoGeom) {
-        setState(() => _holdImmersiveVideoGeom = false);
+      if (mounted && !_immersiveFullscreen) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && !_immersiveFullscreen) _bindWinInlineChrome();
+        });
       }
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && !_immersiveFullscreen) _bindWinInlineChrome();
-      });
     });
   }
 

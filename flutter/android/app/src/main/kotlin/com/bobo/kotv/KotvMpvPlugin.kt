@@ -537,6 +537,9 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
             queuedNext = null
             pendingSeamlessId = null
             audioFocus.abandon()
+            // MediaOverlay SurfaceView 无帧时镂空透壳层蓝底；Flutter 黑盖压不住。
+            // 卸掉 Surface，只留宿主黑底；open→setRender 再重建。
+            surfaceHost?.clearVideoLayer()
             result.success(null)
           } catch (e: Throwable) {
             result.error("STOP_FAILED", e.message, null)

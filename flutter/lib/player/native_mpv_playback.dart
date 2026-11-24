@@ -987,8 +987,37 @@ class NativeMpvPlayback extends KotvPlayback {
   }
 
   Future<void> applyOpts(KotvMpvOpts opts) async {
+    // vulkan / vo / 显示层在 create 时固化；热改 setOpts 无效（macOS 关 Vulkan 仍黑到重启即此）。
+    final recreate = _nativeReady && opts.vulkan != _opts.vulkan;
     if (opts.direct != _opts.direct) _directFailed = false;
     _opts = opts;
+    if (recreate) {
+      final url = _url;
+      final live = _live;
+      final headers = Map<String, String>.from(_headers);
+      final startAt = _position;
+      await kotvTeardownPlayback(
+        stop: () => _ch.invokeMethod('stop'),
+        dispose: () => _ch.invokeMethod('dispose'),
+      );
+      _nativeReady = false;
+      _ready = false;
+      _underlayCover = true;
+      _playing = false;
+      notifyListeners();
+      if (url.isNotEmpty) {
+        try {
+          await open(
+            url,
+            headers: headers.isEmpty ? null : headers,
+            live: live,
+            startAt: startAt,
+            waitReady: false,
+          );
+        } catch (_) {}
+      }
+      return;
+    }
     try {
       await KotvBufferBudget.warm(force: true);
       await _ch.invokeMethod('setOpts', {

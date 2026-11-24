@@ -96,10 +96,18 @@ final class KotvMpvPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
   }
 
   /// 主线程建 layer，mpvQueue 上 init；完成后再回主线程 result。
-  /// Vulkan 开关只在新建 core 时生效（dispose 后下次播放）。
+  /// Vulkan 决定 vo（gpu-next+CAMetalLayer vs avfoundation+ASBDL），只在新建 core 时生效。
   private func ensureCore(completion: @escaping (Result<KotvMpvCore, Error>) -> Void) {
     if let core, core.isReady {
-      completion(.success(core))
+      if core.vulkan == vulkan {
+        completion(.success(core))
+        return
+      }
+      // 开关变了：旧 core 的 layer/vo 对不上，必须拆掉再建。
+      core.destroy { [weak self] in
+        self?.core = nil
+        self?.ensureCore(completion: completion)
+      }
       return
     }
     guard let win = resolveWindow() else {
@@ -235,6 +243,14 @@ final class KotvMpvPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
     case "setOpts", "setDecode":
       ingest(args)
       let props = args?["props"] as? [String: Any]
+      // Vulkan 变了：拆掉旧 core，等下次 create/open 按新开关建（vo/layer 不可热改）。
+      if let c = core, c.vulkan != vulkan {
+        c.destroy { [weak self] in
+          self?.core = nil
+          DispatchQueue.main.async { result(nil) }
+        }
+        return
+      }
       guard let c = core else { result(nil); return }
       c.asyncMpv { [weak self] in
         self?.applySessionOpts(c)
