@@ -2,7 +2,7 @@ import 'dart:math' as math;
 import 'dart:ui' show PlatformDispatcher;
 import 'kotv_playback.dart';
 
-/// 画面调色（MPV / media_kit / FVP 全量；Exo：Surface/Texture 均走 Media3 setVideoEffects）。
+/// 画面调色（MPV / FVP 全量；Exo：Surface/Texture 均走 Media3 setVideoEffects）。
 ///
 /// 数值：brightness/contrast/saturation/gamma/hue/temperature/shadow ∈ [-100, 100]，0 为中性；
 /// sharpness ∈ [0, 100]。隧道模式 / HDR 下 Exo 效果不可用。

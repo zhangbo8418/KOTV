@@ -6,7 +6,6 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:media_kit/media_kit.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../api/kotv_engine_url.dart';
@@ -27,7 +26,6 @@ import '../player/background_playback.dart';
 import '../player/kotv_playback.dart';
 import '../player/mini_playback.dart';
 import '../player/kotv_player_factory.dart';
-import '../player/media_kit_playback.dart';
 import '../player/mpv_opts.dart';
 import '../player/playback_settings.dart';
 import '../player/native_mpv_playback.dart';
@@ -150,7 +148,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     }
   }
 
-  Player? _mkPlayer;
   KotvPlayback? _mk;
   ExoPlayback? _exo;
   FvpPlayback? _fvp;
@@ -211,126 +208,41 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     await kotvStopPlayersForEpisodeSwitch([p]);
   }
 
-  KotvPlayback _ensureMpv() {
-    if (kotvUsesNativeMpv()) {
+  KotvPlayback _ensureMpv() =>
       _mk ??= NativeMpvPlayback(opts: _mpvOpts.copyWith(decodeMode: _decodeMode));
-      return _mk!;
-    }
-    // 同步创建；异步起播路径先 [_primeDesktopMpv]。直播须 live:true（关 cache-pause）。
-    if (_mk != null) return _mk!;
-    if (kotvMpvTeardownStuck) {
-      throw StateError('播放器异常，请重启应用');
-    }
-    _bindDesktopMpv(kotvCreateMpvPlayer());
-    return _mk!;
-  }
 
-  void _bindDesktopMpv(Player player) {
-    _mkPlayer = player;
-    _mk = MediaKitPlayback(
-      player,
-      opts: _mpvOpts.copyWith(decodeMode: _decodeMode),
-      live: true,
-      onWin7SoftOnDirect: _onWin7SoftOnDirect,
-    );
-  }
-
-  /// 桌面起播前：等拆机门闩；无实例则 [kotvTakeDesktopMpvPlayer] 再建。
-  /// macOS / Android 原生通道不走 media_kit，直接返回。
-  /// [kotvMpvTeardownStuck] 时写状态提示重启，返回 false。
-  Future<bool> _primeDesktopMpv() async {
-    if (kotvUsesNativeMpv()) return true;
-    if (kotvMpvTeardownStuck) {
-      if (mounted) setState(() => _status = '播放器异常，请重启应用');
-      return false;
-    }
-    final player = await kotvTakeDesktopMpvPlayer(
-      alreadyBound: _mk != null && _mkPlayer != null,
-      isMounted: () => mounted,
-    );
-    if (kotvMpvTeardownStuck) {
-      if (mounted) setState(() => _status = '播放器异常，请重启应用');
-      return false;
-    }
-    if (player == null) return true;
-    if (_mk != null) {
-      await kotvDisposeMpvPlayer(player);
-      return true;
-    }
-    _bindDesktopMpv(player);
-    return true;
-  }
-
-  /// Win7 直出已软解：会话内关直出并换 D3D11 Player（不落盘）。
-  void _onWin7SoftOnDirect() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_mpvOpts.direct) return;
-      setState(() => _mpvOpts = _mpvOpts.copyWith(direct: false));
-      unawaited(() async {
-        final pos = _playUrl.isNotEmpty ? _playback.position : Duration.zero;
-        await _releaseMpv();
-        await _reopenCurrent(pos);
-      }());
-    });
-  }
-
-  /// 卸本页 MPV 会话（经 [kotvReleaseOwnedMpv]）；下次 [_playback] 按当前设置新建。
+  /// 卸本页 MPV 会话；下次 [_playback] 按当前设置新建。
   Future<void> _releaseMpv() async {
     final mk = _mk;
-    final mkPlayer = _mkPlayer;
-    if (mk == null && mkPlayer == null) return;
-    await kotvReleaseOwnedMpv(
-      wrapper: mk,
-      desktopPlayer: mkPlayer,
-      detach: () {
-        _mkPlayer = null;
-        _mk = null;
-      },
-    );
+    _mk = null;
+    await kotvReleaseOwnedMpv(mk);
   }
 
-  /// 起播/出画失败：按 [kotvPlanSilentRecover] 拆机 / 换引擎 / 同引擎再建。
+  /// 起播/出画失败：按 [kotvPlanSilentRecover] 换解码 / 换引擎。
   /// `true` = 外层 for continue；`false` = break 后抛错；`null` = 直接结束本次 open。
   Future<bool?> _recoverAfterSilentVideo({
     required KotvPlayback pb,
     required KotvPlaybackFailover failover,
     required int serial,
   }) async {
-    bool stale() => !mounted || serial != _playSerial;
-    final canRecreateDesktopMpv = !kotvUsesNativeMpv() && pb is MediaKitPlayback;
-    final plan = kotvPlanSilentRecover(
-      failover: failover,
-      canRecreateDesktopMpv: canRecreateDesktopMpv,
-    );
+    final plan = kotvPlanSilentRecover(failover: failover);
 
     switch (plan.action) {
       case KotvSilentRecoverAction.keepSession:
         return null;
       case KotvSilentRecoverAction.giveUp:
-        if (canRecreateDesktopMpv) await _releaseMpv();
         return false;
-      case KotvSilentRecoverAction.retrySameEngine:
-        if (canRecreateDesktopMpv) await _releaseMpv();
-        if (stale()) {
-          await kotvStopIfUnowned(pb, [_mk, _fvp, _exo, _html, _art, _xg, _zw]);
-          return null;
-        }
-        return true;
       case KotvSilentRecoverAction.applyStep:
         final step = plan.step!;
-        if (canRecreateDesktopMpv) {
-          await _releaseMpv();
-        } else {
+        try {
+          await pb.release();
+        } catch (_) {
           try {
-            await pb.release();
-          } catch (_) {
-            try {
-              await pb.stop();
-            } catch (_) {}
-          }
+            await pb.stop();
+          } catch (_) {}
         }
         await _stopInactiveBackends(kotvEmbedBackend(step.playerVal));
-        if (stale()) return null;
+        if (!mounted || serial != _playSerial) return null;
         setState(() {
           _playerVal = step.playerVal;
           _decodeMode = step.decodeMode;
@@ -404,7 +316,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     final art = _art;
     final xg = _xg;
     final zw = _zw;
-    final mkPlayer = _mkPlayer;
     final backends = <KotvPlayback?>[fvp, mk, exo, html, art, xg, zw];
 
     await kotvSoftPausePlayers(backends);
@@ -418,7 +329,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     _art = null;
     _xg = null;
     _zw = null;
-    _mkPlayer = null;
     _playUrl = '';
     _playDirect = '';
     if (mounted) {
@@ -426,7 +336,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       await WidgetsBinding.instance.endOfFrame;
     }
 
-    await kotvDisposeMpvPlayer(mkPlayer);
     kotvDisposePlaybackWrappers(backends);
     _releasedHard = true;
   }
@@ -1241,7 +1150,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       final art = _art;
       final xg = _xg;
       final zw = _zw;
-      final mkPlayer = _mkPlayer;
       final backends = <KotvPlayback?>[fvp, mk, exo, html, art, xg, zw];
       _fvp = null;
       _mk = null;
@@ -1250,12 +1158,10 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       _art = null;
       _xg = null;
       _zw = null;
-      _mkPlayer = null;
       _playUrl = '';
       _playDirect = '';
       unawaited(() async {
         await kotvHardReleasePlayers(backends, waitFirst: fvp);
-        await kotvDisposeMpvPlayer(mkPlayer);
         kotvDisposePlaybackWrappers(backends);
       }());
     }
@@ -2274,7 +2180,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     /// 超时/无画面恢复：沿用当前会话解码（常为 soft），勿改写 [_prefDecodeMode]。
     String? startDecodeOverride,
   }) async {
-    if (!await _primeDesktopMpv()) return;
     if (!mounted || serial != _playSerial) return;
     // 热缓存同步 peek，避免每台换台多一次 async。
     var playSettings = KotvSettingsCache.peek();
@@ -2532,7 +2437,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         return;
       }
       if (retry) {
-        // applyStep 已写入 _playerVal；retrySameEngine 同引擎再建。
+        // applyStep 已写入 _playerVal。
         _prefPlayerVal = _playerVal;
         try {
           await _openLiveUrl(
@@ -2647,7 +2552,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   /// 全屏/竖屏/横屏共用画面。原生 MPV 画面层用 GlobalKey 保活。
   Widget _buildSharedLiveVideo() {
     final inner = _liveVideoInner();
-    if (kotvUsesNativeMpv() && _mk is NativeMpvPlayback) {
+    if (_mk is NativeMpvPlayback) {
       return KeyedSubtree(key: _videoHostKey, child: inner);
     }
     return inner;
@@ -2665,7 +2570,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
       fit: _liveAspect.fit,
     );
     final ratio = _liveAspect.ratio;
-    final mpvNativeScale = kotvUsesNativeMpv() && _mk is NativeMpvPlayback;
+    final mpvNativeScale = _mk is NativeMpvPlayback;
     if (!mpvNativeScale && ratio != null && ratio > 0) {
       view = ColoredBox(
         color: Colors.black,
@@ -2972,9 +2877,7 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
         return;
       }
       setState(() {
-        _status = kotvMpvTeardownStuck || (e is StateError && e.message.contains('播放器异常'))
-            ? '播放器异常，请重启应用'
-            : '播放失败: $e';
+        _status = '播放失败: $e';
       });
     }
   }

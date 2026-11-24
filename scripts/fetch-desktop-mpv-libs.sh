@@ -51,15 +51,14 @@ fetch_windows() {
   local out="$ASSET/windows/mpv-2.dll"
   local kind_file="$ASSET/windows/.kind"
   local src_stamp="$ASSET/windows/.kotv-mpv-src"
-  local want_kind="av3a-dav1d-vulkan-d3d11-opengl-eglangle-osc-dovi-lcms-xxhash-v26"
+  local want_kind="av3a-dav1d-vulkan-d3d11-opengl-osc-dovi-lcms-xxhash-v27"
   if [[ "${KOTV_WIN7:-}" == "1" || "${KOTV_MPV_WIN7:-}" == "1" ]]; then
-    want_kind="av3a-dav1d-vulkan-d3d11-opengl-eglangle-osc-dovi-lcms-xxhash-win7-v28"
+    want_kind="av3a-dav1d-vulkan-d3d11-opengl-osc-dovi-lcms-xxhash-win7-v29"
     export KOTV_MPV_WIN7=1
   fi
   if marker_ok "$out" 500000 && grep -aqE 'libarcdav3a|AV3A Audio Vivid' "$out" 2>/dev/null \
     && grep -aqE 'dovi_parse_unspec62_nalu|pl_hdr_metadata_from_dovi_rpu' "$out" 2>/dev/null \
     && grep -aqE 'dav1d_data_props|dav1d_get_picture|libdav1d' "$out" 2>/dev/null \
-    && grep -aq 'd3d11-egl' "$out" 2>/dev/null \
     && [[ "$(cat "$kind_file" 2>/dev/null || true)" == "$want_kind" ]] \
     && kotv_mpv_src_stamp_ok "$src_stamp" \
     && windows_siblings_ok; then

@@ -17,6 +17,20 @@ import 'player_normalize.dart';
 import 'position_coalesce.dart';
 import 'silent_video_guard.dart';
 
+/// 卸页面持有的 MPV 会话（详情/直播共用；离页、换引擎、silent 重建）。硬切/换台勿调用。
+/// Android 先 release 解绑 Surface 再 dispose；其余平台 dispose 后由原生侧异步销毁。
+Future<void> kotvReleaseOwnedMpv(KotvPlayback? mpv) async {
+  if (mpv == null) return;
+  if (kotvIsAndroid()) {
+    try {
+      await mpv.release();
+    } catch (_) {}
+  }
+  try {
+    mpv.dispose();
+  } catch (_) {}
+}
+
 /// 原生 libmpv（MethodChannel `kotv_mpv`）。
 /// Android：PlatformView；macOS / iOS：underlay ASBDL（Vulkan 时 CAMetalLayer）；Win/Linux：原生 runner。
 class NativeMpvPlayback extends KotvPlayback {
@@ -123,11 +137,11 @@ class NativeMpvPlayback extends KotvPlayback {
   @override
   String get engineLabel => '内置 MPV';
 
-  /// Win7 才有「硬解直出」：开 = dxva2，关 = auto。hwdec 运行期就地切换，不重建播放器。
+  /// Win7 才有「硬解直出」：开 = dxva2,auto，关 = auto。hwdec 运行期就地切换，不重建播放器。
   @override
   bool get supportsDirectOutput => kotvIsWindows7();
 
-  /// 直出开着但 dxva2 落到了软解：本会话自动改回 auto（仍可拷贝硬解），用户再点开关才重试。
+  /// 直出开着但 mpv 没用上 dxva2（已沿 `dxva2,auto` 落到别的解码）：本会话按关处理，用户再点开关才重试。
   bool _directFailed = false;
 
   /// 实际下发给引擎的选项（直出失败后按关处理）。
@@ -140,7 +154,8 @@ class NativeMpvPlayback extends KotvPlayback {
   String _hwdecCurrent = '';
 
   @override
-  bool get directOutputActive => directOutput && _hwdecCurrent != 'no';
+  bool get directOutputActive =>
+      directOutput && (_hwdecCurrent.isEmpty || _hwdecCurrent == 'dxva2');
 
   @override
   Future<void> setDirectOutput(bool on) async {
@@ -520,10 +535,9 @@ class NativeMpvPlayback extends KotvPlayback {
         final v = '${m['value'] ?? ''}';
         if (v == _hwdecCurrent) break;
         _hwdecCurrent = v;
-        if (v == 'no' && supportsDirectOutput && directOutput && !_opts.soft) {
+        if (v.isNotEmpty && v != 'dxva2' && supportsDirectOutput && directOutput && !_opts.soft) {
           _directFailed = true;
-          _log('硬解直出未生效（dxva2 落到软解），本会话改回自动硬解');
-          unawaited(_ch.invokeMethod('setDecode', _sessionDecodeArgs()).catchError((_) => null));
+          _log('硬解直出未生效（dxva2 不可用，实际 hwdec=$v），本会话按关处理');
         }
         notifyListeners();
         break;
@@ -605,7 +619,7 @@ class NativeMpvPlayback extends KotvPlayback {
       // 缺省也带 force-iso=no，避免会话复用后粘滞。
       final openProps = <String, String>{
         'force-iso': 'no',
-        // Windows 原生插件不自带 lavf 基线；与桌面 media_kit / 安卓同串。
+        // Windows 原生插件不自带 lavf 基线；与安卓同串。
         if (kotvIsWindows()) ...{'demuxer-lavf-o': kotvDemuxerLavfO, 'ytdl': 'no'},
         ..._extraOpenProps,
       };

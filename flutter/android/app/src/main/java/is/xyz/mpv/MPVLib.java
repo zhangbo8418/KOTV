@@ -209,7 +209,7 @@ public final class MPVLib {
     }
 
     /**
-     * API25 等机型：在 Flutter/media_kit 的 {@code System.loadLibrary("mpv")} 之前
+     * API25 等机型：在 {@code System.loadLibrary("mpv")} 之前
      * FORCE_LOAD 应用内 Vulkan 1.1 符号桩，避免 DT_NEEDED 绑到系统 Vulkan 1.0 缺符号报错。
      * 与「设置里开 MPV Vulkan / gpu-api=vulkan」无关；桩只满足链接，不启真正 Vulkan 渲染。
      */

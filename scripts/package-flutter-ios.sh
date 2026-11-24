@@ -125,12 +125,10 @@ kotv_ios_prepare_app() {
   local -a built_names=(
     file_selector_ios
     fvp
-    media_kit_video
     package_info_plus
     shared_preferences_foundation
     url_launcher_ios
     video_player_avfoundation
-    volume_controller
     wakelock_plus
   )
   for name in "${built_names[@]}"; do

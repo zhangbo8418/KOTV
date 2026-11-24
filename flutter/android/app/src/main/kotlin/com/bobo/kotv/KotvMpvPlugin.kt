@@ -1758,7 +1758,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     MPVLib.observeProperty("time-pos", MPVLib.MpvFormat.MPV_FORMAT_DOUBLE)
     MPVLib.observeProperty("duration", MPVLib.MpvFormat.MPV_FORMAT_DOUBLE)
     MPVLib.observeProperty("duration/full", MPVLib.MpvFormat.MPV_FORMAT_DOUBLE)
-    // mpv 语义为 flag；桌面 media_kit 只能订 string，此处订 FLAG 即可。
+    // mpv 语义为 flag。
     MPVLib.observeProperty("media-live", MPVLib.MpvFormat.MPV_FORMAT_FLAG)
     MPVLib.observeProperty("pause", MPVLib.MpvFormat.MPV_FORMAT_FLAG)
     MPVLib.observeProperty("paused-for-cache", MPVLib.MpvFormat.MPV_FORMAT_FLAG)
@@ -1962,7 +1962,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
 
   /**
    * 有排队 → keep-open=no（列表自然前进）；否则 → yes（末项 eof-reached→completed）。
-   * 与桌面 media_kit 同一契约（见 Dart KotvPlayback.queueNext）。
+   * 各平台同一契约（见 Dart KotvPlayback.queueNext）。
    */
   private fun applyKeepOpenForQueue(hasQueued: Boolean) {
     if (!created.get()) return

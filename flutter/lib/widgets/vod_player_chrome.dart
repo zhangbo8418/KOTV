@@ -12,7 +12,7 @@ import '../player/kotv_playback.dart';
 import '../player/kotv_player_factory.dart';
 import '../player/external_player.dart';
 import '../player/kotv_platform.dart';
-import '../player/kotv_win7_direct.dart';
+import '../player/mpv_opts.dart';
 import '../player/player_normalize.dart';
 import '../player/tv_remote_focus.dart';
 import '../player/tv_remote_keys.dart';

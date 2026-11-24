@@ -1,10 +1,5 @@
 import 'dart:convert';
 
-import 'package:media_kit/media_kit.dart';
-import 'package:media_kit_video/media_kit_video.dart';
-
-import '../util/kotv_app_dirs.dart';
-import 'buffer_budget.dart';
 import 'kotv_playback.dart';
 import 'kotv_platform.dart';
 import 'play_format.dart';
@@ -88,13 +83,16 @@ Map<String, String> kotvFvpAvformatProbeOpts() => const {
 const kotvPlaylistExts = '';
 const kotvImageExts = '';
 
-/// MPV 选项：原生 `kotv_mpv`（Android / macOS / iOS / Windows / Linux）与 media_kit 遗留路径共用。
+/// MPV 选项：原生 `kotv_mpv`（Android / macOS / iOS / Windows / Linux）。
 ///
 /// 自带 libmpv 由 scripts 自编译（Vulkan、AV3A、macOS vo_avfoundation 等），钉 [mpv-build.lock.json]；
 /// iOS 用同一提交发布的 MPVKit。FVP 为独立内置播放器，与 MPV 并列可选。
 ///
 /// 原生 MPV 能开 Vulkan 渲染的平台。
 bool kotvMpvVulkanSupported() => kotvUsesNativeMpv();
+
+/// Win7「硬解直出」开关的落盘值：按当前会话实际状态取反。详情 / 全屏 / 播控共用。
+String kotvWin7DirectNextValue(bool currentlyOn) => currentlyOn ? 'false' : 'true';
 
 class KotvMpvOpts {
   const KotvMpvOpts({
@@ -134,7 +132,7 @@ class KotvMpvOpts {
   final bool tlsVerify;
   final bool audioPassThrough;
   final bool diskCache;
-  /// Win7 硬解直出（默认关）：开 → `hwdec=dxva2`；关 → `auto`。
+  /// Win7 硬解直出（默认关）：开 → `hwdec=dxva2,auto`；关 → `auto`。
   final bool direct;
   /// 杜比视界策略：0=AUTO 1=假定支持 2=假定不支持（与 exoDolbyVision 枚举一致）。
   final int dolbyVisionPolicy;
@@ -288,8 +286,8 @@ class KotvMpvOpts {
       return hard ? 'mediacodec' : 'mediacodec,no';
     }
     if (kotvIsWindows()) {
-      // Win7 直出：dxva2 不行就软解；关直出与 Win8+ 相同，交给 MPV 自选。
-      if (kotvIsWindows7() && direct) return 'dxva2,no';
+      // Win7 直出：先试 dxva2 零拷贝，不行由 mpv 接着自选；关直出与 Win8+ 相同。
+      if (kotvIsWindows7() && direct) return 'dxva2,auto';
       return 'auto';
     }
     if (kotvIsApple()) {
@@ -298,111 +296,6 @@ class KotvMpvOpts {
     }
     const linuxHw = 'vaapi,vulkan,nvdec,cuda,vdpau';
     return hard ? linuxHw : '$linuxHw,no';
-  }
-
-  /// Android 可切 gpu/gpu-next；media_kit 必须 libmpv（Flutter Texture）。
-  ///
-  /// media_kit：软解 = `hwdec=no`，[enableHardwareAcceleration] 恒 true（GPU Texture）。
-  /// 勿把 soft 绑成 CPU/`pixel_buffer` 渲染，否则与「自动回落软解」发白、撕裂不一致。
-  VideoControllerConfiguration videoControllerConfiguration() {
-    final hw = hwdecValue();
-    if (kotvIsAndroid()) {
-      return VideoControllerConfiguration(
-        vo: gpuNext ? 'gpu-next' : 'gpu',
-        hwdec: hw,
-        enableHardwareAcceleration: !soft,
-      );
-    }
-    return VideoControllerConfiguration(
-      hwdec: hw,
-      enableHardwareAcceleration: true,
-    );
-  }
-
-  /// 在 VideoController 已附着之后调用：缓冲预算 + conf（media_kit 路径）。
-  ///
-  /// [live] 仅表示开播标定（直播页）；不因引擎 `media-live` 中途改属性。
-  Future<void> applyAfterAttach(Player player, {bool live = false}) async {
-    try {
-      final platform = player.platform;
-      if (platform == null) return;
-      Future<void> set(String k, String v) async {
-        await (platform as dynamic).setProperty(k, v);
-      }
-
-      final hw = hwdecValue();
-      try {
-        await set('hwdec', hw);
-      } catch (_) {}
-
-      // 分片后缀不按名单拦截；不设 protocol_whitelist（名单外的 RTSP/RTMP 会被拒）。
-      try {
-        await set('demuxer-lavf-o', kotvDemuxerLavfO);
-      } catch (_) {}
-      try {
-        await set('ytdl', 'no');
-      } catch (_) {}
-      // 预加载下一集：本集将完时提前打开排在播放列表后面的一项。
-      try {
-        await set('prefetch-playlist', 'yes');
-      } catch (_) {}
-      try {
-        await set('playlist-exts', kotvPlaylistExts);
-      } catch (_) {}
-      try {
-        await set('image-exts', kotvImageExts);
-      } catch (_) {}
-
-      try {
-        await KotvBufferBudget.warm(force: true);
-        final props = KotvBufferBudget.mpvCacheProps(KotvBufferBudget.bytes());
-        for (final e in props.entries) {
-          await set(e.key, e.value);
-        }
-        // 不因 live 强关 cache-pause（旧 cache-pause=no 在硬解挂起时持续喂包更难回落）。
-        // 直播仍关磁盘缓存；点播跟 diskCache 设置。
-        await set('cache-on-disk', (!live && diskCache) ? 'yes' : 'no');
-        if (!live && diskCache && !kotvIsAndroid()) {
-          final dir = await kotvMpvDemuxerCacheDir();
-          await set('demuxer-cache-dir', dir.path);
-        }
-      } catch (_) {}
-      try {
-        if (preferredTextLangs.trim().isNotEmpty) {
-          final slang = preferredTextLangs.replaceAll(';', ',').replaceAll(RegExp(r'\s+'), '');
-          await set('slang', slang);
-        } else {
-          final auto = kotvPreferredTextLanguagesFromLocale().join(',');
-          if (auto.isNotEmpty) await set('slang', auto);
-        }
-      } catch (_) {}
-
-      for (final e in parseConfLines(conf)) {
-        await set(e.$1, e.$2);
-      }
-
-      // 画面/音频 EQ 放在 conf 之后，避免被托管外的 af 盖掉；直通时不写 af。
-      for (final e in videoEq.mpvProps().entries) {
-        try {
-          await set(e.key, e.value);
-        } catch (_) {}
-      }
-      final vf = videoEq.mpvVf();
-      try {
-        await set('vf', vf);
-      } catch (_) {}
-      if (!audioPassThrough) {
-        try {
-          await set('af', _composedAf());
-        } catch (_) {}
-      }
-      try {
-        await set('audio-delay', (audioOffsetMs / 1000.0).toStringAsFixed(3));
-      } catch (_) {}
-      try {
-        await set('sub-scale', kotvClampSubtitleFontScale(subtitleFontScale).toStringAsFixed(2));
-      } catch (_) {}
-    } catch (_) {}
   }
 
   /// 按住看原画 / 试听原音要写的属性。不含 hwdec。

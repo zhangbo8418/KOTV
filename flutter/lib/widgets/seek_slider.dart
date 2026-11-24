@@ -11,8 +11,8 @@ import '../theme/kotv_theme.dart';
 /// 进度条：拖动只改 UI，松手才 [KotvPlayback.seek]。
 ///
 /// seek 完成前钉住目标位置，避免播放器短暂回报 0 导致进度条闪回开头。
-/// 钉住清除必须听 [KotvPlayback.positionStream]：桌面 MPV（MediaKit）不因
-/// position 调 [ChangeNotifier.notifyListeners]。
+/// 钉住清除必须听 [KotvPlayback.positionStream]：后端不一定因 position 调
+/// [ChangeNotifier.notifyListeners]。
 ///
 /// 遥控：获焦高亮；左右步进 seek；上下 [FocusNode.focusInDirection]。
 class KotvSeekSlider extends StatefulWidget {

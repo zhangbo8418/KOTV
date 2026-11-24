@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 将自带 libmpv 打进桌面应用包，供 media_kit 加载；位置与 fvp/mdk 相同（不进 runtime、不单独建 libmpv/ 目录）。
+# 将自带 libmpv 打进桌面应用包，供原生 kotv_mpv 插件加载；位置与 fvp/mdk 相同（不进 runtime、不单独建 libmpv/ 目录）。
 #   Windows：与 kotv.exe / mdk.dll 同目录（整包 DLL + verify-windows-mpv-bundle 闭包）
 #   Linux：bundle/lib/ + 非 OS .so 依赖，RUNPATH=$ORIGIN（避免缺库 / 与系统混载）
 #   macOS：Contents/Frameworks/ + 非系统 dylib，清掉 Homebrew/Xcode LC_RPATH
@@ -521,7 +521,7 @@ EOF
     }
     mkdir -p "$DEST"
     # 与 mdk.dll 同目录；闭包由 verify-windows-mpv-bundle 门禁。
-    # libmpv 单独以 libmpv-2.dll 安装（覆盖 media_kit_libs 预编译），勿再留 mpv-2.dll。
+    # libmpv 单独以 libmpv-2.dll 安装，勿再留 mpv-2.dll。
     if [[ -d "$SRC" ]]; then
       while IFS= read -r -d '' f; do
         base="$(basename "$f")"

@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:media_kit_video/media_kit_video.dart';
 
 import 'art_playback.dart';
 import 'exo_playback.dart';
@@ -9,7 +8,6 @@ import 'fvp_playback.dart';
 import 'html_playback.dart';
 import 'kotv_playback.dart';
 import 'kotv_platform.dart';
-import 'media_kit_playback.dart';
 import 'mpv_opts.dart';
 import 'native_mpv_playback.dart';
 import 'subtitle_style_util.dart';
@@ -26,11 +24,7 @@ void kotvPushPlayerSettings(
   ExoPlayback? exo,
   FvpPlayback? fvp,
 }) {
-  if (mpv is NativeMpvPlayback) {
-    unawaited(mpv.applyOpts(mpvOpts));
-  } else if (mpv is MediaKitPlayback) {
-    unawaited(mpv.applyOpts(mpvOpts));
-  }
+  if (mpv is NativeMpvPlayback) unawaited(mpv.applyOpts(mpvOpts));
   exo?.applyPlayerOptions(settings);
   fvp?.applyPlayerOptions(settings);
   // Exo 的 applyPlayerOptions 播放中已按同一份设置写过字幕样式与偏移。
@@ -46,7 +40,7 @@ bool kotvShowDirectOutput(KotvPlayback playback, String prefDecodeMode) =>
 bool kotvDirectOutputOn(KotvPlayback playback, String sessionDecodeMode) =>
     playback.directOutputActive && !KotvMpvOpts(decodeMode: sessionDecodeMode).soft;
 
-/// 页内画面：Android PlatformView；macOS/Win/Linux 原生 kotv_mpv；iOS media_kit；FVP 各平台独立。
+/// 页内画面：MPV 为原生 kotv_mpv 视频层（Android PlatformView、Apple/Win/Linux underlay）；FVP 各平台独立。
 Widget kotvPlaybackView({
   required String playerVal,
   required KotvPlayback playback,
@@ -75,20 +69,6 @@ Widget kotvPlaybackView({
     case KotvEmbedBackend.mpv:
       final m = mpv ?? playback;
       if (m is NativeMpvPlayback) return m.buildView(fit: fit);
-      if (m is MediaKitPlayback) {
-        // ValueKey：换集/重建 Player 时 remount，避免挂已 dispose 的 Texture。
-        return KeyedSubtree(
-          key: ValueKey<int>(identityHashCode(m.player)),
-          child: Video(
-            controller: m.controller,
-            controls: NoVideoControls,
-            fit: fit,
-            wakelock: false,
-            // 桌面窗失焦/最小化也会进 paused；默认 true 会 pause 掉 libmpv，易黑屏。
-            pauseUponEnteringBackgroundMode: kotvIsAndroid(),
-          ),
-        );
-      }
       return const ColoredBox(color: Colors.black);
   }
 }

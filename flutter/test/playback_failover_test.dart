@@ -106,53 +106,28 @@ void main() {
     expect(f.decodeMode, 'hard');
   });
 
-  test('plan: off + desktop mpv retries same engine', () {
-    final f = KotvPlaybackFailover(
-      playerVal: 'innie#mpv',
-      decodeMode: 'auto',
-      enabled: false,
-    );
-    f.markAttempt();
-    final plan = kotvPlanSilentRecover(failover: f, canRecreateDesktopMpv: true);
-    expect(plan.action, KotvSilentRecoverAction.retrySameEngine);
-    expect(f.playerVal, 'innie#mpv');
-  });
-
-  test('plan: off + other engine keeps session', () {
+  test('plan: off keeps session', () {
     final f = KotvPlaybackFailover(
       playerVal: 'innie#fvp',
       decodeMode: 'auto',
       enabled: false,
     );
     f.markAttempt();
-    final plan = kotvPlanSilentRecover(failover: f, canRecreateDesktopMpv: false);
+    final plan = kotvPlanSilentRecover(failover: f);
     expect(plan.action, KotvSilentRecoverAction.keepSession);
   });
 
   test('plan: on + auto applies soft decode step', () {
     final f = KotvPlaybackFailover(playerVal: 'innie#mpv', decodeMode: 'auto');
     f.markAttempt();
-    final plan = kotvPlanSilentRecover(failover: f, canRecreateDesktopMpv: true);
+    final plan = kotvPlanSilentRecover(failover: f);
     expect(plan.action, KotvSilentRecoverAction.applyStep);
     expect(plan.step!.decodeMode, 'soft');
     expect(plan.step!.playerVal, 'innie#mpv');
     expect(f.playerVal, 'innie#mpv');
   });
 
-  test('plan: on + exhausted ring recreates desktop mpv', () {
-    final f = KotvPlaybackFailover(playerVal: 'innie#mpv', decodeMode: 'auto');
-    f.markAttempt();
-    // 先耗尽环上其它引擎。
-    while (true) {
-      final s = f.nextStep();
-      if (s == null) break;
-      f.markAttempt();
-    }
-    final plan = kotvPlanSilentRecover(failover: f, canRecreateDesktopMpv: true);
-    expect(plan.action, KotvSilentRecoverAction.retrySameEngine);
-  });
-
-  test('plan: on + exhausted ring without recreate gives up', () {
+  test('plan: on + exhausted ring gives up', () {
     final f = KotvPlaybackFailover(playerVal: 'innie#fvp', decodeMode: 'auto');
     f.markAttempt();
     while (true) {
@@ -160,7 +135,7 @@ void main() {
       if (s == null) break;
       f.markAttempt();
     }
-    final plan = kotvPlanSilentRecover(failover: f, canRecreateDesktopMpv: false);
+    final plan = kotvPlanSilentRecover(failover: f);
     expect(plan.action, KotvSilentRecoverAction.giveUp);
   });
 }

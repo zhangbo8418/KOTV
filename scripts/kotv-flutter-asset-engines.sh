@@ -53,7 +53,7 @@ kotv_flutter_strip_placeholder_assets() {
   [[ -d "$root" ]] || return 0
   rm -rf "$root/assets/engine"
   if [[ "$keep_web" != "1" ]]; then
-    rm -rf "$root/packages/media_kit" "$root/packages/wakelock_plus"
+    rm -rf "$root/packages/wakelock_plus"
   fi
   python3 - "$root" <<'PY'
 import os, sys

@@ -31,7 +31,6 @@ drop_dirs = [
     "core/",
     "org/bouncycastle/pqc/",
     "assets/flutter_assets/assets/engine/",
-    "assets/flutter_assets/packages/media_kit/assets/web/",
     "assets/flutter_assets/packages/wakelock_plus/",
     "META-INF/androidx/",
     "META-INF/com/",

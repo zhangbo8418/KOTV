@@ -83,12 +83,7 @@ install(FILES "${FLUTTER_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
   COMPONENT Runtime)
 
 if(PLUGIN_BUNDLED_LIBRARIES)
-  # media_kit_libs_windows_video 会带旧 libmpv-2.dll + ANGLE；ANGLE 保留，
-  # libmpv 排除后由下方 KOTV_MPV_WIN_DIR 自编译覆盖。
-  set(KOTV_PLUGIN_BUNDLED_LIBRARIES "${PLUGIN_BUNDLED_LIBRARIES}")
-  list(FILTER KOTV_PLUGIN_BUNDLED_LIBRARIES EXCLUDE REGEX "[/\\\\]libmpv-2\\.dll$")
-  list(FILTER KOTV_PLUGIN_BUNDLED_LIBRARIES EXCLUDE REGEX "[/\\\\]mpv-2\\.dll$")
-  install(FILES "${KOTV_PLUGIN_BUNDLED_LIBRARIES}"
+  install(FILES "${PLUGIN_BUNDLED_LIBRARIES}"
     DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
     COMPONENT Runtime)
 endif()
@@ -143,7 +138,7 @@ foreach(_kotv_mpv_dll IN LISTS KOTV_MPV_WIN_DLLS)
   endif()
   install(FILES "${_kotv_mpv_dll}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}" COMPONENT Runtime)
 endforeach()
-# 自编译产物多为 mpv-2.dll；安装名统一 libmpv-2.dll（与 mpv.lib 的 LIBRARY、media_kit LoadLibrary 一致）。
+# 自编译产物多为 mpv-2.dll；安装名统一 libmpv-2.dll（与 mpv.lib 的 LIBRARY 一致）。
 if(EXISTS "${KOTV_MPV_WIN_DIR}/mpv-2.dll")
   install(FILES "${KOTV_MPV_WIN_DIR}/mpv-2.dll"
     DESTINATION "${INSTALL_BUNDLE_LIB_DIR}" RENAME "libmpv-2.dll" COMPONENT Runtime)

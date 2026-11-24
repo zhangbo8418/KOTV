@@ -238,8 +238,7 @@ if ! grep -aFq 'vo_avfoundation' "$OUT_APP/Contents/Frameworks/libmpv.dylib"; th
   echo "ERROR: bundled libmpv missing vo_avfoundation" >&2
   exit 1
 fi
-# Runner 必须把 mpv_* 绑到自带 libmpv，不能绑到 media_kit 的 Mpv.framework（无 avfoundation VO）。
-# 通用二进制按打包架构检查（另一切片可能仍绑 Mpv，因 assets 常为单架构 libmpv）。
+# Runner 必须把 mpv_* 绑到自带 libmpv（带 avfoundation VO）。通用二进制按打包架构检查。
 PACK_BIN="$OUT_APP/Contents/MacOS/KO影视"
 MPV_BIND="$(nm -m "$PACK_BIN" 2>/dev/null | grep '_mpv_create' | head -1 || true)"
 if ! echo "$MPV_BIND" | grep -q '(from libmpv)'; then

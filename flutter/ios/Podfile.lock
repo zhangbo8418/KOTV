@@ -7,8 +7,6 @@ PODS:
     - FlutterMacOS
     - mdk (~> 0.39.0)
   - mdk (0.39.0)
-  - media_kit_video (0.0.1):
-    - Flutter
   - package_info_plus (0.4.5):
     - Flutter
   - shared_preferences_foundation (0.0.1):
@@ -19,8 +17,6 @@ PODS:
   - video_player_avfoundation (0.0.1):
     - Flutter
     - FlutterMacOS
-  - volume_controller (3.7.0):
-    - Flutter
   - wakelock_plus (0.0.1):
     - Flutter
 
@@ -29,12 +25,10 @@ DEPENDENCIES:
   - Flutter (from `Flutter`)
   - fvp (from `.symlinks/plugins/fvp/darwin`)
   - mdk (from `/tmp/mdk-sdk-local`)
-  - media_kit_video (from `.symlinks/plugins/media_kit_video/ios`)
   - package_info_plus (from `.symlinks/plugins/package_info_plus/ios`)
   - shared_preferences_foundation (from `.symlinks/plugins/shared_preferences_foundation/darwin`)
   - url_launcher_ios (from `.symlinks/plugins/url_launcher_ios/ios`)
   - video_player_avfoundation (from `.symlinks/plugins/video_player_avfoundation/darwin`)
-  - volume_controller (from `.symlinks/plugins/volume_controller/ios`)
   - wakelock_plus (from `.symlinks/plugins/wakelock_plus/ios`)
 
 EXTERNAL SOURCES:
@@ -46,8 +40,6 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/fvp/darwin"
   mdk:
     :path: "/tmp/mdk-sdk-local"
-  media_kit_video:
-    :path: ".symlinks/plugins/media_kit_video/ios"
   package_info_plus:
     :path: ".symlinks/plugins/package_info_plus/ios"
   shared_preferences_foundation:
@@ -56,8 +48,6 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/url_launcher_ios/ios"
   video_player_avfoundation:
     :path: ".symlinks/plugins/video_player_avfoundation/darwin"
-  volume_controller:
-    :path: ".symlinks/plugins/volume_controller/ios"
   wakelock_plus:
     :path: ".symlinks/plugins/wakelock_plus/ios"
 
@@ -66,12 +56,10 @@ SPEC CHECKSUMS:
   Flutter: 71a624a5bc0c04062bf19101d501e466baf2fb47
   fvp: 385cbd708aab66c4c875657ed55ef00d9ea551e2
   mdk: 79b4bd6e39422d293c6012d23374db171936e185
-  media_kit_video: f3b0d035d89def15cfbbcf7dc2ae278f201e2f83
   package_info_plus: af8e2ca6888548050f16fa2f1938db7b5a5df499
   shared_preferences_foundation: a7c3904f2dedb3701dd1903cb152ef5e7df92422
   url_launcher_ios: 7a95fa5b60cc718a708b8f2966718e93db0cef1b
   video_player_avfoundation: bc5f800d1e1c4f389bc5d51778a4f89dd1bf4a77
-  volume_controller: b2f529b1dc3496fe900df1baef358aadce59a827
   wakelock_plus: e29112ab3ef0b318e58cfa5c32326458be66b556
 
 PODFILE CHECKSUM: dfa667a6814c9da019bbcff81cf929cc8a3d416c

@@ -81,44 +81,6 @@ kotv_mpv_dll_has_opengl() {
   strings "$dll" 2>/dev/null | grep -Eiq 'libmpv_gl|mpv_render_context|opengl|wglCreateContext|video_out_opengl|plain.gl|GL_VENDOR'
 }
 
-# 二进制侧确认硬解直出的 ANGLE 互通（d3d11va → d3d11-egl，dxva2 → dxva2-egl）。
-kotv_mpv_dll_has_angle_interop() {
-  local dll="$1"
-  [[ -f "$dll" ]] || return 1
-  strings "$dll" 2>/dev/null | grep -q 'd3d11-egl' \
-    && strings "$dll" 2>/dev/null | grep -q 'dxva2-egl'
-}
-
-# media_kit 在 Windows 用 ANGLE(EGL) 给 libmpv 提供 OpenGL。mpv 要编进 egl-angle，硬解才能
-# 直出到这块 GL；否则 d3d11va/dxva2 直出建不起来，只能拷贝或软解。
-# 用 media_kit_libs_windows_video 随包的同一份 ANGLE（同 URL / MD5），只取头文件：
-# mpv 运行时按名加载 LIBEGL.DLL，拿到的就是 media_kit 已在进程里加载的那份。
-KOTV_ANGLE_URL="https://github.com/alexmercerind/flutter-windows-ANGLE-OpenGL-ES/releases/download/v1.0.1/ANGLE.7z"
-KOTV_ANGLE_MD5="e866f13e8d552348058afaafe869b1ed"
-
-# 准备 ANGLE 头文件，stdout 输出 include 目录（MinGW gcc 可用的路径）。
-ensure_windows_angle_headers() {
-  local dir="$BUILD_DIR/angle"
-  local archive="$BUILD_DIR/src/ANGLE-v1.0.1.7z"
-  if [[ ! -f "$dir/include/EGL/eglext_angle.h" ]]; then
-    mkdir -p "$BUILD_DIR/src"
-    if [[ ! -f "$archive" ]] || [[ "$(md5sum "$archive" | cut -d' ' -f1)" != "$KOTV_ANGLE_MD5" ]]; then
-      echo "==> fetch ANGLE (media_kit v1.0.1) for egl-angle headers" >&2
-      curl -fsSL --retry 5 --retry-delay 2 -o "$archive" "$KOTV_ANGLE_URL"
-    fi
-    [[ "$(md5sum "$archive" | cut -d' ' -f1)" == "$KOTV_ANGLE_MD5" ]] \
-      || { echo "ERROR: ANGLE archive md5 mismatch ($archive)" >&2; exit 1; }
-    rm -rf "$dir"
-    mkdir -p "$dir"
-    # cmake -E tar 走 libarchive，可解 7z。
-    (cd "$dir" && cmake -E tar xf "$archive") >&2 \
-      || { echo "ERROR: cannot extract $archive" >&2; exit 1; }
-  fi
-  [[ -f "$dir/include/EGL/eglext_angle.h" ]] \
-    || { echo "ERROR: ANGLE headers missing under $dir/include" >&2; exit 1; }
-  cygpath -m "$dir/include" 2>/dev/null || printf '%s' "$dir/include"
-}
-
 kotv_libplacebo_profile() {
   if kotv_is_windows_build; then
     # Vulkan + D3D11 + OpenGL + libdovi + lcms + xxhash（glslang 用 shaderc 代替）。
@@ -1752,13 +1714,11 @@ EOF
   ensure_lua_pkg
   if kotv_is_windows_build; then
     local mpv_vk=enabled
-    local angle_inc
-    angle_inc="$(ensure_windows_angle_headers)"
     local winver=""
     if kotv_is_mpv_win7_build; then
       winver="'-D_WIN32_WINNT=0x0601','-DWINVER=0x0601','-DNTDDI_VERSION=0x06010000',"
     fi
-    echo "==> mpv Windows: vulkan+d3d11+opengl(+plain-gl)+egl-angle+lua/osc (win7=$(kotv_is_mpv_win7_build && echo 1 || echo 0))"
+    echo "==> mpv Windows: vulkan+d3d11+opengl(+plain-gl)+lua/osc (win7=$(kotv_is_mpv_win7_build && echo 1 || echo 0))"
     local -a mpv_extra=(
       -Dd3d11=enabled
       -Dshaderc=enabled
@@ -1766,7 +1726,7 @@ EOF
       -Dgl=enabled
       -Dgl-win32=enabled
       -Dplain-gl=enabled
-      -Degl-angle=enabled
+      -Degl-angle=disabled
       -Dlua=enabled
     )
     meson setup build \
@@ -1788,7 +1748,7 @@ EOF
     -Dcplugins=enabled \
       "${mpv_extra[@]}" \
       -Dlibavdevice=disabled \
-      -Dc_args="[${winver}'-DNDEBUG','-I$angle_inc']" \
+      -Dc_args="[${winver}'-DNDEBUG']" \
       -Dcpp_args="[${winver}'-DNDEBUG']"
   else
     meson setup build \
@@ -1848,11 +1808,6 @@ EOF
     meson configure build 2>&1 | grep -Ei 'd3d11|gl|plain|lua' || true
     exit 1
   fi
-  if ! kotv_mpv_dll_has_angle_interop "$out"; then
-    echo "ERROR: Windows libmpv built without egl-angle interop (d3d11-egl / dxva2-egl)" >&2
-    meson configure build 2>&1 | grep -Ei 'egl|angle|d3d' || true
-    exit 1
-  fi
   if ! kotv_meson_feature_enabled lua build \
     && ! strings "$out" 2>/dev/null | grep -Eiq 'luaL_|lua_open|osc\.lua|player/lua'; then
     echo "ERROR: Windows libmpv built without lua (OSC needs lua)" >&2
@@ -1862,7 +1817,7 @@ EOF
   if ! strings "$out" 2>/dev/null | grep -Fq 'osc.lua'; then
     echo "WARN: mpv-2.dll strings lack osc.lua (OSC may be incomplete)" >&2
   fi
-  echo "ok Windows mpv features include d3d11 + vulkan + opengl + egl-angle + lua/osc"
+  echo "ok Windows mpv features include d3d11 + vulkan + opengl + lua/osc"
 }
 
 case "$PLAT" in

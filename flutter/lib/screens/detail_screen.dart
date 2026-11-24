@@ -6,7 +6,6 @@ import 'package:flutter/gestures.dart' show kDoubleTapTimeout, kTouchSlop;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:media_kit/media_kit.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../api/kotv_api.dart';
@@ -30,9 +29,7 @@ import '../player/background_playback.dart';
 import '../player/kotv_playback.dart';
 import '../player/mini_playback.dart';
 import '../player/kotv_player_factory.dart';
-import '../player/kotv_win7_direct.dart';
 import '../player/kotv_win_chrome.dart';
-import '../player/media_kit_playback.dart';
 import '../player/mpv_opts.dart';
 import '../player/playback_settings.dart';
 import '../player/native_mpv_playback.dart';
@@ -152,9 +149,8 @@ class DetailScreen extends ConsumerStatefulWidget {
     return until != null && DateTime.now().isBefore(until);
   }
 
-  /// 换源/切 Tab：放开 PopScope，并 await 硬停（含桌面 MPV dispose），避免卸树后仍占 AO/出声。
-  /// 并发调用挂同一 Completer。硬停等待有上限以便 UI 返回；桌面 libmpv 拆机仍跑完，
-  /// 再建前由 [kotvAwaitMpvTeardown] 串行（超时置 [kotvMpvTeardownStuck]）。
+  /// 换源/切 Tab：放开 PopScope，并 await 硬停（含 MPV dispose），避免卸树后仍占 AO/出声。
+  /// 并发调用挂同一 Completer。硬停等待有上限以便 UI 返回。
   static Future<void> prepareLeave() async {
     final inFlight = _DetailScreenState._leaveDone;
     if (inFlight != null) {
@@ -269,8 +265,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   bool _reversed = false;
   /// 起播续播 seek（毫秒）；仅当目标集 remarks/flag 与历史一致时并入 startAt。
   int _resumeSeekMs = 0;
-  /// 换 Player 重开本集时的起始进度；[_playAt] 读一次即清零。
-  int _reopenAtMs = 0;
   String _resumeSeekRemarks = '';
   String _resumeSeekFlag = '';
   DateTime? _lastProgressSave;
@@ -366,7 +360,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   double? _prefSpeed;
   double? _prefVolume;
 
-  Player? _mkPlayer;
   KotvPlayback? _mk;
   ExoPlayback? _exo;
   FvpPlayback? _fvp;
@@ -374,11 +367,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   ArtPlayback? _art;
   XgPlayback? _xg;
   ZwPlayback? _zw;
-  StreamSubscription? _playingSub;
   StreamSubscription? _endedSub;
   StreamSubscription? _queuedStartSub;
   StreamSubscription<Duration>? _posSub;
-  StreamSubscription? _bufferingSub;
   KotvPlayback? _wiredNotifyTarget;
   VoidCallback? _playbackNotify;
   int _lastVideoW = 0;
@@ -427,8 +418,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   bool _emptyFallbackExhausted = false;
   String _routeMark = '';
   KotvEmbedBackend get _backend => kotvEmbedBackend(_playerVal);
-
-  bool get _useMpv => _backend == KotvEmbedBackend.mpv;
 
   /// 当前页内后端：按设置选择 Exo / MPV / FVP / HTML。
   KotvPlayback get _playback {
@@ -539,132 +528,32 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     setState(() => _status = next);
   }
 
-  KotvPlayback _ensureMpv() {
-    if (kotvUsesNativeMpv()) {
+  KotvPlayback _ensureMpv() =>
       _mk ??= NativeMpvPlayback(opts: _mpvOpts.copyWith(decodeMode: _decodeMode));
-      return _mk!;
-    }
-    if (_mk != null) {
-      _playingSub ??= _mkPlayer!.stream.playing.listen((_) {
-        if (!mounted || _playUrl.isEmpty || !_useMpv) return;
-        _markPlaybackLiveIfNeeded();
-        _syncPlayStatus();
-      });
-      _bufferingSub ??= _mkPlayer!.stream.buffering.listen((_) {
-        if (!mounted || _playUrl.isEmpty || !_useMpv) return;
-        _syncPlayStatus();
-      });
-      return _mk!;
-    }
-    // 同步兜底创建；正常起播应已 [_primeDesktopMpv]（内含拆机等待）。
-    // 若拆机仍在跑，调用方须先 await [kotvAwaitMpvTeardown]。
-    if (kotvMpvTeardownStuck) {
-      throw StateError('播放器异常，请重启应用');
-    }
-    final player = kotvCreateMpvPlayer();
-    _bindDesktopMpv(player);
-    return _mk!;
-  }
 
-  void _bindDesktopMpv(Player player) {
-    _mkPlayer = player;
-    _mk = MediaKitPlayback(
-      player,
-      opts: _mpvOpts.copyWith(decodeMode: _decodeMode),
-      onWin7SoftOnDirect: _onWin7SoftOnDirect,
-    );
-    _playingSub?.cancel();
-    _bufferingSub?.cancel();
-    _playingSub = player.stream.playing.listen((_) {
-      if (!mounted || _playUrl.isEmpty || !_useMpv) return;
-      _markPlaybackLiveIfNeeded();
-      _syncPlayStatus();
-    });
-    _bufferingSub = player.stream.buffering.listen((_) {
-      if (!mounted || _playUrl.isEmpty || !_useMpv) return;
-      _syncPlayStatus();
-    });
-  }
-
-  /// 桌面起播前：等拆机门闩；无实例则 [kotvTakeDesktopMpvPlayer] 再建。
-  /// macOS / Android 原生通道不走 media_kit，直接返回。
-  /// [kotvMpvTeardownStuck] 时写状态提示重启，返回 false。
-  Future<bool> _primeDesktopMpv() async {
-    if (kotvUsesNativeMpv()) return true;
-    if (kotvMpvTeardownStuck) {
-      if (mounted) setState(() => _status = '播放器异常，请重启应用');
-      return false;
-    }
-    final player = await kotvTakeDesktopMpvPlayer(
-      alreadyBound: _mk != null && _mkPlayer != null,
-      isMounted: () => mounted,
-    );
-    if (kotvMpvTeardownStuck) {
-      if (mounted) setState(() => _status = '播放器异常，请重启应用');
-      return false;
-    }
-    if (player == null) return true;
-    if (_mk != null) {
-      await kotvDisposeMpvPlayer(player);
-      return true;
-    }
-    _bindDesktopMpv(player);
-    return true;
-  }
-
-  /// 卸本页 MPV 会话（经 [kotvReleaseOwnedMpv]）。
-  /// 换引擎 / silent / Win7 直出重建时调用；硬切 [_playAt] / 无缝不调用。
-  /// 离页由 [_stopHard] 直接 [kotvDisposeMpvPlayer]，不必再调本方法。
+  /// 卸本页 MPV 会话（换引擎时调用）；硬切 [_playAt] / 无缝不调用。
   Future<void> _releaseOwnedMpv() async {
     final mk = _mk;
-    final mkPlayer = _mkPlayer;
-    if (mk == null && mkPlayer == null) return;
-    await kotvReleaseOwnedMpv(
-      wrapper: mk,
-      desktopPlayer: mkPlayer,
-      detach: () {
-        _playingSub?.cancel();
-        _bufferingSub?.cancel();
-        _playingSub = null;
-        _bufferingSub = null;
-        _mkPlayer = null;
-        _mk = null;
-      },
-    );
+    _mk = null;
+    await kotvReleaseOwnedMpv(mk);
   }
 
-  /// 起播无画面：按 [kotvPlanSilentRecover] 拆机 / 换引擎 / 同引擎再建。
+  /// 起播无画面：按 [kotvPlanSilentRecover] 换解码 / 换引擎。
   /// `true` = 外层 for continue；`false` = break；`null` = 会话已作废，直接 return。
   Future<bool?> _recoverAfterSilentVideo({
     required KotvPlayback pb,
     required KotvPlaybackFailover failover,
     required int serial,
   }) async {
-    final canRecreateDesktopMpv = !kotvUsesNativeMpv() && pb is MediaKitPlayback;
-    final plan = kotvPlanSilentRecover(
-      failover: failover,
-      canRecreateDesktopMpv: canRecreateDesktopMpv,
-    );
+    final plan = kotvPlanSilentRecover(failover: failover);
 
     switch (plan.action) {
       case KotvSilentRecoverAction.keepSession:
-        return false;
       case KotvSilentRecoverAction.giveUp:
-        if (canRecreateDesktopMpv) {
-          await _releaseOwnedMpv();
-        }
         return false;
-      case KotvSilentRecoverAction.retrySameEngine:
-        if (canRecreateDesktopMpv) {
-          await _releaseOwnedMpv();
-        }
-        if (!mounted || serial != _playAtSerial) return null;
-        return true;
       case KotvSilentRecoverAction.applyStep:
         final step = plan.step!;
-        if (canRecreateDesktopMpv) {
-          await _releaseOwnedMpv();
-        } else if (kotvIsApple() && pb is NativeMpvPlayback) {
+        if (kotvIsApple() && pb is NativeMpvPlayback) {
           // macOS / iOS：停播藏层，保留 libmpv/ASBDL，切回后 EDR 会话仍在。
           try {
             await pb.stop();
@@ -992,29 +881,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     if (!_danmakuOn) setState(() => _danmakuOn = true);
   }
 
-  /// media_kit Win7 直出已软解：会话内关直出并换 D3D11 Player（不落盘；in-place MaybeRewrite 会蓝屏）。
-  void _onWin7SoftOnDirect() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_mpvOpts.direct) return;
-      setState(() => _mpvOpts = _mpvOpts.copyWith(direct: false));
-      unawaited(_reopenWithNewMpvPlayer());
-    });
-  }
-
-  /// 换 media_kit 会话；正在播就按当前进度重开本集。
-  /// 没在播也要拆掉旧的，否则下次起播仍复用按旧选项建的 Player。
-  Future<void> _reopenWithNewMpvPlayer() async {
-    final playing = _epIdx >= 0 && _playUrl.isNotEmpty;
-    if (playing) {
-      _reopenAtMs = _existingPlayback?.position.inMilliseconds ?? 0;
-      try {
-        await _flushWatchProgress(force: true);
-      } catch (_) {}
-    }
-    await _releaseOwnedMpv();
-    if (playing && mounted) await _playAt(_epIdx);
-  }
-
   /// 放开 PopScope，否则随后的 popUntil 会被 canPop:false 拦住。
   Future<void> _releasePopGuard() async {
     if (!mounted) return;
@@ -1031,8 +897,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     await _stopHardAwait();
   }
 
-  /// 离页硬停：soft pause → release → 清宿主 → [kotvDisposeMpvPlayer] + 包装 dispose。
-  /// 桌面 media_kit 的 stop+dispose 只经 [kotvDisposeMpvPlayer]（门闩）；勿再叠 softStop。
+  /// 离页硬停：soft pause → release → 清宿主 → 包装 dispose。
   /// 勿在此使用 [ref]：[_leavePage] 可能在 pop/dispose 之后仍调用本方法。
   /// [skipFlush]：离开页已落过进度时跳过二次 flush。
   Future<void> _stopHard({bool skipFlush = false}) async {
@@ -1049,14 +914,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _playAtSerial++;
     final stopSerial = _playAtSerial;
     _sessionStartedAt = null;
-    _playingSub?.cancel();
     _unwireEpisodeEnd();
     _posSub?.cancel();
-    _bufferingSub?.cancel();
     _unwirePlaybackNotify();
-    _playingSub = null;
     _posSub = null;
-    _bufferingSub = null;
     _magnetPlay = false;
     _stopBtProgressPoll();
     _syncAndroidAutoPip();
@@ -1074,7 +935,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     final art = _art;
     final xg = _xg;
     final zw = _zw;
-    final mkPlayer = _mkPlayer;
     final backends = <KotvPlayback?>[fvp, mk, exo, html, art, xg, zw];
 
     await kotvSoftPausePlayers(backends);
@@ -1087,7 +947,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _art = null;
     _xg = null;
     _zw = null;
-    _mkPlayer = null;
     _playUrl = '';
     _unbindWinInlineChrome();
     _lastVideoPaintRect = null;
@@ -1099,8 +958,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       await WidgetsBinding.instance.endOfFrame;
     }
 
-    // media_kit Player 由页面持有：stop+dispose 走 [kotvDisposeMpvPlayer]（登记门闩）。
-    await kotvDisposeMpvPlayer(mkPlayer);
     kotvDisposePlaybackWrappers(backends);
     if (_mpvOpts.diskCache && !kotvIsAndroid()) {
       await kotvClearMpvDemuxerCacheDir();
@@ -1225,9 +1082,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         setState(() => _immersiveEpCover = false);
         return;
       }
-      // 仅 Android 原生 MPV：出尺寸后须 rebuild 才能按比例定 PlatformView。
-      // 桌面 media_kit 的 Video 若在 open 中途因宽高 setState 整树重建，
-      // 易丢 libmpv render context → 有声黑屏。
+      // 原生 MPV：出尺寸后须 rebuild 才能按比例定视频层。
       if (sizeChanged && p is NativeMpvPlayback) {
         setState(() {});
         _syncWinInlineChrome();
@@ -1445,10 +1300,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     if (_miniDesktop) {
       unawaited(MiniPlayerWindow.exit());
     }
-    _playingSub?.cancel();
     _unwireEpisodeEnd();
     _posSub?.cancel();
-    _bufferingSub?.cancel();
     _unwirePlaybackNotify();
     _stopBtProgressPoll();
     _danmakuItems.dispose();
@@ -1465,11 +1318,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       final art = _art;
       final xg = _xg;
       final zw = _zw;
-      final mkPlayer = _mkPlayer;
       final backends = <KotvPlayback?>[fvp, mk, exo, html, art, xg, zw];
       unawaited(() async {
         await kotvHardReleasePlayers(backends, waitFirst: fvp);
-        await kotvDisposeMpvPlayer(mkPlayer);
         kotvDisposePlaybackWrappers(backends);
       }());
       _fvp = null;
@@ -1479,7 +1330,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       _art = null;
       _xg = null;
       _zw = null;
-      _mkPlayer = null;
       _playUrl = '';
       _lastVideoPaintRect = null;
       _videoLayerRect = null;
@@ -1978,7 +1828,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   static const _nextEpisodeQueueLeadMs = 180000;
 
   /// 「预加载下一集」：解析下一集并排进当前播放器的播放列表，播完无缝接上。
-  /// Exo、全部 MPV（安卓原生 MPV + media_kit）支持；FVP / 网页排不上。
+  /// Exo、MPV 支持；FVP / 网页排不上。
   /// 排不上（磁力、DRM、碟片、请求头与本集不同等）时留下解析结果，换集时少等一次解析。
   void _preloadNextEpisodeNow() {
     final pb = _playback;
@@ -2320,8 +2170,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   }
 
   Future<void> _playAt(int epIdx, {bool fullscreen = false}) async {
-    if (_leaving) return;
-    if (!await _primeDesktopMpv()) return;
     if (_leaving || !mounted) return;
     final d = _detail;
     if (d == null || d.flags.isEmpty) return;
@@ -2338,8 +2186,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     // 换集：抬世代，关掉 READY/连播（BUFFERING 时 Clock=null）
     final gen = ++_playGen;
     final serial = ++_playAtSerial;
-    final reopenAtMs = _reopenAtMs;
-    _reopenAtMs = 0;
     _playbackLive = false;
     _sessionStartedAt = null;
     _lastVideoW = 0;
@@ -2522,7 +2368,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         startPlayer = _prefPlayerVal;
       }
       var openPlayer = startPlayer;
-      var handoffMs = reopenAtMs;
+      var handoffMs = 0;
       if (kotvIsExternalPlayer(startPlayer)) {
         if (serial != _playAtSerial || !mounted) return;
         final resumeOk = _resumeSeekMs > 0 &&
@@ -2699,12 +2545,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             await kotvStopIfUnowned(pb, [_mk, _fvp, _exo, _html, _art, _xg, _zw]);
             return;
           }
-          // MediaKitPlayback.open 已 unpause；其它后端仍补一次 play。
-          if (pb is! MediaKitPlayback) {
-            try {
-              await pb.play();
-            } catch (_) {}
-          }
+          try {
+            await pb.play();
+          } catch (_) {}
           opened = true;
           break;
         } on KotvSilentVideoException catch (e) {
@@ -2793,12 +2636,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       _stopBtProgressPoll();
       _playbackLive = false;
       _sessionStartedAt = null;
-      final tip = kotvMpvTeardownStuck || (e is StateError && e.message.contains('播放器异常'))
-          ? '播放器异常，请重启应用'
-          : _friendlyPlayError(
-              e,
-              triedSwitch: KotvPlaybackFailover.enabledFromSetting(_prefPlayerFailover),
-            );
+      final tip = _friendlyPlayError(
+        e,
+        triedSwitch: KotvPlaybackFailover.enabledFromSetting(_prefPlayerFailover),
+      );
       // 留页并保留舞台；勿清 _playUrl 拆掉播放区。
       if (mounted) {
         setState(() {
@@ -2852,22 +2693,18 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   /// 固定画幅：Exo/其它用 [AspectRatio]；Android MPV 走原生 video-aspect-override，勿再套一层。
   /// 纯音频时叠 [KotvAudioStage]，各入口共用，避免黑屏。
   Widget _buildSharedVideo({BoxFit fit = BoxFit.contain}) {
-    // media_kit 桌面：还没有实例时不要在 build 里创建，避免离页交错留下无人释放的 Player。
-    if (!kotvUsesNativeMpv() && _backend == KotvEmbedBackend.mpv && _mk == null) {
-      return const ColoredBox(color: Colors.black);
-    }
     Widget inner = kotvPlaybackView(
       playerVal: _playerVal,
       playback: _playback,
       mpv: _mk,
       fit: fit,
     );
-    // Android / macOS 原生 PlatformView：跨布局保活。
-    if (kotvUsesNativeMpv() && _mk is NativeMpvPlayback) {
+    // 原生视频层：跨布局保活。
+    if (_mk is NativeMpvPlayback) {
       inner = KeyedSubtree(key: _videoHostKey, child: inner);
     }
     final ratio = _aspect.ratio;
-    final mpvNativeScale = kotvUsesNativeMpv() && _mk is NativeMpvPlayback;
+    final mpvNativeScale = _mk is NativeMpvPlayback;
     if (!mpvNativeScale && ratio != null && ratio > 0) {
       inner = ColoredBox(
         color: Colors.black,
@@ -4441,7 +4278,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
               // 沉浸默认黑底（各平台一致）：适应 letterbox 不透壳壁纸。
               // 仅氛围模式去掉黑底，四周才透详情 AppBackdrop；Android 仍卸详情树防 Surface 镂空双影
               // （7458fbe / ef4fb2d：稳定 Positioned 宿主，勿整页 Offstage 叠一层 Hybrid）。
-              // 桌面 Offstage 保活（media_kit Texture 不宜整树卸装）。
+              // 桌面 Offstage 保活详情树（退出沉浸不重建）。
               // 沉浸期禁止 _syncVideoSlotRect，避免 setState 重建 Hybrid Positioned。
               if (kotvIsAndroid()) ...[
                 if (_immersiveFullscreen && !_ambientOn) const ColoredBox(color: Colors.black),
