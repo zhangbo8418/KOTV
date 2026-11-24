@@ -89,8 +89,10 @@ jobs:
       - name: Install desktop MPV source deps
         shell: bash
         run: |
-          choco install nasm strawberryperl -y --no-progress
-          chmod +x scripts/ci-ensure-windows-vulkan-sdk.sh
+          # strawberryperl：runner 常已预装；choco 503 时不挡后续
+          choco install strawberryperl -y --no-progress || true
+          chmod +x scripts/ci-ensure-windows-nasm.sh scripts/ci-ensure-windows-vulkan-sdk.sh
+          ./scripts/ci-ensure-windows-nasm.sh
           ./scripts/ci-ensure-windows-vulkan-sdk.sh
           python -m pip install meson ninja
           export PATH="/c/Strawberry/perl/bin:/c/mingw-msvcrt/mingw64/bin:/c/Program Files/NASM:/c/ProgramData/chocolatey/bin:$PATH"
@@ -100,6 +102,7 @@ jobs:
           meson --version
           perl -MLocale::Maketext -e "print qq(ok Locale::Maketext\n)"
           echo "C:\\Strawberry\\perl\\bin" >> "$GITHUB_PATH"
+          echo "C:\\Program Files\\NASM" >> "$GITHUB_PATH"
 
       - name: Build desktop libmpv (Vulkan + AV3A source)
         shell: bash
@@ -211,8 +214,9 @@ jobs:
       - name: Install desktop MPV source deps (Win7)
         shell: bash
         run: |
-          choco install nasm strawberryperl -y --no-progress
-          chmod +x scripts/ci-ensure-windows-vulkan-sdk.sh
+          choco install strawberryperl -y --no-progress || true
+          chmod +x scripts/ci-ensure-windows-nasm.sh scripts/ci-ensure-windows-vulkan-sdk.sh
+          ./scripts/ci-ensure-windows-nasm.sh
           ./scripts/ci-ensure-windows-vulkan-sdk.sh
           python -m pip install meson ninja
           export PATH="/c/Strawberry/perl/bin:/c/mingw-msvcrt/mingw64/bin:/c/Program Files/NASM:/c/ProgramData/chocolatey/bin:$PATH"
@@ -222,6 +226,7 @@ jobs:
           meson --version
           perl -MLocale::Maketext -e "print qq(ok Locale::Maketext\n)"
           echo "C:\\Strawberry\\perl\\bin" >> "$GITHUB_PATH"
+          echo "C:\\Program Files\\NASM" >> "$GITHUB_PATH"
 
       - name: Adapt SDK + package Win7
         shell: bash
