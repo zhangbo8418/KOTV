@@ -95,6 +95,8 @@ class NativeMpvPlayback extends KotvPlayback {
   bool _createdAsLive = false;
   /// 引擎 media-live：[isLive] 与守卫用；不挡 queueNext，也不参与 create 比较。
   bool _engineLive = false;
+  /// 原生 `discMenu` 事件：碟片正显示交互菜单。
+  bool _discMenuActive = false;
   String _url = '';
   Map<String, String> _headers = const {};
   String? _lastError;
@@ -551,6 +553,12 @@ class NativeMpvPlayback extends KotvPlayback {
         if (!_endedCtrl.isClosed) _endedCtrl.add(true);
         notifyListeners();
         break;
+      case 'discMenu':
+        final active = m['active'] == true;
+        if (active == _discMenuActive) break;
+        _discMenuActive = active;
+        notifyListeners();
+        break;
       case 'live':
         if (!kotvAcceptEngineLive(already: _engineLive, reported: m['live'] == true)) {
           break;
@@ -582,6 +590,7 @@ class NativeMpvPlayback extends KotvPlayback {
     _live = live;
     _createdAsLive = live;
     _engineLive = false;
+    _discMenuActive = false;
     _queued = null;
     _headers = kotvNormalizePlayHeaders(headers, url: url);
     _completed = false;
@@ -1148,29 +1157,18 @@ class NativeMpvPlayback extends KotvPlayback {
   }
 
   @override
-  /// 桌面原生桥尚未接碟片导航（Android 原生另有实现）。
-  bool get supportsDiscNav => kotvIsAndroid();
+  bool get supportsDiscNav => true;
 
   @override
-  Future<List<KotvTrack>> discTitles() async {
-    try {
-      // MediaEdition.index 为 0-based。
-      final n = await _ch.invokeMethod<int>('discTitleCount') ?? 0;
-      if (n <= 0) return const [];
-      return [for (var i = 0; i < n; i++) KotvTrack(id: '$i', label: '标题 ${i + 1}')];
-    } catch (_) {
-      return const [];
-    }
-  }
+  bool get discMenuActive => _discMenuActive;
 
   @override
-  Future<List<KotvTrack>> discChapters() async {
+  Future<KotvDiscInfo> discInfo() async {
     try {
-      final n = await _ch.invokeMethod<int>('discChapterCount') ?? 0;
-      if (n <= 0) return const [];
-      return [for (var i = 0; i < n; i++) KotvTrack(id: '$i', label: '章节 ${i + 1}')];
+      final m = await _ch.invokeMethod<Map<dynamic, dynamic>>('discInfo');
+      return m == null ? KotvDiscInfo.empty : KotvDiscInfo.fromMap(m);
     } catch (_) {
-      return const [];
+      return KotvDiscInfo.empty;
     }
   }
 
@@ -1189,10 +1187,12 @@ class NativeMpvPlayback extends KotvPlayback {
   }
 
   @override
-  Future<void> openDiscMenu() async {
-    // 原生 MPVLib：discnav menu 由插件 openDiscMenu 映射。
+  Future<void> discNav(String action, {double? x, double? y}) async {
     try {
-      await _ch.invokeMethod('openDiscMenu');
+      await _ch.invokeMethod('discNav', {
+        'action': action,
+        if (x != null && y != null) ...{'x': x.clamp(0.0, 1.0), 'y': y.clamp(0.0, 1.0)},
+      });
     } catch (_) {}
   }
 

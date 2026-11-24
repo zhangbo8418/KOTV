@@ -19,6 +19,8 @@ final class KotvMpvPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
   private var conf = ""
   private var diskCache = false
   private var livePlayback = false
+  /// 单集循环时不排下一集。
+  private var repeatOne = false
   private weak var hostWindow: KotvMpvWindow?
   /// Dart 洞（顶左原点）。core 重建间隙 updateFrame 可能落到 nil，须缓存到 ensureCore 后再应用。
   private var pendingHoleFlutter: CGRect?
@@ -76,6 +78,7 @@ final class KotvMpvPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
     if let c = args["conf"] as? String { conf = c }
     if let v = args["diskCache"] as? Bool { diskCache = v }
     if let v = args["live"] as? Bool { livePlayback = v }
+    if let v = args["repeatOne"] as? Bool { repeatOne = v }
   }
 
   private func applySessionOpts(_ core: KotvMpvCore) {
@@ -181,7 +184,10 @@ final class KotvMpvPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
               for (k, v) in props { c.setProperty(k, "\(v)") }
             }
             if let headers, !headers.isEmpty {
-              let fields = headers.map { "\($0.key): \($0.value)" }.joined(separator: "\r\n")
+              // mpv 的字符串列表以逗号分隔，值里的逗号（如 UA 的 "KHTML, like Gecko"）要转义。
+              let fields = headers
+                .map { "\($0.key): \($0.value)".replacingOccurrences(of: ",", with: "\\,") }
+                .joined(separator: ",")
               c.setProperty("http-header-fields", fields)
             }
             c.open(url: url, startAtMs: startAt)
@@ -240,6 +246,7 @@ final class KotvMpvPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
 
     case "setRepeatOne":
       let on = (args?["on"] as? Bool) ?? false
+      repeatOne = on
       guard let c = core else { result(nil); return }
       c.asyncMpv { c.setProperty("loop-file", on ? "inf" : "no"); DispatchQueue.main.async { result(nil) } }
 
@@ -270,10 +277,15 @@ final class KotvMpvPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
       case "setSubtitleTrack": prop = "sid"
       default: prop = "secondary-sid"
       }
-      let id = args?["id"] as? String
+      // 与 Dart 同口径：字幕空 id = 关闭，音视频空 id = 自动。
+      var id = (args?["id"] as? String) ?? ""
+      let key = id.lowercased()
+      let sub = prop == "sid" || prop == "secondary-sid"
+      if key == "off" || key == "none" || (key.isEmpty && sub) { id = "no" }
+      if key.isEmpty && !sub { id = "auto" }
       guard let c = core else { result(nil); return }
       c.asyncMpv {
-        if let id { c.command(["set", prop, id]) }
+        c.command(["set", prop, id])
         DispatchQueue.main.async { result(nil) }
       }
 
@@ -283,10 +295,14 @@ final class KotvMpvPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
       c.asyncMpv { c.setProperty("sub-delay", String(ms / 1000.0)); DispatchQueue.main.async { result(nil) } }
 
     case "addSubtitle":
-      let url = args?["url"] as? String
-      guard let c = core else { result(nil); return }
+      let path = (args?["path"] as? String) ?? ""
+      let title = (args?["title"] as? String) ?? ""
+      let select = (args?["select"] as? Bool) ?? true
+      guard let c = core, !path.isEmpty else { result(nil); return }
       c.asyncMpv {
-        if let url { c.command(["sub-add", url]) }
+        var cmd = ["sub-add", path, select ? "select" : "auto"]
+        if !title.isEmpty { cmd.append(title) }
+        c.command(cmd)
         DispatchQueue.main.async { result(nil) }
       }
 
@@ -322,13 +338,55 @@ final class KotvMpvPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
       }
 
     case "getAudioTracks", "getVideoTracks", "getSubtitleTracks":
-      result("[]")
-    case "queueNext", "clearNext", "skipToNext":
-      result(false)
-    case "discTitleCount", "discChapterCount":
-      result(0)
-    case "setSubtitleStyle", "setRenderMode", "setSurfaceLayerEnabled",
-         "setDiscTitle", "setDiscChapter", "openDiscMenu", "retryVideo":
+      let type = call.method == "getAudioTracks" ? "audio" : call.method == "getVideoTracks" ? "video" : "sub"
+      guard let c = core else { result("[]"); return }
+      c.asyncMpv {
+        let json = c.tracksJSON(type: type)
+        DispatchQueue.main.async { result(json) }
+      }
+
+    case "queueNext":
+      let id = (args?["id"] as? String) ?? ""
+      let url = (args?["url"] as? String) ?? ""
+      let startAt = (args?["startAtMs"] as? NSNumber)?.int64Value ?? 0
+      let subs = (args?["subs"] as? [[String: Any]]) ?? []
+      guard let c = core, !livePlayback, !repeatOne, !id.isEmpty, !url.isEmpty else {
+        result(false)
+        return
+      }
+      c.asyncMpv {
+        c.queueNext(id: id, url: url, startAtMs: startAt, subs: subs)
+        DispatchQueue.main.async { result(true) }
+      }
+    case "clearNext":
+      guard let c = core else { result(nil); return }
+      c.asyncMpv { c.clearNext(); DispatchQueue.main.async { result(nil) } }
+    case "skipToNext":
+      guard let c = core else { result(false); return }
+      c.asyncMpv {
+        let ok = c.skipToNext()
+        DispatchQueue.main.async { result(ok) }
+      }
+
+    case "discInfo":
+      guard let c = core else { result([:]); return }
+      c.asyncMpv {
+        let info = c.discInfo()
+        DispatchQueue.main.async { result(info) }
+      }
+    case "setDiscTitle", "setDiscChapter":
+      let index = (args?["index"] as? NSNumber)?.intValue ?? -1
+      guard let c = core, index >= 0 else { result(nil); return }
+      let prop = call.method == "setDiscTitle" ? "edition" : "chapter"
+      c.asyncMpv { c.setProperty(prop, String(index)); DispatchQueue.main.async { result(nil) } }
+    case "discNav":
+      let action = (args?["action"] as? String) ?? ""
+      let x = (args?["x"] as? NSNumber)?.doubleValue
+      let y = (args?["y"] as? NSNumber)?.doubleValue
+      guard let c = core, !action.isEmpty else { result(nil); return }
+      c.asyncMpv { c.discNav(action, x: x, y: y); DispatchQueue.main.async { result(nil) } }
+
+    case "setSubtitleStyle", "setRenderMode", "setSurfaceLayerEnabled", "retryVideo":
       result(nil)
     default:
       result(FlutterMethodNotImplemented)

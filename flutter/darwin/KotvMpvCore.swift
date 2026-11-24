@@ -67,6 +67,14 @@ final class KotvMpvCore {
   private var lastHoleFrame: CGRect?
   /// loadfile 勿带 start=（VT+avfoundation 会卡住不出 FILE_LOADED）；FILE_LOADED 后再 seek，且不 pause。
   private var pendingStartMs: Int64 = 0
+  /// 排好的下一集与切入后要挂的外挂字幕；均只在 mpvQueue 上读写。
+  private var queuedId = ""
+  private var queuedStartMs: Int64 = 0
+  private var queuedSubs: [[String: Any]] = []
+  private var pendingSubs: [[String: Any]] = []
+  /// 每个文件各报一次：keep-open=yes 时片尾只有 eof-reached，没有 END_FILE。
+  private var completedSent = false
+  private var skipSent = false
   #if os(macOS)
   private var playbackActivity: NSObjectProtocol?
   #endif
@@ -241,6 +249,8 @@ final class KotvMpvCore {
 
   func open(url: String, startAtMs: Int64 = 0) {
     pendingStartMs = max(0, startAtMs)
+    // loadfile replace 清掉整个播放列表，排好的下一集随之作废。
+    clearQueued()
     // loadfile 前显示层；遮罩由 Dart 洞负责。
     DispatchQueue.main.async { [weak self] in self?.setVisible(true) }
     // replace 即可换片；勿 stop（会打断无缝换集），勿 pause。
@@ -266,6 +276,7 @@ final class KotvMpvCore {
   }
 
   func stop() {
+    clearQueued()
     command(["stop"])
     pausedState = true
     DispatchQueue.main.async { [weak self] in self?.setVisible(false) }
@@ -302,6 +313,108 @@ final class KotvMpvCore {
     DispatchQueue.main.async { [weak self] in
       self?.displayLayer?.videoGravity = gravity
     }
+  }
+
+  /// 无缝换集：下一集追加到播放列表下标 1，keep-open=no 让片尾自然前进。
+  /// 续播点不写进 loadfile（见 [pendingStartMs]），切入后在 FILE_LOADED 再 seek。
+  func queueNext(id: String, url: String, startAtMs: Int64, subs: [[String: Any]]) {
+    queuedId = id
+    queuedStartMs = max(0, startAtMs)
+    queuedSubs = subs
+    // 只留正在播的一项，新排的总在下标 1。
+    command(["playlist-clear"])
+    command(["loadfile", url, "append"])
+    setProperty("keep-open", "no")
+  }
+
+  /// 撤掉排队的下一集；原先有排队才返回 true。
+  @discardableResult
+  func clearNext() -> Bool {
+    guard clearQueued() else { return false }
+    command(["playlist-clear"])
+    return true
+  }
+
+  func skipToNext() -> Bool {
+    guard !queuedId.isEmpty else { return false }
+    command(["playlist-next"])
+    command(["set", "pause", "no"])
+    return true
+  }
+
+  @discardableResult
+  private func clearQueued() -> Bool {
+    guard !queuedId.isEmpty else { return false }
+    queuedId = ""
+    queuedSubs = []
+    queuedStartMs = 0
+    setProperty("keep-open", "yes")
+    return true
+  }
+
+  /// 轨表 JSON（`audio` / `video` / `sub`），字段同 Windows / Android 插件。
+  func tracksJSON(type: String) -> String {
+    guard let handle = mpv else { return "[]" }
+    var count: Int64 = 0
+    mpv_get_property(handle, "track-list/count", MPV_FORMAT_INT64, &count)
+    var out: [[String: Any]] = []
+    for i in 0..<max(0, count) {
+      let p = "track-list/\(i)/"
+      guard string(p + "type") == type else { continue }
+      var item: [String: Any] = [
+        "id": string(p + "id").isEmpty ? "auto" : string(p + "id"),
+        "title": string(p + "title"),
+        "lang": string(p + "lang"),
+        "codec": string(p + "codec"),
+      ]
+      var w: Int64 = 0, h: Int64 = 0
+      mpv_get_property(handle, p + "demux-w", MPV_FORMAT_INT64, &w)
+      mpv_get_property(handle, p + "demux-h", MPV_FORMAT_INT64, &h)
+      if w > 0 && h > 0 {
+        item["width"] = Int(w)
+        item["height"] = Int(h)
+      }
+      out.append(item)
+    }
+    guard let data = try? JSONSerialization.data(withJSONObject: out),
+          let json = String(data: data, encoding: .utf8) else { return "[]" }
+    return json
+  }
+
+  /// 碟片导航：标题即 edition（0 起，带菜单的碟另有一项菜单 edition）、章节即 chapter。
+  func discInfo() -> [String: Any] {
+    guard let handle = mpv else { return [:] }
+    var editions: Int64 = 0, edition: Int64 = -1
+    var chapters: Int64 = 0, chapter: Int64 = -1
+    var menuSupported: Int32 = 0
+    mpv_get_property(handle, "edition-list/count", MPV_FORMAT_INT64, &editions)
+    mpv_get_property(handle, "current-edition", MPV_FORMAT_INT64, &edition)
+    mpv_get_property(handle, "chapter-list/count", MPV_FORMAT_INT64, &chapters)
+    mpv_get_property(handle, "chapter", MPV_FORMAT_INT64, &chapter)
+    mpv_get_property(handle, "disc-menu-supported", MPV_FORMAT_FLAG, &menuSupported)
+    // 只有一项（或 mpv 补的空 edition）没得选。
+    let titles = editions >= 2 ? (0..<editions).map { string("edition-list/\($0)/title") } : []
+    return [
+      "titles": titles,
+      "title": Int(edition),
+      "chapters": (0..<max(0, chapters)).map { string("chapter-list/\($0)/title") },
+      "chapter": Int(chapter),
+      "menuSupported": menuSupported != 0,
+    ]
+  }
+
+  func discNav(_ action: String, x: Double?, y: Double?) {
+    if let x, let y {
+      command(["discnav", action, String(x), String(y)])
+    } else {
+      command(["discnav", action])
+    }
+  }
+
+  private func string(_ name: String) -> String {
+    guard let handle = mpv, let raw = mpv_get_property_string(handle, name) else { return "" }
+    defer { mpv_free(raw) }
+    return String(cString: raw)
   }
 
   func videoInfo() -> [String: Any] {
@@ -419,6 +532,8 @@ final class KotvMpvCore {
     mpv_set_option_string(handle, "hwdec-software-fallback", "yes")
     mpv_set_option_string(handle, "target-colorspace-hint", "auto")
     mpv_set_option_string(handle, "keep-open", "yes")
+    // 本集将完时提前打开排队的下一集（无缝换集）。
+    mpv_set_option_string(handle, "prefetch-playlist", "yes")
     mpv_set_option_string(handle, "idle", "yes")
     mpv_set_option_string(handle, "osc", "no")
     mpv_set_option_string(handle, "input-default-bindings", "no")
@@ -451,6 +566,7 @@ final class KotvMpvCore {
     mpv_observe_property(handle, 0, "video-params/sig-peak", MPV_FORMAT_DOUBLE)
     mpv_observe_property(handle, 0, "hwdec-current", MPV_FORMAT_STRING)
     mpv_observe_property(handle, 0, "media-live", MPV_FORMAT_FLAG)
+    mpv_observe_property(handle, 0, "disc-menu-active", MPV_FORMAT_FLAG)
 
     let box = Unmanaged.passRetained(self)
     mpv_set_wakeup_callback(handle, { ctx in
@@ -487,7 +603,15 @@ final class KotvMpvCore {
       guard let prop = event.data?.assumingMemoryBound(to: mpv_event_property.self).pointee,
             let namePtr = prop.name else { return }
       switch String(cString: namePtr) {
-      case "pause", "paused-for-cache", "eof-reached":
+      case "eof-reached":
+        emitPosition()
+        if flag(prop) {
+          onEof()
+        } else {
+          // 片尾后拖回去再播完要能再报一次。
+          completedSent = false
+        }
+      case "pause", "paused-for-cache":
         emitPosition()
       case "dwidth", "dheight", "video-params/w", "video-params/h":
         emitSize(ready: true)
@@ -501,14 +625,43 @@ final class KotvMpvCore {
         emitVideoInfo()
       case "media-live":
         // 没有该属性的 libmpv（iOS MPVKit）只报 NONE，不会走到这里。
-        if prop.format == MPV_FORMAT_FLAG,
-           prop.data?.assumingMemoryBound(to: Int32.self).pointee != 0 {
+        if flag(prop) {
           emit(["event": "live", "live": true])
         }
+      case "disc-menu-active":
+        // 非碟片时属性不可用（NONE），按无菜单报。
+        emit(["event": "discMenu", "active": flag(prop)])
       default:
         break
       }
+    case MPV_EVENT_START_FILE:
+      completedSent = false
+      skipSent = false
+      pendingSubs = []
+      var pos: Int64 = -1
+      if let handle = mpv { mpv_get_property(handle, "playlist-pos", MPV_FORMAT_INT64, &pos) }
+      if pos == 1 && !queuedId.isEmpty {
+        let id = queuedId
+        pendingSubs = queuedSubs
+        pendingStartMs = queuedStartMs
+        queuedId = ""
+        queuedSubs = []
+        queuedStartMs = 0
+        setProperty("keep-open", "yes")
+        emit(["event": "transition", "id": id])
+      }
     case MPV_EVENT_FILE_LOADED, MPV_EVENT_PLAYBACK_RESTART:
+      if event.event_id == MPV_EVENT_FILE_LOADED {
+        for sub in pendingSubs {
+          guard let path = sub["path"] as? String, !path.isEmpty else { continue }
+          let select = (sub["select"] as? Bool) ?? true
+          let title = (sub["title"] as? String) ?? ""
+          var args = ["sub-add", path, select ? "select" : "auto"]
+          if !title.isEmpty { args.append(title) }
+          command(args)
+        }
+        pendingSubs = []
+      }
       emitSize(ready: true)
       emitPosition()
       emitVideoInfo()
@@ -530,8 +683,9 @@ final class KotvMpvCore {
       }
     case MPV_EVENT_END_FILE:
       if let data = event.data?.assumingMemoryBound(to: mpv_event_end_file.self).pointee {
+        // 有排队时 keep-open=no，mpv 自己前进到下一项，这里不报 completed。
         if data.reason == MPV_END_FILE_REASON_EOF {
-          emit(["event": "completed"])
+          if queuedId.isEmpty { emitCompleted() }
         } else if data.reason == MPV_END_FILE_REASON_ERROR {
           let detail = String(cString: mpv_error_string(data.error))
           emit(["event": "error", "message": "MPV \(detail) (\(data.error))"])
@@ -545,6 +699,29 @@ final class KotvMpvCore {
 
   private func emit(_ map: [String: Any]) {
     DispatchQueue.main.async { [weak self] in self?.onEvent?(map) }
+  }
+
+  private func flag(_ prop: mpv_event_property) -> Bool {
+    prop.format == MPV_FORMAT_FLAG && prop.data?.assumingMemoryBound(to: Int32.self).pointee != 0
+  }
+
+  /// 片尾：有排队的下一集就前进过去，否则报 completed。
+  private func onEof() {
+    guard queuedId.isEmpty else {
+      if !skipSent {
+        skipSent = true
+        command(["playlist-next"])
+        command(["set", "pause", "no"])
+      }
+      return
+    }
+    emitCompleted()
+  }
+
+  private func emitCompleted() {
+    guard !completedSent else { return }
+    completedSent = true
+    emit(["event": "completed"])
   }
 
   private func emitPosition() {

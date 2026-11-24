@@ -905,57 +905,57 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
           }
         }
       }
-      "discTitleCount" -> {
+      // 碟片导航：标题即 edition（0 起，带菜单的碟另有一项菜单 edition）、章节即 chapter。
+      "discInfo" -> {
         main.post {
           try {
-            val n = if (created.get()) (MPVLib.getPropertyInt("disc-titles") ?: 0) else 0
-            result.success(n)
-          } catch (e: Throwable) {
-            result.error("DISC_FAILED", e.message, null)
-          }
-        }
-      }
-      "discChapterCount" -> {
-        main.post {
-          try {
-            val n = if (created.get()) (MPVLib.getPropertyInt("chapters") ?: 0) else 0
-            result.success(n)
-          } catch (e: Throwable) {
-            result.error("DISC_FAILED", e.message, null)
-          }
-        }
-      }
-      "setDiscTitle" -> {
-        val index = call.argument<Number>("index")?.toInt() ?: 0
-        main.post {
-          try {
-            if (created.get() && index >= 1) {
-              MPVLib.setPropertyInt("disc-title", index)
+            if (!created.get()) {
+              result.success(emptyMap<String, Any>())
+              return@post
             }
-            result.success(null)
+            val editions = MPVLib.getPropertyInt("edition-list/count") ?: 0
+            val chapters = MPVLib.getPropertyInt("chapter-list/count") ?: 0
+            // 只有一项（或 mpv 补的空 edition）没得选。
+            val titles = if (editions >= 2) {
+              (0 until editions).map { MPVLib.getPropertyString("edition-list/$it/title") ?: "" }
+            } else {
+              emptyList()
+            }
+            result.success(
+              mapOf(
+                "titles" to titles,
+                "title" to (MPVLib.getPropertyInt("current-edition") ?: -1),
+                "chapters" to (0 until chapters).map { MPVLib.getPropertyString("chapter-list/$it/title") ?: "" },
+                "chapter" to (MPVLib.getPropertyInt("chapter") ?: -1),
+                "menuSupported" to (MPVLib.getPropertyBoolean("disc-menu-supported") ?: false),
+              ),
+            )
           } catch (e: Throwable) {
             result.error("DISC_FAILED", e.message, null)
           }
         }
       }
-      "setDiscChapter" -> {
+      "setDiscTitle", "setDiscChapter" -> {
         val index = call.argument<Number>("index")?.toInt() ?: -1
+        val prop = if (call.method == "setDiscTitle") "edition" else "chapter"
         main.post {
           try {
-            if (created.get() && index >= 0) {
-              MPVLib.setPropertyInt("chapter", index)
-            }
+            if (created.get() && index >= 0) MPVLib.setPropertyInt(prop, index)
             result.success(null)
           } catch (e: Throwable) {
             result.error("DISC_FAILED", e.message, null)
           }
         }
       }
-      "openDiscMenu" -> {
+      "discNav" -> {
+        val action = call.argument<String>("action").orEmpty()
+        val x = call.argument<Number>("x")?.toDouble()
+        val y = call.argument<Number>("y")?.toDouble()
         main.post {
           try {
-            if (created.get()) {
-              MPVLib.command(arrayOf("discnav", "menu"))
+            if (created.get() && action.isNotEmpty()) {
+              val args = if (x != null && y != null) arrayOf("discnav", action, "$x", "$y") else arrayOf("discnav", action)
+              MPVLib.command(args)
             }
             result.success(null)
           } catch (e: Throwable) {
@@ -1751,6 +1751,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
     MPVLib.observeProperty("duration/full", MPVLib.MpvFormat.MPV_FORMAT_DOUBLE)
     // mpv 语义为 flag。
     MPVLib.observeProperty("media-live", MPVLib.MpvFormat.MPV_FORMAT_FLAG)
+    MPVLib.observeProperty("disc-menu-active", MPVLib.MpvFormat.MPV_FORMAT_FLAG)
     MPVLib.observeProperty("pause", MPVLib.MpvFormat.MPV_FORMAT_FLAG)
     MPVLib.observeProperty("paused-for-cache", MPVLib.MpvFormat.MPV_FORMAT_FLAG)
     MPVLib.observeProperty("seeking", MPVLib.MpvFormat.MPV_FORMAT_FLAG)
@@ -2172,9 +2173,13 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   }
 
   override fun eventProperty(property: String) {
-    if (property == "current-tracks/video/dolby-vision-profile") {
-      dvProfile = 0L
-      main.post { syncDolbyVisionRenderer() }
+    when (property) {
+      "current-tracks/video/dolby-vision-profile" -> {
+        dvProfile = 0L
+        main.post { syncDolbyVisionRenderer() }
+      }
+      // 非碟片时属性不可用，按无菜单报。
+      "disc-menu-active" -> emit(mapOf("event" to "discMenu", "active" to false))
     }
   }
 
@@ -2218,6 +2223,7 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
         }
       }
       "paused-for-cache", "seeking" -> buffering = value
+      "disc-menu-active" -> emit(mapOf("event" to "discMenu", "active" to value))
       "media-live" -> if (value) {
         val gen = activeLoadGen
         main.post {

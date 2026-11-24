@@ -1619,62 +1619,61 @@ class VodFullscreenChromeState extends State<VodFullscreenChrome> {
     final currentSub = widget.player.currentSubtitleId;
     final rows = <Widget>[];
     if (disc) {
-      rows.add(
-        _chromeSelectRow(
-          icon: Icons.menu_open,
-          label: '碟片菜单',
-          selected: false,
-          onTap: () async {
-            await widget.player.openDiscMenu();
-            if (context.mounted) Navigator.pop(context);
-          },
-        ),
-      );
-      final titles = await widget.player.discTitles();
-      if (titles.isNotEmpty) {
+      final info = await widget.player.discInfo();
+      if (info.menuSupported) {
+        rows.add(
+          _chromeSelectRow(
+            icon: Icons.menu_open,
+            label: '碟片菜单',
+            selected: false,
+            onTap: () async {
+              await widget.player.discNav('menu');
+              if (context.mounted) Navigator.pop(context);
+            },
+          ),
+        );
+      }
+      if (info.titles.isNotEmpty) {
         rows.add(
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
             child: Text('标题', style: TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 13)),
           ),
         );
-        for (final t in titles) {
+        for (var i = 0; i < info.titles.length; i++) {
           rows.add(
             _chromeSelectRow(
-              label: t.label,
-              selected: false,
+              label: kotvDiscEntryLabel('标题', i, info.titles[i]),
+              selected: i == info.title,
               onTap: () async {
-                final idx = int.tryParse(t.id) ?? 0;
-                await widget.player.setDiscTitle(idx);
+                await widget.player.setDiscTitle(i);
                 if (context.mounted) Navigator.pop(context);
               },
             ),
           );
         }
       }
-      final chapters = await widget.player.discChapters();
-      if (chapters.isNotEmpty) {
+      if (info.chapters.isNotEmpty) {
         rows.add(
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
             child: Text('章节', style: TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 13)),
           ),
         );
-        for (final t in chapters) {
+        for (var i = 0; i < info.chapters.length; i++) {
           rows.add(
             _chromeSelectRow(
-              label: t.label,
-              selected: false,
+              label: kotvDiscEntryLabel('章节', i, info.chapters[i]),
+              selected: i == info.chapter,
               onTap: () async {
-                final idx = int.tryParse(t.id) ?? 0;
-                await widget.player.setDiscChapter(idx);
+                await widget.player.setDiscChapter(i);
                 if (context.mounted) Navigator.pop(context);
               },
             ),
           );
         }
       }
-      if (titles.isEmpty && chapters.isEmpty) {
+      if (info.titles.isEmpty && info.chapters.isEmpty) {
         rows.add(
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),

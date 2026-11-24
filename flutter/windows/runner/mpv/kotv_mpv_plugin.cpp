@@ -450,6 +450,32 @@ void RefreshTrackCache(MpvCore* core, mpv_handle* m) {
   core->tracks_sub = s;
 }
 
+// 碟片导航：标题即 edition（0 起，带菜单的碟另有一项菜单 edition）、章节即 chapter。
+EncodableMap DiscInfo(mpv_handle* m) {
+  int64_t editions = 0, edition = -1, chapters = 0, chapter = -1;
+  int menu_supported = 0;
+  mpv_get_property(m, "edition-list/count", MPV_FORMAT_INT64, &editions);
+  mpv_get_property(m, "current-edition", MPV_FORMAT_INT64, &edition);
+  mpv_get_property(m, "chapter-list/count", MPV_FORMAT_INT64, &chapters);
+  mpv_get_property(m, "chapter", MPV_FORMAT_INT64, &chapter);
+  mpv_get_property(m, "disc-menu-supported", MPV_FORMAT_FLAG, &menu_supported);
+  EncodableList titles, chapter_titles;
+  // 只有一项（或 mpv 补的空 edition）没得选。
+  for (int64_t i = 0; editions >= 2 && i < editions; ++i) {
+    titles.emplace_back(GetStr(m, ("edition-list/" + std::to_string(i) + "/title").c_str()));
+  }
+  for (int64_t i = 0; i < chapters; ++i) {
+    chapter_titles.emplace_back(GetStr(m, ("chapter-list/" + std::to_string(i) + "/title").c_str()));
+  }
+  return {
+      {EncodableValue("titles"), EncodableValue(titles)},
+      {EncodableValue("title"), EncodableValue(edition)},
+      {EncodableValue("chapters"), EncodableValue(chapter_titles)},
+      {EncodableValue("chapter"), EncodableValue(chapter)},
+      {EncodableValue("menuSupported"), EncodableValue(menu_supported != 0)},
+  };
+}
+
 void RefreshInfoCache(MpvCore* core, mpv_handle* m) {
   EncodableMap info;
   const std::string hw = GetStr(m, "hwdec");
@@ -524,6 +550,7 @@ void EventLoop(std::shared_ptr<MpvCore> core, std::shared_ptr<Bridge> bridge) {
   // 每个文件各报一次：media-live 常在开播后才定下来；keep-open 下片尾只有 eof-reached，没有 END_FILE。
   bool live_sent = false;
   bool completed_sent = false;
+  bool disc_menu_sent = false;
   std::string hwdec_sent;
   std::string last_log;
   int log_repeat = 0;
@@ -569,6 +596,14 @@ void EventLoop(std::shared_ptr<MpvCore> core, std::shared_ptr<Bridge> bridge) {
           live_sent = true;
           post_event({{EncodableValue("event"), EncodableValue("live")},
                       {EncodableValue("live"), EncodableValue(true)}});
+        }
+        // 非碟片时属性不可用，按无菜单算。
+        flag = 0;
+        mpv_get_property(m, "disc-menu-active", MPV_FORMAT_FLAG, &flag);
+        if ((flag != 0) != disc_menu_sent) {
+          disc_menu_sent = flag != 0;
+          post_event({{EncodableValue("event"), EncodableValue("discMenu")},
+                      {EncodableValue("active"), EncodableValue(disc_menu_sent)}});
         }
         flag = 0;
         if (mpv_get_property(m, "eof-reached", MPV_FORMAT_FLAG, &flag) >= 0) {
@@ -1134,7 +1169,10 @@ class KotvMpvPlugin : public flutter::Plugin {
       const auto* v = std::get_if<std::string>(&kv.second);
       if (!k || !v) continue;
       if (!fields.empty()) fields += ",";
-      fields += *k + ": " + *v;
+      // mpv 的字符串列表以逗号分隔，值里的逗号（如 UA 的 "KHTML, like Gecko"）要转义。
+      std::string field = *k + ": " + *v;
+      for (size_t p = 0; (p = field.find(',', p)) != std::string::npos; p += 2) field.insert(p, "\\");
+      fields += field;
     }
     return fields;
   }
@@ -1484,9 +1522,33 @@ class KotvMpvPlugin : public flutter::Plugin {
       result->Success(EncodableValue(json));
       return;
     }
-    if (method == "setRenderMode" || method == "setSurfaceLayerEnabled" ||
-        method == "setDiscTitle" || method == "setDiscChapter" || method == "openDiscMenu" ||
-        method == "retryVideo") {
+    if (method == "setRenderMode" || method == "setSurfaceLayerEnabled" || method == "retryVideo") {
+      result->Success();
+      return;
+    }
+    if (method == "discInfo") {
+      mpv_handle* m = Mpv();
+      result->Success(m ? EncodableValue(DiscInfo(m)) : EncodableValue(EncodableMap{}));
+      return;
+    }
+    if (method == "setDiscTitle" || method == "setDiscChapter") {
+      const int64_t index = ArgInt64(args, "index", -1);
+      if (Mpv() && index >= 0) {
+        SetProp(Mpv(), method == "setDiscTitle" ? "edition" : "chapter", std::to_string(index));
+      }
+      result->Success();
+      return;
+    }
+    if (method == "discNav") {
+      const std::string action = ArgString(args, "action");
+      if (Mpv() && !action.empty()) {
+        if (HasArg(args, "x") && HasArg(args, "y")) {
+          CommandAsync(Mpv(), {"discnav", action, std::to_string(ArgDouble(args, "x")),
+                               std::to_string(ArgDouble(args, "y"))});
+        } else {
+          CommandAsync(Mpv(), {"discnav", action});
+        }
+      }
       result->Success();
       return;
     }
@@ -1547,10 +1609,6 @@ class KotvMpvPlugin : public flutter::Plugin {
         CommandAsync(Mpv(), {"set", "pause", "no"});
       }
       result->Success(EncodableValue(queued && Mpv() != nullptr));
-      return;
-    }
-    if (method == "discTitleCount" || method == "discChapterCount") {
-      result->Success(EncodableValue(0));
       return;
     }
     result->NotImplemented();

@@ -233,6 +233,8 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   /// 遥控上键已进入临时倍速：抬键只恢复倍速，不走短按亮栏。
   bool _remoteHoldSpeed = false;
   DateTime? _lastTapAt;
+  /// 碟片菜单里上次按返回（送 prev）的时刻。
+  DateTime? _discBackAt;
   bool? _playingForChrome;
   final GlobalKey<VodFullscreenChromeState> _chromeKey = GlobalKey<VodFullscreenChromeState>();
   final FocusNode _winKeyFallback = FocusNode(debugLabel: 'win7ChromeKey');
@@ -767,22 +769,21 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     String title;
     if (kind == 'disc') {
       title = '碟片导航';
-      rows.add(KotvWinChrome.row(id: 'menu', label: '碟片菜单', icon: 'menu_open'));
-      final titles = await pb.discTitles();
-      if (titles.isNotEmpty) {
+      final info = await pb.discInfo();
+      if (info.menuSupported) rows.add(KotvWinChrome.row(id: 'menu', label: '碟片菜单', icon: 'menu_open'));
+      if (info.titles.isNotEmpty) {
         rows.add(KotvWinChrome.row(label: '标题', kind: 'header'));
-        for (final t in titles) {
-          rows.add(KotvWinChrome.row(id: 'title:${t.id}', label: t.label));
+        for (var i = 0; i < info.titles.length; i++) {
+          rows.add(KotvWinChrome.row(id: 'title:$i', label: kotvDiscEntryLabel('标题', i, info.titles[i]), selected: i == info.title));
         }
       }
-      final chapters = await pb.discChapters();
-      if (chapters.isNotEmpty) {
+      if (info.chapters.isNotEmpty) {
         rows.add(KotvWinChrome.row(label: '章节', kind: 'header'));
-        for (final t in chapters) {
-          rows.add(KotvWinChrome.row(id: 'chapter:${t.id}', label: t.label));
+        for (var i = 0; i < info.chapters.length; i++) {
+          rows.add(KotvWinChrome.row(id: 'chapter:$i', label: kotvDiscEntryLabel('章节', i, info.chapters[i]), selected: i == info.chapter));
         }
       }
-      if (titles.isEmpty && chapters.isEmpty) rows.add(KotvWinChrome.row(label: '暂无标题/章节信息', kind: 'info'));
+      if (info.titles.isEmpty && info.chapters.isEmpty) rows.add(KotvWinChrome.row(label: '暂无标题/章节信息', kind: 'info'));
     } else if (kind == 'video') {
       title = '视频轨';
       final cur = pb.currentVideoId;
@@ -832,7 +833,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     switch (kind) {
       case 'disc':
         if (id == 'menu') {
-          await pb.openDiscMenu();
+          await pb.discNav('menu');
         } else if (id.startsWith('title:')) {
           await pb.setDiscTitle(int.tryParse(id.substring(6)) ?? 0);
         } else if (id.startsWith('chapter:')) {
@@ -1865,7 +1866,14 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       case KotvFsMode.none:
         if (!cancelled) {
           final dist = downAt == null || upPos == null ? 0.0 : (upPos - downAt).distance;
-          if (dist < kTouchSlop) _handleVideoTap();
+          if (dist < kTouchSlop) {
+            final at = upPos == null || !_discMenuOwnsInput ? null : _videoFraction(upPos);
+            if (at != null) {
+              unawaited(widget.playback.discNav('mouse-click', x: at.dx, y: at.dy));
+            } else {
+              _handleVideoTap();
+            }
+          }
         }
         break;
       case KotvFsMode.channel:
@@ -1995,11 +2003,64 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     if (mounted) setState(() {});
   }
 
+  /// 碟片菜单在屏且底栏/选集都没开：方向键、确认、返回与点按交给碟片。
+  bool get _discMenuOwnsInput =>
+      widget.playback.discMenuActive && !_showChrome && !_epOpen && !_gestureLocked;
+
+  static String? _discNavAction(LogicalKeyboardKey key) {
+    if (kotvIsUpKey(key)) return 'up';
+    if (kotvIsDownKey(key)) return 'down';
+    if (kotvIsLeftKey(key)) return 'left';
+    if (kotvIsRightKey(key)) return 'right';
+    if (kotvIsEnterKey(key)) return 'select';
+    return null;
+  }
+
+  KeyEventResult? _onDiscMenuKey(KeyEvent event) {
+    final key = event.logicalKey;
+    if (kotvIsBackKey(key)) {
+      if (event is! KeyDownEvent) return KeyEventResult.handled;
+      // 有的碟菜单没有上一层，prev 不起作用：1.5 秒内再按返回就照常退出。
+      final now = DateTime.now();
+      final last = _discBackAt;
+      if (last != null && now.difference(last) < const Duration(milliseconds: 1500)) {
+        _discBackAt = null;
+        return null;
+      }
+      _discBackAt = now;
+      unawaited(widget.playback.discNav('prev'));
+      return KeyEventResult.handled;
+    }
+    final action = _discNavAction(key);
+    if (action == null) return null;
+    if (event is KeyDownEvent) unawaited(widget.playback.discNav(action));
+    return KeyEventResult.handled;
+  }
+
+  /// 点按落在画面上的位置（0..1），按当前画面比例算出画面所在矩形。
+  Offset? _videoFraction(Offset global) {
+    final box = context.findRenderObject();
+    final pb = widget.playback;
+    if (box is! RenderBox || !box.hasSize || pb.width <= 0 || pb.height <= 0) return null;
+    final ratio = _aspect.ratio;
+    final fixed = ratio != null && ratio > 0;
+    final src = fixed ? Size(ratio, 1) : Size(pb.width.toDouble(), pb.height.toDouble());
+    final fitted = applyBoxFit(fixed ? BoxFit.contain : _aspect.fit, src, box.size).destination;
+    final rect = Alignment.center.inscribe(fitted, Offset.zero & box.size);
+    final p = box.globalToLocal(global);
+    return Offset((p.dx - rect.left) / rect.width, (p.dy - rect.top) / rect.height);
+  }
+
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
     final isDown = event is KeyDownEvent;
     final isRepeat = event is KeyRepeatEvent;
     final isUp = event is KeyUpEvent;
     final key = event.logicalKey;
+
+    if (_discMenuOwnsInput) {
+      final r = _onDiscMenuKey(event);
+      if (r != null) return r;
+    }
 
     if (isDown && kotvIsBackKey(key)) {
       final back = detailImmersiveBack;

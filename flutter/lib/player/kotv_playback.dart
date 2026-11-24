@@ -197,11 +197,16 @@ abstract class KotvPlayback extends ChangeNotifier {
 
   /// 碟片导航（DVD/BD）；不支持时 [supportsDiscNav] 为 false。
   bool get supportsDiscNav => false;
-  Future<List<KotvTrack>> discTitles() async => const [];
-  Future<List<KotvTrack>> discChapters() async => const [];
+  Future<KotvDiscInfo> discInfo() async => KotvDiscInfo.empty;
   Future<void> setDiscTitle(int index) async {}
   Future<void> setDiscChapter(int index) async {}
-  Future<void> openDiscMenu() async {}
+
+  /// 碟片正显示交互菜单：方向键/确认/返回与点按交给 [discNav]。
+  bool get discMenuActive => false;
+
+  /// mpv `discnav`：up/down/left/right/select/menu/title-menu/popup/prev/mouse-move/mouse-click；
+  /// [x]/[y] 为画面内 0..1 坐标，只对 mouse-* 有意义。
+  Future<void> discNav(String action, {double? x, double? y}) async {}
 
   /// 下次 [open] 附加属性（如 `force-iso` / `dvd-device`）；默认忽略。
   void setExtraOpenProps(Map<String, String> props) {}
@@ -403,6 +408,41 @@ String kotvFormatSpeed(int bytesPerSec, {bool showZero = false}) {
     return '${kb.toStringAsFixed(2)} KB/s';
   }
   return '${(kb / 1024.0).toStringAsFixed(2)} MB/s';
+}
+
+/// 碟片标题/章节的显示名：mpv 没给名称时用「标题 N」。
+String kotvDiscEntryLabel(String kind, int index, String name) =>
+    name.trim().isEmpty ? '$kind ${index + 1}' : name.trim();
+
+/// 碟片的标题（mpv edition）与章节；下标均 0 起，未选中为 -1。
+class KotvDiscInfo {
+  const KotvDiscInfo({
+    this.titles = const [],
+    this.title = -1,
+    this.chapters = const [],
+    this.chapter = -1,
+    this.menuSupported = false,
+  });
+
+  static const empty = KotvDiscInfo();
+
+  factory KotvDiscInfo.fromMap(Map<dynamic, dynamic> m) {
+    List<String> names(Object? v) => v is List ? [for (final e in v) '${e ?? ''}'] : const [];
+    return KotvDiscInfo(
+      titles: names(m['titles']),
+      title: (m['title'] as num?)?.toInt() ?? -1,
+      chapters: names(m['chapters']),
+      chapter: (m['chapter'] as num?)?.toInt() ?? -1,
+      menuSupported: m['menuSupported'] == true,
+    );
+  }
+
+  /// mpv 给的名称（可能为空，界面自行补「标题 N」）。
+  final List<String> titles;
+  final int title;
+  final List<String> chapters;
+  final int chapter;
+  final bool menuSupported;
 }
 
 class KotvTrack {
