@@ -10,6 +10,14 @@ kotv_is_windows_build() {
   [[ "${OS:-}" == "Windows_NT" ]]
 }
 
+# macOS 应用的最低系统版本：取 Xcode 工程里的 MACOSX_DEPLOYMENT_TARGET（随包 dylib 须不高于它）。
+kotv_macos_deployment_target() {
+  local root
+  root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  sed -n 's/.*MACOSX_DEPLOYMENT_TARGET = \([0-9.]*\);.*/\1/p' \
+    "$root/flutter/macos/Runner.xcodeproj/project.pbxproj" | sort -u -V | tail -1
+}
+
 # 缺命令就退出。
 need() { command -v "$1" >/dev/null || { echo "need $1" >&2; exit 1; }; }
 

@@ -5,6 +5,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=kotv-release-name.sh
 source "$ROOT/scripts/kotv-release-name.sh"
+# shellcheck source=kotv-win-build-env.sh
+source "$ROOT/scripts/kotv-win-build-env.sh"
 export PATH="${HOME}/flutter/bin:${PATH}"
 # 本地默认国内镜像；GitHub Actions 用官方源（镜像偶发 content-hash 失败）。
 if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
@@ -212,6 +214,16 @@ if otool -l "$OUT_APP/Contents/Frameworks/libmpv.dylib" | awk '
     want && $1 == "cmdsize" { next }
     want && $1 == "path" { print $2; want = 0 }
   ' >&2
+  exit 1
+fi
+# 随包库的最低系统不得高于应用本身，否则旧系统启动即被 dyld 杀掉（Symbol not found）。
+MIN_OS="$(kotv_macos_deployment_target)"
+TOO_NEW="$(find "$OUT_APP/Contents/Frameworks" "$OUT_APP/Contents/MacOS" -type f \( -name '*.dylib' -o -perm -u+x \) -print0 \
+  | xargs -0 -I{} sh -c 'm=$(otool -l "$1" 2>/dev/null | awk "/LC_BUILD_VERSION/{f=1} f&&\$1==\"minos\"{print \$2; exit}"); [ -n "$m" ] && printf "%s %s\n" "$m" "$1"' _ {} \
+  | awk -v want="$MIN_OS" '{ split($1,a,"."); split(want,b,"."); if (a[1]+0 > b[1]+0 || (a[1]+0 == b[1]+0 && a[2]+0 > b[2]+0)) print }')"
+if [[ -n "$TOO_NEW" ]]; then
+  echo "ERROR: bundled Mach-O requires newer macOS than $MIN_OS:" >&2
+  echo "$TOO_NEW" >&2
   exit 1
 fi
 if ! find "$OUT_APP/Contents/Frameworks" -maxdepth 1 \( -name 'libplacebo.*.dylib' -o -name 'libplacebo.dylib' \) | grep -q .; then

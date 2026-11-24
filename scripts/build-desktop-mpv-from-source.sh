@@ -1870,6 +1870,11 @@ case "$PLAT" in
     build_mpv_linux
     ;;
   macos|darwin)
+    # 不设时 clang 按 SDK 版本定最低系统（CI macos-26 → 26.0），旧系统 dyld 找不到 libc++ 新符号。
+    # clang / CMake / rustc 都读这个变量；与 Xcode 工程的 MACOSX_DEPLOYMENT_TARGET 同值。
+    MACOSX_DEPLOYMENT_TARGET="$(kotv_macos_deployment_target)"
+    export MACOSX_DEPLOYMENT_TARGET
+    echo "==> MACOSX_DEPLOYMENT_TARGET=$MACOSX_DEPLOYMENT_TARGET"
     build_mpv_macos
     ;;
   windows|win)
