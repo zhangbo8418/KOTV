@@ -749,19 +749,22 @@ class NativeMpvPlayback extends KotvPlayback {
   Future<void> _unloadKeepingContext() async {
     _queued = null;
     _openSerial++;
-    try {
-      await _ch.invokeMethod('stop');
-    } catch (_) {}
+    // 先盖黑/揭洞，再 stop 藏 HWND：否则 Win7 子窗在 Flutter 之上，Hide 瞬间会透出浅色壳层。
+    _underlayCover = true;
+    _ready = false;
     _playing = false;
     _buffering = false;
     _completed = false;
-    _ready = false;
+    _w = 0;
+    _h = 0;
+    notifyListeners();
+    try {
+      await _ch.invokeMethod('stop');
+    } catch (_) {}
     _position = Duration.zero;
     _duration = Duration.zero;
     _buffered = Duration.zero;
     _url = '';
-    _w = 0;
-    _h = 0;
     if (!_posCtrl.isClosed) _posCtrl.add(Duration.zero);
     if (!_bufCtrl.isClosed) _bufCtrl.add(Duration.zero);
   }

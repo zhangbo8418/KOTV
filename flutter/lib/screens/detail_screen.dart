@@ -2218,8 +2218,11 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         _epIdx = epIdx;
         _epPage = epIdx ~/ _epSize;
         _magnetPlay = false;
-        // Android Hybrid：全屏换集先盖黑，避免 Surface 镂空透出详情；桌面 Texture 不盖。
-        if (kotvIsAndroid() && _immersiveFullscreen) _immersiveEpCover = true;
+        // 全屏硬切先盖黑：Android Hybrid 防镂空；Win7 子窗在 Flutter 之上也要盖到首帧。
+        if (_immersiveFullscreen &&
+            (kotvIsAndroid() || KotvWinChrome.isNeeded)) {
+          _immersiveEpCover = true;
+        }
         // 可直开跳过 play；本机路径在远端须走 play 换成 /file/。
         _status = canDirect ? '换集中…' : (_detailMagnet ? '磁力解析中…' : '解析中…');
       });
@@ -4301,8 +4304,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
               // 叠在 Scaffold 上以便全屏不卸 Texture；沉浸中即使 playUrl 空窗也保 PlatformView。
               if (_playUrl.isNotEmpty || _immersiveFullscreen)
                 _buildStableVideoLayer(context, stackSize: stackSize),
-              // 换集过渡黑盖：仅 Android Hybrid；桌面 Texture 不盖。
-              if (kotvIsAndroid() && _immersiveFullscreen && _immersiveEpCover)
+              // 换集过渡黑盖：Android Hybrid + Win7 子窗叠层。
+              if (_immersiveFullscreen &&
+                  _immersiveEpCover &&
+                  (kotvIsAndroid() || KotvWinChrome.isNeeded))
                 const Positioned.fill(
                   child: IgnorePointer(child: ColoredBox(color: Colors.black)),
                 ),

@@ -39,7 +39,38 @@ using flutter::EncodableValue;
 constexpr UINT kMsgDrain = WM_APP + 0x31;
 constexpr UINT kMsgDestroyHwnd = WM_APP + 0x32;
 constexpr wchar_t kBridgeClass[] = L"KotvMpvBridge";
+// 视频子窗自建类：系统 STATIC 默认 COLOR_WINDOW（近白），换集亮窗到首帧之间会白闪。
+constexpr wchar_t kVideoClass[] = L"KotvMpvVideo";
 constexpr auto kTeardownWait = std::chrono::milliseconds(1500);
+
+LRESULT CALLBACK VideoWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+  if (msg == WM_ERASEBKGND) {
+    RECT rc{};
+    GetClientRect(hwnd, &rc);
+    FillRect(reinterpret_cast<HDC>(wp), &rc, static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH)));
+    return 1;
+  }
+  if (msg == WM_PAINT) {
+    PAINTSTRUCT ps{};
+    HDC hdc = BeginPaint(hwnd, &ps);
+    FillRect(hdc, &ps.rcPaint, static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH)));
+    EndPaint(hwnd, &ps);
+    return 0;
+  }
+  return DefWindowProcW(hwnd, msg, wp, lp);
+}
+
+void EnsureVideoClass() {
+  static bool registered = false;
+  if (registered) return;
+  WNDCLASSW wc{};
+  wc.lpfnWndProc = VideoWndProc;
+  wc.hInstance = GetModuleHandleW(nullptr);
+  wc.hbrBackground = static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
+  wc.lpszClassName = kVideoClass;
+  RegisterClassW(&wc);
+  registered = true;
+}
 
 // %TEMP%\kotv_mpv.log：mpv 的 warn 及以上、解码器探测和嵌入窗口信息，进程启动时清空。
 void MpvLog(const char* fmt, ...) {
@@ -953,6 +984,8 @@ class KotvMpvPlugin : public flutter::Plugin {
   }
 
   void HideVideo(HWND h) {
+    // 换集/停播：禁止 updateFrame 再把窗抢先亮出来（否则 STATIC/空窗白闪）。
+    allow_show_ = false;
     if (h && IsWindowVisible(h)) {
       ShowWindow(h, SW_HIDE);
       NotifySurface();
@@ -1003,6 +1036,8 @@ class KotvMpvPlugin : public flutter::Plugin {
           if (sink_) sink_->Success(EncodableValue(std::move(p.map)));
           break;
         case Posted::kShowVideo:
+          // 仅事件线程在有画面尺寸后投递；允许亮窗。
+          allow_show_ = true;
           ShowVideo();
           break;
         case Posted::kHideVideo:
@@ -1017,8 +1052,15 @@ class KotvMpvPlugin : public flutter::Plugin {
   }
 
   void ShowVideo() {
-    if (!core_ || !core_->hwnd || !visible_ || !have_frame_) return;
+    if (!core_ || !core_->hwnd || !visible_ || !have_frame_ || !allow_show_) return;
     if (IsWindowVisible(core_->hwnd)) return;
+    // 亮窗前刷黑，避免 VO 尚未 Present 时露出默认底色。
+    if (HDC hdc = GetDC(core_->hwnd)) {
+      RECT rc{};
+      GetClientRect(core_->hwnd, &rc);
+      FillRect(hdc, &rc, static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH)));
+      ReleaseDC(core_->hwnd, hdc);
+    }
     ShowWindow(core_->hwnd, SW_SHOWNOACTIVATE);
     NotifySurface();
   }
@@ -1091,11 +1133,13 @@ class KotvMpvPlugin : public flutter::Plugin {
     if (!ResolveFramePhysical(&cx, &cy, &cw, &ch)) return false;
     MpvCore* core = EnsureCore();
     if (!core->hwnd) {
-      core->hwnd = CreateWindowExW(WS_EX_NOPARENTNOTIFY, L"STATIC", L"",
+      EnsureVideoClass();
+      core->hwnd = CreateWindowExW(WS_EX_NOPARENTNOTIFY, kVideoClass, L"",
                                    WS_CHILD | WS_CLIPSIBLINGS | WS_DISABLED, cx, cy, cw, ch,
                                    parent, nullptr, GetModuleHandleW(nullptr), nullptr);
       if (!core->hwnd) return false;
       region_set_ = false;
+      allow_show_ = false;
       ShowWindow(core->hwnd, SW_HIDE);
     } else {
       MoveWindow(core->hwnd, cx, cy, cw, ch, TRUE);
@@ -1495,8 +1539,11 @@ class KotvMpvPlugin : public flutter::Plugin {
           have_frame_ = true;
           const bool need_hwnd = !core_ || !core_->hwnd;
           // 几何未变勿 MoveWindow；已可见勿再 ShowWindow。
+          // 停播/换集后 allow_show_=false：勿因几何同步把空窗再亮出来。
           if (moved || need_hwnd) EnsureVideoHwnd();
-          if (visible_ && Mpv() && core_->hwnd && !IsWindowVisible(core_->hwnd)) ShowVideo();
+          if (visible_ && allow_show_ && Mpv() && core_->hwnd && !IsWindowVisible(core_->hwnd)) {
+            ShowVideo();
+          }
         }
       }
       result->Success();
@@ -1626,6 +1673,8 @@ class KotvMpvPlugin : public flutter::Plugin {
   SessionOpts opts_;
   bool visible_ = false;
   bool have_frame_ = false;
+  // stop/open 藏窗后为 false；FILE_LOADED/VIDEO_RECONFIG 投 kShowVideo 时置 true。
+  bool allow_show_ = false;
   double frame_x_ = 0;
   double frame_y_ = 0;
   double frame_w_ = 0;

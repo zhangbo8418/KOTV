@@ -13,7 +13,7 @@ import (
 )
 
 var (
-	mu  sync.Mutex
+	mu    sync.Mutex
 	store *database.DB
 )
 
@@ -223,7 +223,9 @@ func (b Bundle) FilterSites(sites []model.Site) []model.Site {
 	return out
 }
 
-// InjectLives 用组直播列表覆盖 Api.Lives。
+// InjectLives 组直播策略写入 Api.Lives。
+// 未开放直播：清空。组里配了源：覆盖仓内 lives。组列表为空：不动仓内 lives
+// （否则换仓/刷新会把点播 JSON 自带的 lives 清掉，直播页变成「请配置直播源」）。
 func (b Bundle) InjectLives(api *model.Api) {
 	if api == nil {
 		return
@@ -243,6 +245,9 @@ func (b Bundle) InjectLives(api *model.Api) {
 			name = url
 		}
 		lives = append(lives, model.Live{Name: name, URL: url})
+	}
+	if len(lives) == 0 {
+		return
 	}
 	api.Lives = lives
 }

@@ -206,7 +206,7 @@ func (a *App) finishConfigLoad(cfg *config.Manager, sess *clientsession.Session,
 	if u == "" {
 		u = strings.TrimSpace(source)
 	}
-	// 分组专属直播注入：覆盖仓 JSON 内 lives，再 SyncFromConfig。
+	// 分组直播策略（组有源才覆盖仓内 lives；空列表保留点播 JSON 的 lives）。
 	uid := hostclient.DataOwner()
 	pol := grouppolicy.Resolve(auth.GetUser(uid))
 	apiSnap := cfg.API()

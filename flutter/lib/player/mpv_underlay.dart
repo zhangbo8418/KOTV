@@ -281,6 +281,13 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
       return;
     }
 
+    // Win7 HWND 叠在 Flutter 之上：换集/未就绪时必须先藏窗，黑遮才能挡住；
+    // 否则 updateFrame 可能把空窗再亮出来（白闪）。
+    final wantShow = widget.ready && !widget.coverUntilReady;
+    if (_win7Overlay && !wantShow) {
+      await _setVisible(false);
+    }
+
     final sameSent = _lastSent != null &&
         (_lastSent!.left - hole.left).abs() < 0.5 &&
         (_lastSent!.top - hole.top).abs() < 0.5 &&
@@ -292,10 +299,8 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
       await _updateFrame(hole, clip);
     }
 
-    if (_win7Overlay) {
-      if (widget.ready && !widget.coverUntilReady) {
-        await _setVisible(true);
-      }
+    if (_win7Overlay && wantShow) {
+      await _setVisible(true);
     }
   }
 
