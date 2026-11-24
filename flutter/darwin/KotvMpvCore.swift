@@ -24,8 +24,7 @@ private typealias KotvMpvColor = UIColor
 /// 宿主：macOS 把容器层 `insertSublayer(..., at: 0)` 进 contentView.layer 并涂黑；
 /// iOS 在窗口最底插一个黑底宿主视图，Flutter 视图改为不透明=否。Dart 洞清成透明露出画面。
 /// 几何：`updateFrame` 按洞矩形摆容器层；续播点在 FILE_LOADED 后再 seek（勿 loadfile start=）。
-/// EDR：仅软解且 sigPeak>1。硬解 VT 零拷贝不走 soft 的 `tag_pixel_buffer_color_metadata`，
-/// 开 EDR 易色偏；故硬解保持关 EDR。
+/// EDR：HDR 直出开且 sigPeak>1 即开，软硬解一样（VT 帧缺省的色彩标记由补丁 0053 按 mpv 的推断补齐）。
 /// 所有 `mpv_*` 仅在 [mpvQueue]（VO 会 `dispatch_sync` 主队列，主线程同步调 mpv 会死锁）。
 final class KotvMpvCore {
   /// macOS：包里带了 MoltenVK ICD（AppDelegate 已写入 VK_ICD_FILENAMES）且有 Metal 设备。
@@ -224,9 +223,6 @@ final class KotvMpvCore {
       return
     }
     mpv_set_property_string(handle, name, value)
-    if name == "hwdec" {
-      updateEDRMode(sigPeak: lastSigPeak)
-    }
   }
 
   func command(_ args: [String]) {
@@ -331,8 +327,7 @@ final class KotvMpvCore {
     mpv_get_property(handle, "video-params/sig-peak", MPV_FORMAT_DOUBLE, &peak)
     mpv_get_property(handle, "dwidth", MPV_FORMAT_INT64, &w)
     mpv_get_property(handle, "dheight", MPV_FORMAT_INT64, &h)
-    let soft = hwdec == "no" || hwcur == "no"
-    let edrOn = hdrEnabled && soft && peak > 1.0
+    let edrOn = !vulkan && hdrEnabled && peak > 1.0
     return [
       "hwdec": hwdec,
       "hwdec-current": hwcur.isEmpty ? hwdec : hwcur,
@@ -504,7 +499,6 @@ final class KotvMpvCore {
         updateEDRMode(sigPeak: peak)
       case "hwdec-current":
         emitVideoInfo()
-        updateEDRMode(sigPeak: lastSigPeak)
       case "media-live":
         // 没有该属性的 libmpv（iOS MPVKit）只报 NONE，不会走到这里。
         if prop.format == MPV_FORMAT_FLAG,
@@ -605,25 +599,11 @@ final class KotvMpvCore {
     emit(info)
   }
 
-  private func isSoftDecode() -> Bool {
-    guard let handle = mpv else { return false }
-    if let raw = mpv_get_property_string(handle, "hwdec") {
-      let hw = String(cString: raw); mpv_free(raw)
-      if hw == "no" { return true }
-    }
-    if let raw = mpv_get_property_string(handle, "hwdec-current") {
-      let cur = String(cString: raw); mpv_free(raw)
-      return cur == "no"
-    }
-    return false
-  }
-
-  /// 见类型注释：仅软解 + sigPeak>1 开 EDR。Vulkan 由 MoltenVK 按交换链色彩空间开关 EDR。
+  /// 见类型注释：HDR 直出开且 sigPeak>1 开 EDR（软硬解一样）。Vulkan 由 MoltenVK 按交换链色彩空间开关 EDR。
   private func updateEDRMode(sigPeak: Double) {
     lastSigPeak = sigPeak
     guard !vulkan else { return }
-    let soft = isSoftDecode()
-    let shouldEnableEDR = hdrEnabled && soft && sigPeak > 1.0
+    let shouldEnableEDR = hdrEnabled && sigPeak > 1.0
     let apply: () -> Void = { [weak self] in
       guard let self, let videoLayer = self.displayLayer else { return }
       self.withoutLayerAnimations {
