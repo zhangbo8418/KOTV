@@ -94,8 +94,8 @@ kotv_git_checkout_commit "$BS/deps/mpv" "$MPV_REPO" "$MPV_COMMIT"
 [[ "$(git -C "$BS/deps/mpv" rev-parse HEAD)" == "$MPV_COMMIT" ]] \
   || { echo "ERROR: mpv HEAD != $MPV_COMMIT" >&2; exit 1; }
 
-chmod +x "$ROOT/scripts/kotv-patch-mpv-android-cmake.sh"
-"$ROOT/scripts/kotv-patch-mpv-android-cmake.sh" "$BS/include/cmake-android.sh"
+chmod +x "$ROOT/scripts/kotv-patch-mpv-android-buildscripts.sh"
+"$ROOT/scripts/kotv-patch-mpv-android-buildscripts.sh" "$BS"
 
 # path.sh 把 ANDROID_HOME 指到 buildscripts/sdk/…；尽量链已有 SDK。
 if [[ -z "${ANDROID_HOME:-}" ]]; then

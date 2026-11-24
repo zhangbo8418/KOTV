@@ -173,13 +173,7 @@ internal class KotvMpvAudioFocus(
     if (enabled == noisyRegistered) return
     try {
       if (enabled) {
-        val filter = IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-          ctx.registerReceiver(noisyReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
-        } else {
-          @Suppress("UnspecifiedRegisterReceiverFlag")
-          ctx.registerReceiver(noisyReceiver, filter)
-        }
+        ctx.registerLocalReceiver(noisyReceiver, IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY))
         noisyRegistered = true
       } else {
         ctx.unregisterReceiver(noisyReceiver)

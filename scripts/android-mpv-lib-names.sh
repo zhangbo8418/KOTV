@@ -154,6 +154,10 @@ kotv_android_mpv_check_markers() {
     echo "ERROR: $abi/libmpv.so lacks DVD/Blu-ray ISO (dvdnav + libbluray)" >&2
     fail=1
   fi
+  if grep -aq 'libharfbuzz.so.0' "$mpv" 2>/dev/null; then
+    echo "ERROR: $abi/libmpv.so has freetype dynamic harfbuzz (binds system libharfbuzz_ng on Android 7)" >&2
+    fail=1
+  fi
   if ! grep -aqE 'libarcdav3a|AV3A Audio Vivid|--enable-libarcdav3a' "$ffmpeg" 2>/dev/null; then
     echo "ERROR: $abi/libffmpeg.so lacks AV3A" >&2
     fail=1

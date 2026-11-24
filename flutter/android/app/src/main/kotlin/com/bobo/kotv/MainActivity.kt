@@ -76,12 +76,7 @@ class MainActivity : FlutterActivity() {
       theme.applyStyle(R.style.KotvJarDarkAlertDialogOverlay, true)
     }
     super.onCreate(savedInstanceState)
-    ContextCompat.registerReceiver(
-      this,
-      externalChosenReceiver,
-      IntentFilter(EXTERNAL_CHOSEN),
-      ContextCompat.RECEIVER_NOT_EXPORTED,
-    )
+    registerLocalReceiver(externalChosenReceiver, IntentFilter(EXTERNAL_CHOSEN))
   }
 
   override fun onDestroy() {
