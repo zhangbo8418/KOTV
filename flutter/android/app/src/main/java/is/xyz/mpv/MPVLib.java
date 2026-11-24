@@ -291,8 +291,11 @@ public final class MPVLib {
     }
 
     private static String getBundleId(Context app, String abi) throws IOException {
+        // 爬虫初始化期间 Application.getPackageName() 会返回伪装包名，查不到包；加载失败会被缓存到进程结束。
+        String pkg = com.fongmi.android.tv.App.realAppPackageName();
+        if (pkg.isEmpty()) pkg = app.getPackageName();
         try {
-            PackageInfo info = app.getPackageManager().getPackageInfo(app.getPackageName(), 0);
+            PackageInfo info = app.getPackageManager().getPackageInfo(pkg, 0);
             return info.lastUpdateTime + ":" + abi + ":cxx-ndk";
         } catch (PackageManager.NameNotFoundException e) {
             throw new IOException("Unable to read app update time", e);

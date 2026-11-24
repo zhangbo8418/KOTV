@@ -71,12 +71,6 @@ final backdropProvider = Provider<Map<String, dynamic>>((ref) {
   );
 });
 
-/// AppBackdrop 粘住的壁纸 URL；换源清 ImageCache 后用来预热。
-final stickyWallUrlProvider = StateProvider<String>((ref) => '');
-
-/// 递增后强制壳层壁纸层按磁盘/网络重挂，避免 clearLiveImages 后空白。
-final wallRepaintProvider = StateProvider<int>((ref) => 0);
-
 final pendingSearchProvider = StateProvider<String?>((ref) => null);
 
 final remoteBridgeProvider = StateProvider<RemoteBridge?>((ref) => null);

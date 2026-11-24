@@ -1,10 +1,8 @@
 import 'dart:typed_data';
 
-/// Web：无本地壁纸文件缓存。
-Future<Uint8List?> kotvReadWallpaperBytes(String url) async => null;
+/// Web：不落盘，每次启动重新取图。
+Future<({String url, Uint8List bytes, DateTime fetchedAt})?> wallDiskLoad() async => null;
 
-Future<void> kotvPersistWallpaper(String url) async {}
+Future<void> wallDiskSave(String url, Uint8List bytes) async {}
 
-Future<({String url, String path})?> kotvLoadWallpaperDisk() async => null;
-
-Future<void> kotvClearWallpaperDisk() async {}
+Future<void> wallDiskClear() async {}

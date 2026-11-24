@@ -38,6 +38,8 @@ dependencies:
 dependency_overrides:
   # 2.12.1 Messages.kt 重复声明 MessagesPigeonMethodCodec，Kotlin 编不过
   video_player_android: 2.11.0
+  # 2.3.x 改走 JNI，Android 7 上取目录抛 ClassNotFoundException（Landroid/content/Context;），缓存目录全取不到
+  path_provider_android: 2.2.23
 
 dev_dependencies:
   flutter_test:

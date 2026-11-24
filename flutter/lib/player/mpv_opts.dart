@@ -94,6 +94,9 @@ bool kotvMpvVulkanSupported() => kotvUsesNativeMpv();
 /// Win7「硬解直出」开关的落盘值：按当前会话实际状态取反。详情 / 全屏 / 播控共用。
 String kotvWin7DirectNextValue(bool currentlyOn) => currentlyOn ? 'false' : 'true';
 
+/// Win7「硬解直出」设置值（缺省开）。
+bool kotvWin7DirectFromSetting(Object? raw) => kotvSettingsFlag(raw, def: true);
+
 class KotvMpvOpts {
   const KotvMpvOpts({
     this.decodeMode = 'auto',
@@ -103,7 +106,7 @@ class KotvMpvOpts {
     this.tlsVerify = true,
     this.audioPassThrough = true,
     this.diskCache = false,
-    this.direct = false,
+    this.direct = true,
     this.dolbyVisionPolicy = 0,
     this.preferredTextLangs = '',
     this.videoEq = KotvVideoEq.off,
@@ -125,14 +128,14 @@ class KotvMpvOpts {
   final String decodeMode;
   final bool gpuNext;
   /// Vulkan 渲染（原生端再看设备是否支持）：Android gpu-api=vulkan；macOS gpu-next+MoltenVK；
-  /// Win/Linux gpu-api 先试 Vulkan。
+  /// Win/Linux 开 = gpu-api 先试 Vulkan，关 = 只用 d3d11/opengl（Linux 只用 opengl）。
   final bool vulkan;
   final String conf;
   /// Android 原生：HTTPS 校验证书（cacert.pem）；坏 CA 可关。
   final bool tlsVerify;
   final bool audioPassThrough;
   final bool diskCache;
-  /// Win7 硬解直出（默认关）：开 → `hwdec=dxva2,auto`；关 → `auto`。
+  /// Win7 硬解直出（默认开）：开 → `hwdec=dxva2,auto`；关 → `auto`。
   final bool direct;
   /// 杜比视界策略：0=AUTO 1=假定支持 2=假定不支持（与 exoDolbyVision 枚举一致）。
   final int dolbyVisionPolicy;
@@ -184,7 +187,7 @@ class KotvMpvOpts {
       tlsVerify: tlsVerify,
       audioPassThrough: audioPassThrough,
       diskCache: diskCache,
-      direct: kotvSettingsFlag(settings['mpvDirect']),
+      direct: kotvWin7DirectFromSetting(settings['mpvDirect']),
       dolbyVisionPolicy: dolby,
       preferredTextLangs: preferredTextLangs,
       videoEq: KotvVideoEq.fromSettings(settings),

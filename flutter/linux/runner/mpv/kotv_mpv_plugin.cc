@@ -35,7 +35,7 @@ struct KotvMpvState {
   std::atomic<bool> stop{false};
   // Dart KotvMpvOpts.hwdecValue()。
   std::string hwdec = "auto";
-  // 建 mpv 时生效：gpu-api 先试 Vulkan，失败回到默认探测。
+  // 建 mpv 时生效：开 = gpu-api 先试 Vulkan 再自动探测；关 = 不碰 Vulkan。
   bool vulkan = false;
   GtkWidget* view_widget = nullptr;
   int64_t wid = 0;
@@ -241,7 +241,8 @@ bool ensure_mpv() {
       mpv_set_option(g_state->mpv, "wid", MPV_FORMAT_INT64, &g_state->wid);
       // gpu-next 才能做杜比视界重塑；x11 仅作无 GPU 时的兜底。
       mpv_set_option_string(g_state->mpv, "vo", "gpu-next,gpu,x11");
-      mpv_set_option_string(g_state->mpv, "gpu-api", g_state->vulkan ? "vulkan,auto" : "auto");
+      // gpu-api=auto 在 X11 上优先探 Vulkan；关 Vulkan 就只用 opengl。
+      mpv_set_option_string(g_state->mpv, "gpu-api", g_state->vulkan ? "vulkan,auto" : "opengl");
     }
   }
 #endif

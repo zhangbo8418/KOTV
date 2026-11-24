@@ -3369,10 +3369,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       if (_miniDesktop) await _exitMini();
       if (!mounted || _immersiveFullscreen) return;
       if (!kotvIsDesktop() && !kIsWeb && !KotvLayout.television) {
-        // 手机全屏保持竖屏，上下滑切集；点「全屏观看」才锁横屏。
-        try {
-          await kotvLockPortrait();
-        } catch (_) {}
+        // 手机全屏按系统旋转设置：锁定时竖屏（上下滑切集），点「全屏观看」才横屏。
+        await kotvSetPhoneOrientation(KotvPhoneOrientation.follow);
       }
       // 先铺开画面，再进系统全屏（时序收在 kotvEnterSystemFullscreenAfterLayout）。
       // 全窗口 kind 不会改系统窗口。

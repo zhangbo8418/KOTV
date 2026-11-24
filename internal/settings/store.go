@@ -45,22 +45,22 @@ const (
 	PlayerStableVolume Type = "playerStableVolume"
 	UA                 Type = "ua" // 播放 User-Agent；空则用 Media3 默认
 	// MPV：mpv_vulkan / mpv_gpu_next + 自定义 mpv.conf
-	MpvVulkan     Type = "mpvVulkan"
-	MpvGpuNext    Type = "mpvGpuNext"
-	MpvConf       Type = "mpvConf"
-	LiveKeep      Type = "liveKeep"     // 上次直播：源$$$分组$$$频道$$$线路URL
-	LiveAcross    Type = "liveAcross"   // 跨分组换台，默认 true
-	LiveChange    Type = "liveChange"   // 播放失败自动换线，默认 true
-	LiveInvert    Type = "liveInvert"   // 反转上下换台方向，默认 false
-	DLNARenderer  Type = "dlnaRenderer" // 作为 DLNA 被投端，默认 false
-	UpdateURL     Type = "updateUrl"
-	AvatarPath    Type = "avatarPath"
-	WallMode      Type = "wallMode"
-	WallURL       Type = "wallURL"
-	WallFile      Type = "wallFile"
-	Incognito     Type = "incognito"
-	SyncPairCode  Type = "syncPairCode"
-	DeviceUUID    Type = "deviceUUID"
+	MpvVulkan       Type = "mpvVulkan"
+	MpvGpuNext      Type = "mpvGpuNext"
+	MpvConf         Type = "mpvConf"
+	LiveKeep        Type = "liveKeep"     // 上次直播：源$$$分组$$$频道$$$线路URL
+	LiveAcross      Type = "liveAcross"   // 跨分组换台，默认 true
+	LiveChange      Type = "liveChange"   // 播放失败自动换线，默认 true
+	LiveInvert      Type = "liveInvert"   // 反转上下换台方向，默认 false
+	DLNARenderer    Type = "dlnaRenderer" // 作为 DLNA 被投端，默认 false
+	UpdateURL       Type = "updateUrl"
+	AvatarPath      Type = "avatarPath"
+	WallMode        Type = "wallMode"
+	WallURL         Type = "wallURL"
+	WallFile        Type = "wallFile"
+	Incognito       Type = "incognito"
+	SyncPairCode    Type = "syncPairCode"
+	DeviceUUID      Type = "deviceUUID"
 	RemoteAuth      Type = "remoteAuth"      // App 用户管理开关：允许非本机客户端连入并强制登录；默认 false。Web 始终需登录
 	AllowRegister   Type = "allowRegister"   // 开放注册，默认 false
 	RequireInvite   Type = "requireInvite"   // 注册需邀请码，默认 false
@@ -89,7 +89,7 @@ const (
 	ExoDiskPreloadMs         Type = "exoDiskPreloadMs"
 	MpvTlsVerify             Type = "mpvTlsVerify"
 	MpvDiskCache             Type = "mpvDiskCache"
-	MpvDirect                Type = "mpvDirect" // Win7 硬解直出（默认关）；关=hwdec=auto，开=dxva2（不行则软解）
+	MpvDirect                Type = "mpvDirect" // Win7 硬解直出（默认开）；开=dxva2（不行则软解），关=hwdec=auto
 	VideoEq                  Type = "videoEq"
 	AudioEq                  Type = "audioEq"
 	VideoBrightness          Type = "videoBrightness"
@@ -306,7 +306,7 @@ func defaultFile() file {
 			{ID: "exoDiskPreloadMs", Label: "Exo磁盘预读毫秒", Value: "120000"},
 			{ID: "mpvTlsVerify", Label: "MPV TLS校验", Value: "true"},
 			{ID: "mpvDiskCache", Label: "MPV磁盘缓存", Value: "false"},
-			{ID: "mpvDirect", Label: "MPV硬解直出", Value: "false"},
+			{ID: "mpvDirect", Label: "MPV硬解直出", Value: "true"},
 			{ID: "videoEq", Label: "画面调色", Value: "off"},
 			{ID: "audioEq", Label: "音频均衡", Value: "off"},
 			{ID: "videoBrightness", Label: "画面亮度", Value: "0"},
@@ -461,7 +461,7 @@ func Load() error {
 	ensureSettingLocked(ExoDiskPreloadMs, "Exo磁盘预读毫秒", "120000")
 	ensureSettingLocked(MpvTlsVerify, "MPV TLS校验", "true")
 	ensureSettingLocked(MpvDiskCache, "MPV磁盘缓存", "false")
-	ensureSettingLocked(MpvDirect, "MPV硬解直出", "false")
+	ensureSettingLocked(MpvDirect, "MPV硬解直出", "true")
 	ensureSettingLocked(VideoEq, "画面调色", "off")
 	ensureSettingLocked(AudioEq, "音频均衡", "off")
 	ensureSettingLocked(VideoBrightness, "画面亮度", "0")

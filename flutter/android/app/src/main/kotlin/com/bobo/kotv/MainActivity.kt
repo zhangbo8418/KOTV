@@ -10,6 +10,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.content.pm.ResolveInfo
 import android.content.res.Configuration
@@ -195,6 +196,15 @@ class MainActivity : FlutterActivity() {
         "ensureReadMediaPermission" -> ensureReadMediaPermission(result)
         "pickConfigFile" -> pickConfigFile(result)
         "isTelevision" -> result.success(KotvFileChooser.isTelevision(this))
+        // follow：随系统自动旋转（锁定时不转）；landscape：横屏随重力翻转（不受锁定限制）；portrait：竖屏。
+        "setOrientation" -> {
+          requestedOrientation = when (call.arguments as? String) {
+            "landscape" -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            "portrait" -> ActivityInfo.SCREEN_ORIENTATION_USER_PORTRAIT
+            else -> ActivityInfo.SCREEN_ORIENTATION_FULL_USER
+          }
+          result.success(true)
+        }
         "useFileBrowser" -> result.success(KotvFileChooser.shouldUseFileBrowser(this))
         "storageRoot" -> result.success(KotvFileChooser.storageRoot())
         "listDir" -> {

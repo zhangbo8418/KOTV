@@ -765,7 +765,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     await _showPlayerSubSheet(
       title: 'MPV 设置',
       buildChildren: (setSheet) {
-        final mpvDirect = kotvSettingsFlag(g('mpvDirect'));
+        final mpvDirect = kotvWin7DirectFromSetting(g('mpvDirect'));
         final mpvGpuNext = g('mpvGpuNext', 'false') == 'true';
         final mpvVulkan = g('mpvVulkan', 'false') == 'true';
         final mpvTlsVerify =
@@ -2064,7 +2064,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       } catch (_) {}
     }
     if (mounted) {
-      await kotvClearImageMemory(ref: ref);
+      await kotvClearImageMemory();
     }
     KotvSettingsCache.clear();
     if (data == null || !mounted) return;
@@ -2395,7 +2395,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         usesMpv && kotvIsWindows7() && !KotvMpvOpts(decodeMode: g('playerDecode', 'auto')).soft;
     // 「MPV 设置」副标题写这个平台里面真有的项。
     final mpvSheetHint = showMpvDirect
-        ? '硬解直出 ${kotvSettingsFlag(g('mpvDirect')) ? '开' : '关'} / 配置…'
+        ? '硬解直出 ${kotvWin7DirectFromSetting(g('mpvDirect')) ? '开' : '关'} / 配置…'
         : (kotvIsAndroid() ? 'Vulkan / 配置…' : '磁盘缓存 / 配置…');
     final canPickPlayer = kotvCanSwitchPlayer(live: false);
     final canPickLivePlayer = kotvCanSwitchPlayer(live: true);

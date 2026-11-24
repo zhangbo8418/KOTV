@@ -326,9 +326,9 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     // 嵌入详情 Stack：系统栏/方向由父页独占，勿与 _enter/_exitImmersive 叠调（易方向抖动卡死）。
     if (!widget.embedded) {
       if (!kotvIsDesktop() && !kIsWeb && !KotvLayout.television) {
-        // 先锁竖屏再进沉浸：锁方向常会把系统栏拉回来。电视保持横屏。
+        // 先定方向再进沉浸：改方向常会把系统栏拉回来。电视保持横屏。
         unawaited(() async {
-          await kotvLockPortrait();
+          await kotvSetPhoneOrientation(KotvPhoneOrientation.follow);
           await kotvEnterSystemFullscreenAfterLayout(widget.desktopFullscreen);
         }());
       } else {
@@ -1383,7 +1383,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       _forcedLandscape = true;
       _showForceLandscape = false;
     });
-    await kotvForceLandscape();
+    await kotvSetPhoneOrientation(KotvPhoneOrientation.landscape);
     await kotvEnterSystemFullscreenAfterLayout(widget.desktopFullscreen);
     _bumpChrome(intentional: true);
   }
@@ -1391,7 +1391,7 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
   Future<void> _lockPortraitMode() async {
     if (KotvLayout.television) return;
     setState(() => _forcedLandscape = false);
-    await kotvLockPortrait();
+    await kotvSetPhoneOrientation(KotvPhoneOrientation.portrait);
     await kotvEnterSystemFullscreenAfterLayout(widget.desktopFullscreen);
     if (!mounted) return;
     _refreshForceLandscapeBtn();

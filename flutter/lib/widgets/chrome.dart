@@ -1,6 +1,6 @@
 import 'dart:async';
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -28,91 +28,118 @@ class AppBackdrop extends ConsumerStatefulWidget {
   ConsumerState<AppBackdrop> createState() => _AppBackdropState();
 }
 
+/// 壁纸取图规则（引擎 backdrop.wallpapers 已按「后台品牌图 > 设置里选的」排好）：
+/// - 冷启动先显示磁盘缓存，不等设置和网络；
+/// - 依次试候选：与正在显示的同一地址且未过期就不动，否则取图，取到才换；
+/// - 正在显示的地址取图失败时保留旧图；新地址失败则试下一个，全失败也保留旧图；
+/// - 没取到就退避重试（服务端会偶发 500）；
+/// - 只有设置选了渐变/内置主题且后台没配壁纸时才清掉。
 class _AppBackdropState extends ConsumerState<AppBackdrop> {
-  Timer? _wallTimer;
-  String _stickyWallUrl = '';
+  static const _retryMin = Duration(seconds: 10);
+  static const _retryMax = Duration(minutes: 5);
+
+  Timer? _refreshTimer;
+  Timer? _retryTimer;
+  Duration _retryDelay = _retryMin;
+  KotvWallpaper? _wall;
+  List<String> _want = const [];
+  int _syncGen = 0;
 
   @override
   void initState() {
     super.initState();
-    unawaited(_restoreDiskWall());
-    // 配置壁纸（如每日 bing）定时刷新：先保持 sticky，再换图，避免先 blank。
-    _wallTimer = Timer.periodic(const Duration(minutes: 30), (_) {
+    unawaited(_restoreDisk());
+    // 重拉设置（候选地址可能变）并按缓存时效重取。
+    _refreshTimer = Timer.periodic(const Duration(minutes: 30), (_) {
       if (!mounted) return;
       ref.invalidate(settingsProvider);
+      unawaited(_sync());
     });
-  }
-
-  Future<void> _restoreDiskWall() async {
-    final hit = await kotvLoadWallpaperDisk();
-    if (!mounted || hit == null) return;
-    setState(() => _stickyWallUrl = hit.url);
-    ref.read(stickyWallUrlProvider.notifier).state = hit.url;
-  }
-
-  void _stickWall(String url) {
-    final u = url.trim();
-    if (u.isEmpty) return;
-    if (u == _stickyWallUrl && ref.read(stickyWallUrlProvider) == u) return;
-    setState(() => _stickyWallUrl = u);
-    ref.read(stickyWallUrlProvider.notifier).state = u;
-  }
-
-  void _clearStickyWall() {
-    if (_stickyWallUrl.isEmpty && ref.read(stickyWallUrlProvider).isEmpty) return;
-    setState(() => _stickyWallUrl = '');
-    ref.read(stickyWallUrlProvider.notifier).state = '';
-    unawaited(kotvClearWallpaperDisk());
   }
 
   @override
   void dispose() {
-    _wallTimer?.cancel();
+    _refreshTimer?.cancel();
+    _retryTimer?.cancel();
     super.dispose();
+  }
+
+  Future<void> _restoreDisk() async {
+    final hit = await kotvLoadWallpaperDisk();
+    if (!mounted || hit == null || _wall != null) return;
+    setState(() => _wall = hit);
+    unawaited(_sync());
+  }
+
+  Future<void> _sync() async {
+    _retryTimer?.cancel();
+    final gen = ++_syncGen;
+    // 有更优先的候选没取到（含正在显示的过期图没刷新成功），稍后重试。
+    var missed = false;
+    for (final url in _want) {
+      final cur = _wall;
+      final showing = cur != null && cur.url == url;
+      if (showing && cur.fresh) break;
+      final got = await kotvFetchWallpaper(url);
+      if (!mounted || gen != _syncGen) return;
+      if (got != null) {
+        setState(() => _wall = got);
+        break;
+      }
+      missed = true;
+      if (showing) break;
+    }
+    if (!missed) {
+      _retryDelay = _retryMin;
+      return;
+    }
+    _retryTimer = Timer(_retryDelay, () {
+      if (mounted) unawaited(_sync());
+    });
+    _retryDelay = _retryDelay * 2 > _retryMax ? _retryMax : _retryDelay * 2;
+  }
+
+  void _clear() {
+    _syncGen++;
+    _retryTimer?.cancel();
+    if (_wall != null) setState(() => _wall = null);
+    unawaited(kotvClearWallpaperDisk());
   }
 
   @override
   Widget build(BuildContext context) {
     final bd = ref.watch(backdropProvider);
-    // 换源清 ImageCache 后递增，强制壁纸层按磁盘/网络重挂。
-    ref.watch(wallRepaintProvider);
     final p = ref.watch(kotvPaletteProvider);
     final settingsReady = ref.watch(settingsProvider.select((s) => s.hasValue));
-    // settings 未就绪时，回落 config.wallpaper，避免首屏空背景。
-    // select 只盯 wallpaper 串：其它 config 字段刷新不重建壁纸层。
-    final cfgWall = ref.watch(configProvider.select(
-          (async) => async.maybeWhen(
-            data: (c) => '${c['wallpaper'] ?? ''}'.trim(),
-            orElse: () => '',
-          ),
-        ));
+    // 配置晚于设置就绪时，设置里那份 backdrop 还没有配置壁纸，重拉一次。
+    ref.listen(
+      configProvider.select((c) => '${c.valueOrNull?['wallpaper'] ?? ''}'),
+      (prev, next) {
+        if (prev != next) ref.invalidate(settingsProvider);
+      },
+    );
     final mode = '${bd['mode'] ?? ''}'.trim();
-    var image = '${bd['image'] ?? ''}'.trim();
-    if (image.isEmpty && (mode.isEmpty || mode == 'config')) {
-      image = cfgWall;
-    }
-
-    final intentionalNoWall =
-        settingsReady && (mode == 'gradient' || mode.startsWith('builtin'));
-    if (intentionalNoWall) {
-      if (_stickyWallUrl.isNotEmpty) {
+    final want = [
+      for (final u in (bd['wallpapers'] as List?) ?? const [])
+        if ('$u'.trim().isNotEmpty) '$u'.trim(),
+    ];
+    final noWall = settingsReady && want.isEmpty && (mode == 'gradient' || mode.startsWith('builtin'));
+    if (noWall) {
+      if (_want.isNotEmpty || _wall != null) {
+        _want = const [];
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _clearStickyWall();
+          if (mounted) _clear();
         });
       }
-      image = '';
-    } else if (image.isNotEmpty) {
-      if (image != _stickyWallUrl) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _stickWall(image);
-        });
-      }
-    } else if (_stickyWallUrl.isNotEmpty) {
-      // loading / 短暂空串：继续显示上一张。
-      image = _stickyWallUrl;
+    } else if (want.isNotEmpty && !listEquals(want, _want)) {
+      _want = want;
+      _retryDelay = _retryMin;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) unawaited(_sync());
+      });
     }
 
-    final hasWall = image.startsWith('http://') || image.startsWith('https://');
+    final wall = _wall;
     // 渐变/光晕/压色跟 effectiveLight 走，跟随系统时才会切浅色
     final gradStart = p.gradStart;
     final gradEnd = p.gradEnd;
@@ -133,92 +160,27 @@ class _AppBackdropState extends ConsumerState<AppBackdrop> {
             ),
           ),
         ),
-        if (hasWall)
+        if (wall != null)
           Positioned.fill(
             child: LayoutBuilder(
               builder: (context, constraints) {
                 final dpr = MediaQuery.devicePixelRatioOf(context);
-                final w = (constraints.maxWidth * dpr).round().clamp(1, 1920);
-                return _CachedWallImage(url: image, decodeWidth: w);
+                return KotvFrameImage(
+                  bytes: wall.bytes,
+                  targetWidth: (constraints.maxWidth * dpr).round().clamp(1, 1920),
+                  fit: BoxFit.cover,
+                  filterQuality: FilterQuality.medium,
+                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                );
               },
             ),
           ),
-        if (hasWall) Positioned.fill(child: ColoredBox(color: wallTint)),
+        if (wall != null) Positioned.fill(child: ColoredBox(color: wallTint)),
         Positioned(right: -80, top: -120, child: _Glow(glowTop, 420)),
         Positioned(left: -100, bottom: -60, child: _Glow(glowBot, 360)),
         Positioned(right: 80, bottom: 80, child: _Glow(glowMid, 220)),
         widget.child,
       ],
-    );
-  }
-}
-
-/// 壁纸：有落盘字节就从内存解，否则同一组件按地址拉。同时只留一个 codec。
-class _CachedWallImage extends StatefulWidget {
-  const _CachedWallImage({required this.url, required this.decodeWidth});
-
-  final String url;
-  final int decodeWidth;
-
-  @override
-  State<_CachedWallImage> createState() => _CachedWallImageState();
-}
-
-class _CachedWallImageState extends State<_CachedWallImage> {
-  Uint8List? _bytes;
-  bool _checked = false;
-  int _gen = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    unawaited(_load(widget.url));
-  }
-
-  @override
-  void didUpdateWidget(covariant _CachedWallImage oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.url != widget.url) {
-      _checked = false;
-      unawaited(_load(widget.url));
-    }
-  }
-
-  Future<void> _load(String url) async {
-    final gen = ++_gen;
-    var bytes = await kotvReadWallpaperBytes(url);
-    if (bytes == null) {
-      await kotvPersistWallpaper(url);
-      bytes = await kotvReadWallpaperBytes(url);
-    }
-    if (!mounted || gen != _gen) return;
-    setState(() {
-      _checked = true;
-      _bytes = bytes;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final bytes = _bytes;
-    if (bytes != null) {
-      return KotvFrameImage(
-        bytes: bytes,
-        targetWidth: widget.decodeWidth,
-        fit: BoxFit.cover,
-        filterQuality: FilterQuality.medium,
-        gaplessPlayback: true,
-        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-      );
-    }
-    if (!_checked) return const SizedBox.expand();
-    return KotvNetworkImage(
-      widget.url,
-      fit: BoxFit.cover,
-      filterQuality: FilterQuality.medium,
-      cacheWidth: widget.decodeWidth,
-      gaplessPlayback: true,
-      errorBuilder: (_, __, ___) => const SizedBox.shrink(),
     );
   }
 }

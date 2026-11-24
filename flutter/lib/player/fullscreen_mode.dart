@@ -64,17 +64,39 @@ Future<void> kotvEnterSystemFullscreen(KotvDesktopFullscreenKind kind) async {
   } catch (_) {}
 }
 
-const _phoneOrientations = <DeviceOrientation>[
-  DeviceOrientation.portraitUp,
-  DeviceOrientation.landscapeLeft,
-  DeviceOrientation.landscapeRight,
-];
+/// 手机/平板的屏幕方向。
+enum KotvPhoneOrientation {
+  /// 跟随系统自动旋转：方向锁定时保持竖屏，关闭锁定时随手机转。
+  follow,
 
-/// 手机恢复可横可竖。全屏里临时锁过方向后必须走这里，否则回首页也转不了。
-Future<void> kotvRestorePhoneOrientations() async {
+  /// 横屏全屏：两个横向随手机翻转，方向锁定时也照转。
+  landscape,
+
+  /// 竖屏。
+  portrait,
+}
+
+/// 手机/平板设方向（电视、桌面、Web 不处理）。Android 走原生 requestedOrientation：
+/// 「横屏随重力、无视方向锁定」只有 SENSOR_LANDSCAPE 能表达，Flutter 的方向列表做不到。
+Future<void> kotvSetPhoneOrientation(KotvPhoneOrientation orientation) async {
   if (kIsWeb || kotvIsDesktop() || KotvLayout.television) return;
   try {
-    await SystemChrome.setPreferredOrientations(_phoneOrientations);
+    if (kotvIsAndroid()) {
+      await const MethodChannel('kotv_android').invokeMethod<bool>('setOrientation', orientation.name);
+      return;
+    }
+    await SystemChrome.setPreferredOrientations(switch (orientation) {
+      KotvPhoneOrientation.follow => const [
+          DeviceOrientation.portraitUp,
+          DeviceOrientation.landscapeLeft,
+          DeviceOrientation.landscapeRight,
+        ],
+      KotvPhoneOrientation.landscape => const [
+          DeviceOrientation.landscapeLeft,
+          DeviceOrientation.landscapeRight,
+        ],
+      KotvPhoneOrientation.portrait => const [DeviceOrientation.portraitUp],
+    });
   } catch (_) {}
 }
 
@@ -89,7 +111,7 @@ Future<void> kotvExitSystemFullscreen({required bool wasDisplayFullscreen}) asyn
         DeviceOrientation.landscapeRight,
       ]);
     } else if (!kIsWeb && !kotvIsDesktop()) {
-      await kotvRestorePhoneOrientations();
+      await kotvSetPhoneOrientation(KotvPhoneOrientation.follow);
     } else {
       await SystemChrome.setPreferredOrientations(DeviceOrientation.values);
     }
@@ -104,23 +126,6 @@ Future<void> kotvExitSystemFullscreen({required bool wasDisplayFullscreen}) asyn
       await windowManager.setFullScreen(false);
     } catch (_) {}
   }
-}
-
-Future<void> kotvLockPortrait() async {
-  try {
-    await SystemChrome.setPreferredOrientations(const [
-      DeviceOrientation.portraitUp,
-    ]);
-  } catch (_) {}
-}
-
-Future<void> kotvForceLandscape() async {
-  try {
-    await SystemChrome.setPreferredOrientations(const [
-      DeviceOrientation.landscapeLeft,
-      DeviceOrientation.landscapeRight,
-    ]);
-  } catch (_) {}
 }
 
 /// 仅「手机竖屏握持 + 横屏片源」时显示「全屏观看」。

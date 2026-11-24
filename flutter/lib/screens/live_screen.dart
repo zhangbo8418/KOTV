@@ -3124,15 +3124,8 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
     }
     if (_miniDesktop) await _exitMini();
     if (!mounted) return;
-    if (!kotvIsDesktop()) {
-      // 手机/平板：全屏强制横屏，侧栏才不会竖着撑满。
-      try {
-        await SystemChrome.setPreferredOrientations(const [
-          DeviceOrientation.landscapeLeft,
-          DeviceOrientation.landscapeRight,
-        ]);
-      } catch (_) {}
-    }
+    // 手机/平板：全屏横屏，侧栏才不会竖着撑满。
+    await kotvSetPhoneOrientation(KotvPhoneOrientation.landscape);
     // 先落沉浸布局，再系统全屏（时序收在 kotvEnterSystemFullscreenAfterLayout）。
     setState(() {
       _desktopFs = desktopFs;

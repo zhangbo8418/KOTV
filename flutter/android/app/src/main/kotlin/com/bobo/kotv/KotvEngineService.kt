@@ -332,6 +332,7 @@ class KotvEngineService : Service() {
    * Win7 不确认，播放就停在这一条连接上。需要 root；没有 su 就跳过。
    */
   private fun relaxNicOffload() {
+    if (!nicRelaxTried.compareAndSet(false, true)) return
     val so = resolveEngineSo() ?: return
     val proc = try {
       ProcessBuilder("su", "-c", "\"$so\" -relax-nic")
@@ -419,6 +420,9 @@ class KotvEngineService : Service() {
     const val ACTION_STOP = "com.bobo.kotv.action.STOP_ENGINE"
 
     private val running = AtomicBoolean(false)
+
+    /** 网卡卸载设置一直生效到重启；每次 su 都会弹授权提示，进程内只试一次。 */
+    private val nicRelaxTried = AtomicBoolean(false)
 
     /** 引擎因 :9978 被别的程序占着退出过；前端经 engineState 读取，下次拉起前清掉。 */
     @Volatile

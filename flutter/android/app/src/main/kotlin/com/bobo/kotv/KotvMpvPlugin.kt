@@ -1430,8 +1430,9 @@ class KotvMpvPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, EventChann
   /**
    * 硬解直出：MediaCodec 把画面直接交给 SurfaceView，由系统合成输出（HDR 也由系统送显），
    * 不经 mpv 的 GL 渲染（vo=mediacodec_embed）。
-   * - Android 8.0 以下没有 AImageReader，GL 渲染拿不到硬解画面，硬解只能直出；
-   * - Rockchip 盒子默认直出。
+   * - Android 8.0 以下 GL 只能用 mediacodec-copy；Rockchip 解码器拷贝模式下 10bit HEVC 不出帧，
+   *   4K 软解又远跟不上，所以这两类设备硬解一律直出；
+   * - 直出不做色调映射：HDR/杜比视界片源送到不支持 HDR 的显示输入会发灰、偏暗。
    * 要求 SurfaceView 和硬解；字幕画在叠层 OSD Surface 上，滤镜、着色器等 GL 处理不生效。
    */
   private fun wantDirectOutput(): Boolean =

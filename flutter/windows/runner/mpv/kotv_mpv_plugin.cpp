@@ -288,7 +288,7 @@ struct MpvCore {
 struct SessionOpts {
   // Dart KotvMpvOpts.hwdecValue()。
   std::string hwdec = "auto";
-  // 建 mpv 时生效：gpu-api 先试 Vulkan，失败回到默认探测。
+  // 建 mpv 时生效：开 = gpu-api 先试 Vulkan 再自动探测；关 = 不碰 Vulkan。
   bool vulkan = false;
   std::string conf;
   bool disk_cache = false;
@@ -753,7 +753,8 @@ void InitAndOpen(std::shared_ptr<MpvCore> core, std::shared_ptr<Bridge> bridge, 
     mpv_set_option(m, "wid", MPV_FORMAT_INT64, &wid);
     // Win7 上 d3d11 / gpu-next 可能不可用：按顺序回退到 gpu、direct3d，避免探测卡死。
     mpv_set_option_string(m, "vo", "gpu-next,gpu,direct3d");
-    mpv_set_option_string(m, "gpu-api", opts.vulkan ? "vulkan,auto" : "auto");
+    // gpu-api=auto 在 d3d11 起不来时会探到 Vulkan；关 Vulkan 就只列 d3d11、opengl。
+    mpv_set_option_string(m, "gpu-api", opts.vulkan ? "vulkan,auto" : "d3d11,opengl");
     mpv_set_option_string(m, "gpu-context", "auto");
     // Win7 换不成 10bit 交换链：libplacebo 默认挑 R10G10B10A2，每帧 ResizeBuffers 都 E_INVALIDARG，画面全黑。
     if (IsWindows7()) mpv_set_option_string(m, "d3d11-output-format", "rgba8");

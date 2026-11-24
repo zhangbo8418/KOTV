@@ -10,6 +10,7 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -1418,50 +1419,36 @@ func (a *App) APIBackdrop() map[string]any {
 		}
 	}
 
-	image := ""
+	settingWall := ""
 	switch mode {
 	case "url":
-		image = wallURL
+		settingWall = wallURL
 	case "file":
-		image = wallFile
+		settingWall = wallFile
 	case "config":
-		image = configWall
-	case "gradient", "builtin1", "builtin2", "builtin3":
-		image = ""
-	default:
-		if mode == "" {
-			image = configWall
+		settingWall = configWall
+	}
+	// 壁纸候选按优先级：后台（分组品牌图，已回落全局）> 设置里选的。
+	// 客户端依次取图，前一个缺失或取不到有效图片才用下一个。
+	pol := grouppolicy.Resolve(auth.GetUser(hostclient.DataOwner()))
+	wallpapers := make([]string, 0, 2)
+	for _, src := range []string{pol.Brand["wallpaper"], settingWall} {
+		if u := a.backdropImageURL(src); u != "" && !slices.Contains(wallpapers, u) {
+			wallpapers = append(wallpapers, u)
 		}
 	}
-	image = a.resolveBackdropImageURL(image)
-
-	// 本地文件走引擎 /file/ 代理，便于 Flutter Image.network 加载。
-	if image != "" && !strings.HasPrefix(image, "http://") && !strings.HasPrefix(image, "https://") {
-		path := strings.TrimPrefix(image, "file://")
-		if path != "" {
-			port := a.Server.Port()
-			esc := url.PathEscape(path)
-			esc = strings.ReplaceAll(esc, "%2F", "/")
-			image = fmt.Sprintf("http://127.0.0.1:%d/file/%s", port, esc)
-		}
-	}
-	// 远端客户端需要对外可达地址，否则壁纸加载会打到客户端自身。
-	image = playproxy.PublicizeURL(image)
 
 	return map[string]any{
 		"mode":       mode,
 		"name":       name,
 		"light":      light,
-		"image":      image,
+		"wallpapers": wallpapers,
 		"gradStart":  gradStart,
 		"gradEnd":    gradEnd,
 		"glowTop":    glowTop,
 		"glowBottom": glowBot,
 		"glowMid":    glowMid,
 		"wallTint":   wallTint,
-		"wallURL":    wallURL,
-		"wallFile":   wallFile,
-		"configWall": configWall,
 		"primary":    primary,
 		"surface":    surface,
 		"variant":    variant,
@@ -1482,27 +1469,32 @@ func (a *App) APIBackdrop() map[string]any {
 	}
 }
 
-func (a *App) resolveBackdropImageURL(src string) string {
-	src = strings.TrimSpace(src)
-	if src == "" {
+// backdropImageURL 把壁纸来源（URL、本地路径、相对配置根的路径）转成客户端能直接取的地址。
+func (a *App) backdropImageURL(src string) string {
+	image := strings.TrimSpace(src)
+	if image == "" {
 		return ""
 	}
-	if strings.HasPrefix(src, "http://") || strings.HasPrefix(src, "https://") || strings.HasPrefix(src, "file://") {
-		return src
-	}
-	// 绝对本地路径原样返回，上层会转 /file/。
-	if strings.HasPrefix(src, "/") {
-		return src
-	}
-	if cfg, ready := a.scopeReady(); ready {
-		base := strings.TrimSpace(cfg.API().URL)
-		if base != "" {
-			if resolved := util.ResolveRelativeURL(base, src); resolved != "" {
-				return resolved
+	remote := strings.HasPrefix(image, "http://") || strings.HasPrefix(image, "https://")
+	if !remote && !strings.HasPrefix(image, "file://") && !strings.HasPrefix(image, "/") {
+		if cfg, ready := a.scopeReady(); ready {
+			if base := strings.TrimSpace(cfg.API().URL); base != "" {
+				if resolved := util.ResolveRelativeURL(base, image); resolved != "" {
+					image = resolved
+					remote = strings.HasPrefix(image, "http://") || strings.HasPrefix(image, "https://")
+				}
 			}
 		}
 	}
-	return src
+	// 本地文件走引擎 /file/ 代理。
+	if !remote {
+		if path := strings.TrimPrefix(image, "file://"); path != "" {
+			esc := strings.ReplaceAll(url.PathEscape(path), "%2F", "/")
+			image = fmt.Sprintf("http://127.0.0.1:%d/file/%s", a.Server.Port(), esc)
+		}
+	}
+	// 远端客户端需要对外可达地址，否则壁纸会打到客户端自身。
+	return playproxy.PublicizeURL(image)
 }
 
 func parseStringList(v string) []string {

@@ -109,7 +109,7 @@ Future<void> kotvFinishEngineAddress(WidgetRef ref, String url) async {
   await KotvClientStore.forgetEngineKey(url);
   ref.read(engineLauncherProvider).applyBaseUrl(url);
   KotvSettingsCache.clear();
-  await kotvClearImageMemory(ref: ref);
+  await kotvClearImageMemory();
   ref.invalidate(engineStatusProvider);
 }
 
