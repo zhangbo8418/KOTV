@@ -888,6 +888,56 @@ class _UserAdminScreenState extends ConsumerState<UserAdminScreen> {
                             final statusLabel = pending
                                 ? '待审批'
                                 : (enabled ? '启用' : '停用');
+                            final info = Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(name, style: TextStyle(color: p.fg, fontWeight: FontWeight.w600, fontSize: 15)),
+                                const SizedBox(height: 2),
+                                Text(
+                                  '$roleLabel · 分组 $groupLabel · $statusLabel${must ? ' · 需改密' : ''}',
+                                  style: TextStyle(color: p.muted, fontSize: 12),
+                                ),
+                              ],
+                            );
+                            final actions = <Widget>[
+                              if (pending)
+                                KotvFocusAction(
+                                  label: '审批',
+                                  color: p.fg,
+                                  fontSize: 12,
+                                  onPressed: () => unawaited(_approveUser(u)),
+                                ),
+                              KotvFocusAction(
+                                label: '角色',
+                                color: p.fg,
+                                fontSize: 12,
+                                onPressed: () => unawaited(_setUserRole(u)),
+                              ),
+                              KotvFocusAction(
+                                label: '分组',
+                                color: p.fg,
+                                fontSize: 12,
+                                onPressed: () => unawaited(_setUserGroup(u)),
+                              ),
+                              KotvFocusAction(
+                                label: enabled ? '停用' : '启用',
+                                color: p.fg,
+                                fontSize: 12,
+                                onPressed: () => unawaited(_toggleEnabled(u)),
+                              ),
+                              KotvFocusAction(
+                                label: '重置密码',
+                                color: p.fg,
+                                fontSize: 12,
+                                onPressed: () => unawaited(_resetPassword(u)),
+                              ),
+                              KotvFocusAction(
+                                label: '删除',
+                                color: const Color(0xFFE53955),
+                                fontSize: 12,
+                                onPressed: () => unawaited(_deleteUser(u)),
+                              ),
+                            ];
                             return Padding(
                               padding: const EdgeInsets.only(bottom: 8),
                               child: Material(
@@ -895,60 +945,13 @@ class _UserAdminScreenState extends ConsumerState<UserAdminScreen> {
                                 borderRadius: BorderRadius.circular(12),
                                 child: Padding(
                                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                                  child: Row(
-                                    children: [
-                                      Expanded(
-                                        child: Column(
+                                  // 窄屏操作按钮另起一行，否则名字列被挤成一两个字宽。
+                                  child: compact
+                                      ? Column(
                                           crossAxisAlignment: CrossAxisAlignment.start,
-                                          children: [
-                                            Text(name, style: TextStyle(color: p.fg, fontWeight: FontWeight.w600, fontSize: 15)),
-                                            const SizedBox(height: 2),
-                                            Text(
-                                              '$roleLabel · 分组 $groupLabel · $statusLabel${must ? ' · 需改密' : ''}',
-                                              style: TextStyle(color: p.muted, fontSize: 12),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                      if (pending)
-                                        KotvFocusAction(
-                                          label: '审批',
-                                          color: p.fg,
-                                          fontSize: 12,
-                                          onPressed: () => unawaited(_approveUser(u)),
-                                        ),
-                                      KotvFocusAction(
-                                        label: '角色',
-                                        color: p.fg,
-                                        fontSize: 12,
-                                        onPressed: () => unawaited(_setUserRole(u)),
-                                      ),
-                                      KotvFocusAction(
-                                        label: '分组',
-                                        color: p.fg,
-                                        fontSize: 12,
-                                        onPressed: () => unawaited(_setUserGroup(u)),
-                                      ),
-                                      KotvFocusAction(
-                                        label: enabled ? '停用' : '启用',
-                                        color: p.fg,
-                                        fontSize: 12,
-                                        onPressed: () => unawaited(_toggleEnabled(u)),
-                                      ),
-                                      KotvFocusAction(
-                                        label: '重置密码',
-                                        color: p.fg,
-                                        fontSize: 12,
-                                        onPressed: () => unawaited(_resetPassword(u)),
-                                      ),
-                                      KotvFocusAction(
-                                        label: '删除',
-                                        color: const Color(0xFFE53955),
-                                        fontSize: 12,
-                                        onPressed: () => unawaited(_deleteUser(u)),
-                                      ),
-                                    ],
-                                  ),
+                                          children: [info, const SizedBox(height: 6), Wrap(children: actions)],
+                                        )
+                                      : Row(children: [Expanded(child: info), ...actions]),
                                 ),
                               ),
                             );

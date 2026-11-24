@@ -26,12 +26,24 @@ class KotvJarVideoActivity : Activity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     current = WeakReference(this)
+    finishIfSessionOver()
   }
 
   override fun onResume() {
     super.onResume()
     current = WeakReference(this)
     signalReady()
+    finishIfSessionOver()
+  }
+
+  /**
+   * [enter] 等待超时后 [leave] 可能先于本页创建执行（那时 current 为空，关不到本页）。
+   * 本页晚到时会话已结束：自己关掉，否则透明页留在顶层吃掉全部触摸，只能按返回关。
+   */
+  private fun finishIfSessionOver() {
+    if (depth.get() > 0 || isFinishing) return
+    leaving = true
+    finish()
   }
 
   override fun finish() {
