@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # 把 OpenSSL（3.5 起的 3.x，带 QUIC）源码编进 PREFIX，供 ngtcp2/curl HTTP/3。
 # Windows：./Configure mingw64 + Win7 宏（不用 MSYS2 预编译包，那些不支持 Win7）。
-# macOS：仅当「真实硬件 arch == 目标 arch」且 brew 库内真有 QUIC 符号时用 brew；
-#        Rosetta(arch -x86_64) 下 uname 会谎报，禁止误用 arm64 bottle。
+# macOS：总是源码编，跟随 MACOSX_DEPLOYMENT_TARGET（brew bottle 按 runner 系统版本编，随包后旧系统起不来）。
 # Linux：系统 ≥3.5 且带 QUIC 可用，否则 Configure。
 set -euo pipefail
 
@@ -79,15 +78,6 @@ openssl_has_quic_api() {
     return 0
   fi
   return 1
-}
-
-kotv_macos_can_use_brew_openssl() {
-  [[ "$(uname -s 2>/dev/null)" == "Darwin" ]] || return 1
-  local hw want
-  hw="$(kotv_macos_hw_arch)"
-  want="$(kotv_macos_target_arch)"
-  # Rosetta：hw=arm64 但 uname/目标为 x86_64 → 绝不能用 /opt/homebrew arm64 bottle
-  [[ -n "$hw" && -n "$want" && "$hw" == "$want" ]]
 }
 
 kotv_clear_prefix_openssl() {
@@ -340,53 +330,6 @@ if openssl_ver_ok && openssl_has_quic_api \
     echo "ok cached OpenSSL $(pkg-config --modversion openssl 2>/dev/null || pkg-config --modversion libssl) (QUIC)"
     exit 0
   fi
-fi
-
-# ---------- macOS brew（同硬件 arch + 库内 QUIC）----------
-if ! kotv_is_windows_build && kotv_macos_can_use_brew_openssl && command -v brew >/dev/null 2>&1; then
-  for f in openssl@3.5 openssl@3 openssl; do
-    bp="$(brew --prefix "$f" 2>/dev/null || true)"
-    [[ -n "$bp" && -d "$bp/lib/pkgconfig" ]] || continue
-    brew_ssl=""
-    for cand in "$bp/lib/libssl.dylib" "$bp/lib/libssl.3.dylib"; do
-      [[ -f "$cand" ]] && brew_ssl="$cand" && break
-    done
-    [[ -n "$brew_ssl" ]] || continue
-    if ! kotv_macos_file_has_arch "$brew_ssl" "$(kotv_macos_target_arch)"; then
-      echo "WARN: brew $f libssl arch != $(kotv_macos_target_arch); skip" >&2
-      continue
-    fi
-    if ! openssl_lib_has_quic "$brew_ssl"; then
-      echo "WARN: brew $f lacks SSL_set_quic_tls_cbs in dylib; skip" >&2
-      continue
-    fi
-    export PKG_CONFIG_PATH="$bp/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
-    if ! openssl_ver_ok; then
-      continue
-    fi
-    ver="$(pkg-config --modversion openssl 2>/dev/null || pkg-config --modversion libssl)"
-    for name in openssl libssl libcrypto; do
-      [[ -f "$bp/lib/pkgconfig/${name}.pc" ]] || continue
-      sed "s|^prefix=.*|prefix=$bp|" "$bp/lib/pkgconfig/${name}.pc" >"$PREFIX/lib/pkgconfig/${name}.pc"
-    done
-    mkdir -p "$PREFIX/lib" "$PREFIX/include"
-    cp -R "$bp/include/openssl" "$PREFIX/include/" 2>/dev/null || true
-    shopt -s nullglob
-    for lib in "$bp/lib"/libssl* "$bp/lib"/libcrypto*; do
-      [[ -e "$lib" ]] || continue
-      cp -fR "$lib" "$PREFIX/lib/" 2>/dev/null || true
-    done
-    shopt -u nullglob
-    export PKG_CONFIG_PATH="$(kotv_native_path "$PREFIX/lib/pkgconfig")${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
-    if openssl_has_quic_api; then
-      echo "ok macOS OpenSSL $ver ← brew $f (QUIC)"
-      exit 0
-    fi
-    kotv_clear_prefix_openssl
-  done
-elif ! kotv_is_windows_build && [[ "$(uname -s 2>/dev/null)" == "Darwin" ]] && ! kotv_macos_can_use_brew_openssl; then
-  echo "WARN: macOS hw=$(kotv_macos_hw_arch) target=$(kotv_macos_target_arch); skip brew, source-build" >&2
-  kotv_clear_prefix_openssl
 fi
 
 # ---------- Linux：系统 ≥3.5 且带 QUIC（勿在 Darwin 误走）----------

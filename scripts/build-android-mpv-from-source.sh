@@ -88,7 +88,14 @@ kotv_git_checkout_commit "$SRC" "$MPV_ANDROID_REPO" "$MPV_ANDROID_COMMIT"
   || { echo "ERROR: mpv-android HEAD != $MPV_ANDROID_COMMIT" >&2; exit 1; }
 
 BS="$SRC/buildscripts"
+# deps 里的源码已按当时 builder 的 patches 打过补丁；builder 换了补丁会对不上，整目录重下。
+deps_stamp="$BS/deps/.kotv-builder"
+if [[ -d "$BS/deps" && "$(cat "$deps_stamp" 2>/dev/null)" != "$MPV_ANDROID_COMMIT" ]]; then
+  echo "==> builder changed; drop cached deps"
+  rm -rf "$BS/deps"
+fi
 mkdir -p "$BS/deps"
+echo "$MPV_ANDROID_COMMIT" > "$deps_stamp"
 # 预置 mpv tip（ci.sh 见已有 deps/mpv 则跳过 clone）。
 kotv_git_checkout_commit "$BS/deps/mpv" "$MPV_REPO" "$MPV_COMMIT"
 [[ "$(git -C "$BS/deps/mpv" rev-parse HEAD)" == "$MPV_COMMIT" ]] \

@@ -62,16 +62,15 @@ kotv_choco_install_vulkan_sdk() {
 }
 
 kotv_lunarg_install_vulkan_sdk() {
-  local url exe exe_win
+  local url exe
   url="${KOTV_VULKAN_SDK_URL:-https://sdk.lunarg.com/sdk/download/${SDK_VER}/windows/vulkansdk-windows-X64-${SDK_VER}.exe}"
   exe="${RUNNER_TEMP:-/tmp}/vulkansdk-windows-X64-${SDK_VER}.exe"
-  exe_win="$(cygpath -w "$exe" 2>/dev/null || echo "$exe")"
   echo "==> download Vulkan SDK ${SDK_VER} from LunarG"
   curl -fsSL --connect-timeout 30 --retry 3 --retry-delay 5 --max-time 900 -o "$exe" "$url" \
     || { echo "ERROR: download Vulkan SDK failed: $url" >&2; return 1; }
   echo "==> silent install -> ${SDK_ROOT_WIN}"
-  # 与 chocolatey 包 silentArgs 一致；经 cmd 调起，避免 Git Bash 吞参数。
-  cmd.exe //c "\"$exe_win\" install --accept-licenses --confirm-command --accept-messages --root=$SDK_ROOT_WIN" \
+  # 与 chocolatey 包 silentArgs 一致。直接调 exe：经 cmd //c 时 MSYS 把内层引号转成 \"，cmd 认不出。
+  MSYS_NO_PATHCONV=1 "$exe" install --accept-licenses --confirm-command --accept-messages --root "$SDK_ROOT_WIN" \
     || { echo "ERROR: LunarG Vulkan SDK installer failed" >&2; return 1; }
   kotv_vulkan_sdk_ready "$SDK_ROOT" \
     || { echo "ERROR: Vulkan SDK installed but headers/libs missing under $SDK_ROOT" >&2; ls -la "$SDK_ROOT" >&2 || true; return 1; }
