@@ -148,12 +148,12 @@ class _FolderScreenState extends ConsumerState<FolderScreen> {
     final s = LayoutScale.of(context);
     final p = KotvPalette.of(context);
     return Scaffold(
-      backgroundColor: p.surface,
+      backgroundColor: Colors.transparent,
       appBar: AppBar(
         toolbarHeight: LayoutScale.dp(context, kToolbarHeight),
         iconTheme: IconThemeData(size: LayoutScale.dp(context, 24), color: p.fg),
         title: Text(widget.title.isEmpty ? '目录' : widget.title),
-        backgroundColor: p.surface,
+        backgroundColor: p.statusBar,
         foregroundColor: p.fg,
       ),
       body: KotvPullRefresh(

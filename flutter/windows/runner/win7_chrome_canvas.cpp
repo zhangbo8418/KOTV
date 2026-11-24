@@ -231,7 +231,6 @@ uint32_t IconByName(const std::string& n) {
       {"tune", 0xe683},
       {"equalizer", 0xe236},
       {"repeat", 0xe51f},
-      {"wb_sunny_outlined", 0xf4bc},
       {"graphic_eq", 0xe2e3},
       {"skip_next_outlined", 0xf3a0},
       {"playlist_play", 0xe4d4},

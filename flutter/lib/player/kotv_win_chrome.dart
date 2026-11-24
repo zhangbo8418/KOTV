@@ -494,7 +494,6 @@ class KotvWinChrome {
   /// [VodFullscreenChrome] `_showMore`。
   static List<Map<String, dynamic>> vodMoreItems({
     required bool repeatOne,
-    required bool ambientOn,
     required bool supportsStableVolume,
     required bool stableVolume,
     required bool loopSkip,
@@ -514,7 +513,6 @@ class KotvWinChrome {
         row(id: 'videoEq', label: '画面调色', kind: 'link', icon: 'tune', chevron: true),
         row(id: 'audioFx', label: '音频效果', kind: 'link', icon: 'equalizer', chevron: true),
         row(id: 'repeat', label: '循环播放视频', kind: 'toggle', icon: 'repeat', on: repeatOne),
-        row(id: 'ambient', label: '氛围模式', kind: 'toggle', icon: 'wb_sunny_outlined', on: ambientOn),
         if (supportsStableVolume)
           row(id: 'stableVolume', label: '稳定音量', kind: 'toggle', icon: 'graphic_eq', on: stableVolume),
         row(id: 'loopSkip', label: '跳过片头片尾', kind: 'toggle', icon: 'skip_next_outlined', on: loopSkip),

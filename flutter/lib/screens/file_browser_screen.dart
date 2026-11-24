@@ -231,11 +231,11 @@ class _FileBrowserScreenState extends ConsumerState<FileBrowserScreen> {
         _goUp();
       },
       child: Scaffold(
-        backgroundColor: p.surface,
+        backgroundColor: Colors.transparent,
         appBar: AppBar(
           toolbarHeight: kToolbarHeight * ui,
           iconTheme: IconThemeData(size: 24 * ui, color: p.fg),
-          backgroundColor: p.surface,
+          backgroundColor: p.statusBar,
           foregroundColor: p.fg,
           title: Text(widget.title),
           leading: TvFocus(

@@ -416,7 +416,6 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     final srcName = srcs.isEmpty ? '' : srcs[widget.danmakuSourceIdx.clamp(0, srcs.length - 1)].name;
     return KotvWinChrome.vodMoreItems(
       repeatOne: widget.playback.repeatOne,
-      ambientOn: _ambientOn,
       supportsStableVolume: widget.playback.supportsStableVolume,
       stableVolume: _winStableVolume,
       loopSkip: _winLoopSkip,
@@ -716,11 +715,6 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     switch (id) {
       case 'repeat':
         widget.onRepeatOneChanged?.call(on);
-        break;
-      case 'ambient':
-        setState(() => _ambientOn = on);
-        widget.onAmbientChanged?.call(on);
-        await _winPersist('playerAmbient', on ? 'true' : 'false');
         break;
       case 'stableVolume':
         setState(() => _winStableVolume = on);

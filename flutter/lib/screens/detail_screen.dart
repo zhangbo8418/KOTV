@@ -280,6 +280,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   KotvMpvOpts _mpvOpts = const KotvMpvOpts();
   bool _danmakuOn = false;
   bool _ambientOn = false;
+
+  /// Win7 原生播控没有氛围模式：设置里残留的开关一律当关。
+  static bool _ambientFromSetting(String v) => !KotvWinChrome.isNeeded && v.toLowerCase() == 'true';
   /// off | audio | pip
   String _playerBackground = 'pip';
   double _holdSpeed = 2.0;
@@ -1366,7 +1369,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     );
     _playerBackground = kotvPlayerBackgroundFromSettings(settings);
     _holdSpeed = (double.tryParse('${settings['playerSpeedLongPress'] ?? '2.0'}') ?? 2.0).clamp(2.0, 5.0).toDouble();
-    _ambientOn = '${settings['playerAmbient'] ?? ''}'.toLowerCase() == 'true';
+    _ambientOn = _ambientFromSetting('${settings['playerAmbient'] ?? ''}');
     _stableVolumeOn = '${settings['playerStableVolume'] ?? ''}'.toLowerCase() == 'true';
     _syncAndroidAutoPip();
     _applyDanmakuPrefsFromSettings(settings, applyOffset: true);
@@ -2844,13 +2847,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           ? stackSize
           : MediaQuery.sizeOf(context);
       var r = Offset.zero & s;
-      // Win7 全屏/铺满：视频 HWND 铺满，顶底栏半透明叠上（同 VodFullscreenChrome），勿 inset 挤出黑边。
-      // 氛围模式：画面略内缩，四周透出壳层壁纸（默认适应仍是黑边）。
-      // Win7 原生铺满：勿内缩，整窗交给视频 HWND。
-      if (!KotvWinChrome.isNeeded &&
-          _ambientOn &&
-          r.width > 80 &&
-          r.height > 96) {
+      // 氛围模式：画面略内缩，四周透出壳层壁纸（默认适应仍是黑边）。Win7 原生播控无氛围，视频 HWND 铺满。
+      if (_ambientOn && r.width > 80 && r.height > 96) {
         return Rect.fromLTRB(r.left + 28, r.top + 36, r.right - 28, r.bottom - 36);
       }
       return r;
@@ -3977,7 +3975,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       unawaited(_playback.setVideoScale(v));
     }
     if (k == 'playerAmbient') {
-      setState(() => _ambientOn = v.toLowerCase() == 'true');
+      setState(() => _ambientOn = _ambientFromSetting(v));
     }
     if (k == 'mpvDirect') {
       final on = kotvSettingsFlag(v);
@@ -4226,39 +4224,35 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             onNews: () => showLatestNews(context, ref),
             title: _routeTitle.isNotEmpty ? _routeTitle : '详情',
           );
-      // 详情压在壳层 Navigator 上（Cupertino/Material 路由默认不透明），
-      // 壳层壁纸透不出来，须自带 AppBackdrop（勿重复壁纸定时刷新）。
-      // SafeArea 只包内容：壁纸仍全屏，顶栏避开状态栏。
+      // 详情压在壳层 Navigator 上：路由不透明只是不画下层路由，页面透明即透出壳层壁纸（全应用一层）。
+      // SafeArea 只包内容：顶栏避开状态栏。
       final detailScaffold = Scaffold(
         backgroundColor: Colors.transparent,
-        body: AppBackdrop(
-          periodicSettingsRefresh: false,
-          child: SafeArea(
-            bottom: false,
-            child: Column(
-              children: [
-                Visibility(
-                  visible: false,
-                  maintainSize: true,
-                  maintainAnimation: true,
-                  maintainState: true,
-                  maintainInteractivity: false,
-                  child: buildTopBar(),
+        body: SafeArea(
+          bottom: false,
+          child: Column(
+            children: [
+              Visibility(
+                visible: false,
+                maintainSize: true,
+                maintainAnimation: true,
+                maintainState: true,
+                maintainInteractivity: false,
+                child: buildTopBar(),
+              ),
+              Expanded(
+                child: KeyedSubtree(
+                  key: _bodyClipKey,
+                  child: _loading
+                      ? Center(child: CircularProgressIndicator(color: KotvPalette.of(context).primary))
+                      : _error != null
+                          ? Center(child: Text(_error!, style: TextStyle(color: KotvPalette.of(context).fg)))
+                          : _detail == null
+                              ? const SizedBox.shrink()
+                              : _buildBody(),
                 ),
-                Expanded(
-                  child: KeyedSubtree(
-                    key: _bodyClipKey,
-                    child: _loading
-                        ? Center(child: CircularProgressIndicator(color: KotvPalette.of(context).primary))
-                        : _error != null
-                            ? Center(child: Text(_error!, style: TextStyle(color: KotvPalette.of(context).fg)))
-                            : _detail == null
-                                ? const SizedBox.shrink()
-                                : _buildBody(),
-                  ),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       );
@@ -4285,7 +4279,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
             fit: StackFit.expand,
             children: [
               // 沉浸默认黑底（各平台一致）：适应 letterbox 不透壳壁纸。
-              // 仅氛围模式去掉黑底，四周才透详情 AppBackdrop；Android 仍卸详情树防 Surface 镂空双影
+              // 仅氛围模式去掉黑底，四周才透壳层壁纸；Android 仍卸详情树防 Surface 镂空双影
               // （7458fbe / ef4fb2d：稳定 Positioned 宿主，勿整页 Offstage 叠一层 Hybrid）。
               // 桌面 Offstage 保活详情树（退出沉浸不重建）。
               // 沉浸期禁止 _syncVideoSlotRect，避免 setState 重建 Hybrid Positioned。
@@ -4336,28 +4330,25 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     } else {
       body = Scaffold(
         backgroundColor: Colors.transparent,
-        body: AppBackdrop(
-          periodicSettingsRefresh: false,
-          child: SafeArea(
-            bottom: false,
-            child: Column(
-              children: [
-                LibraryTopBar(
-                  onBack: () => unawaited(_leavePage()),
-                  onSearch: () => unawaited(_leavePage(afterPop: () => goKotvPage(ref, KotvPage.search))),
-                  onProfile: () => unawaited(_leavePage(afterPop: () => goKotvPage(ref, KotvPage.profile))),
-                  onNews: () => showLatestNews(context, ref),
-                  title: _routeTitle.isNotEmpty ? _routeTitle : '详情',
-                ),
-                Expanded(
-                  child: _loading
-                      ? Center(child: CircularProgressIndicator(color: KotvPalette.of(context).primary))
-                      : _error != null
-                          ? Center(child: Text(_error!, style: TextStyle(color: KotvPalette.of(context).fg)))
-                          : _buildBody(),
-                ),
-              ],
-            ),
+        body: SafeArea(
+          bottom: false,
+          child: Column(
+            children: [
+              LibraryTopBar(
+                onBack: () => unawaited(_leavePage()),
+                onSearch: () => unawaited(_leavePage(afterPop: () => goKotvPage(ref, KotvPage.search))),
+                onProfile: () => unawaited(_leavePage(afterPop: () => goKotvPage(ref, KotvPage.profile))),
+                onNews: () => showLatestNews(context, ref),
+                title: _routeTitle.isNotEmpty ? _routeTitle : '详情',
+              ),
+              Expanded(
+                child: _loading
+                    ? Center(child: CircularProgressIndicator(color: KotvPalette.of(context).primary))
+                    : _error != null
+                        ? Center(child: Text(_error!, style: TextStyle(color: KotvPalette.of(context).fg)))
+                        : _buildBody(),
+              ),
+            ],
           ),
         ),
       );

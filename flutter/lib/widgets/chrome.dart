@@ -15,17 +15,14 @@ import 'h_scroll.dart';
 import 'kotv_network_image.dart';
 import 'marquee_text.dart';
 
-/// Legacy 背景：按 settings.backdrop（wallMode）切换渐变/壁纸/内置主题。
+/// 背景：按 settings.backdrop（wallMode）切换渐变/壁纸/内置主题。
+/// 全应用只在壳层挂一层（压在壳层 Navigator 上的页面保持透明）；壳层之外只有起播前的等待/登录页自带。
 class AppBackdrop extends ConsumerStatefulWidget {
   const AppBackdrop({
     super.key,
     required this.child,
-    this.periodicSettingsRefresh = true,
   });
   final Widget child;
-
-  /// 壳层为 true；详情等嵌套层为 false，避免叠多个 30min 定时器。
-  final bool periodicSettingsRefresh;
 
   @override
   ConsumerState<AppBackdrop> createState() => _AppBackdropState();
@@ -39,7 +36,6 @@ class _AppBackdropState extends ConsumerState<AppBackdrop> {
   void initState() {
     super.initState();
     unawaited(_restoreDiskWall());
-    if (!widget.periodicSettingsRefresh) return;
     // 配置壁纸（如每日 bing）定时刷新：先保持 sticky，再换图，避免先 blank。
     _wallTimer = Timer.periodic(const Duration(minutes: 30), (_) {
       if (!mounted) return;
