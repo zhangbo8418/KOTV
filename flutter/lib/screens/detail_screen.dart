@@ -2973,11 +2973,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           child: layer,
         );
       },
-      // 退出沉浸 hold 整窗几何时勿抢点（否则 macOS 详情按钮全死）；
-      // Win7 沉浸中也让出命中给原生播控 HWND。
+      // Win7 全屏/铺满：命中交给原生 gesture HWND，Flutter 视频层不抢点。
       child: IgnorePointer(
-        ignoring: _holdImmersiveVideoGeom ||
-            (KotvWinChrome.isNeeded && _immersiveFullscreen),
+        ignoring: KotvWinChrome.isNeeded && holdFullscreen,
         child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: () {
@@ -2992,7 +2990,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
           unawaited(_playback.playOrPause());
           setState(() {});
         },
-        onSecondaryTap: _immersiveFullscreen ? null : () => kotvHandleAppBack?.call(),
         onDoubleTap: _immersiveFullscreen
             ? null
             : () => unawaited(_cycleImmersiveByDoubleTap()),
@@ -3508,7 +3505,6 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
               unawaited(_playback.playOrPause());
               setState(() {});
             },
-      onSecondaryTap: () => kotvHandleAppBack?.call(),
       onDoubleTap: interactive && !stableSlot
           ? () => unawaited(_cycleImmersiveByDoubleTap())
           : null,

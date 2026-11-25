@@ -32,6 +32,11 @@ import 'widgets/chrome.dart';
 import 'widgets/h_scroll.dart';
 import 'widgets/web_sign_in_page.dart';
 
+/// 鼠标右键 = 返回，全应用只在根 Listener 这一处处理，且在松开时触发：
+/// 按下即返回会立刻开始退出 macOS 系统全屏，切换动画吞掉这次松开，
+/// Flutter 便认为右键一直按着，之后的左键都被当成拖动而点不动。
+int? _mouseBackPointer;
+
 /// Release 构建里 build 抛异常会渲染成一块灰色空白（默认 ErrorWidget），
 /// 页面看着像"没了"却无从追查；换成可读文案并把错误打到日志。
 void _kotvLogUiError(Object error, StackTrace? stack, {String where = 'build'}) {
@@ -370,20 +375,15 @@ class _KotvAppState extends ConsumerState<KotvApp> with WindowListener, WidgetsB
         return Listener(
           behavior: HitTestBehavior.translucent,
           onPointerDown: (e) {
-            // 电视上 phantom pointer 会误关环；仅桌面真鼠标/触控板 disarm。
-            if (KotvLayout.television) {
-              if (e.kind == PointerDeviceKind.mouse && (e.buttons & kSecondaryMouseButton) != 0) {
-                kotvHandleAppBack?.call();
-              }
-              return;
+            if (e.kind == PointerDeviceKind.mouse && (e.buttons & kSecondaryMouseButton) != 0) {
+              _mouseBackPointer = e.pointer;
             }
+            // 电视上 phantom pointer 会误关环；仅桌面真鼠标/触控板 disarm。
+            if (KotvLayout.television) return;
             switch (e.kind) {
               case PointerDeviceKind.mouse:
               case PointerDeviceKind.trackpad:
                 KotvKeyHighlight.disarm();
-                if (e.kind == PointerDeviceKind.mouse && (e.buttons & kSecondaryMouseButton) != 0) {
-                  kotvHandleAppBack?.call();
-                }
                 break;
               case PointerDeviceKind.touch:
               case PointerDeviceKind.stylus:
@@ -393,6 +393,14 @@ class _KotvAppState extends ConsumerState<KotvApp> with WindowListener, WidgetsB
               case PointerDeviceKind.unknown:
                 break;
             }
+          },
+          onPointerUp: (e) {
+            if (e.pointer != _mouseBackPointer) return;
+            _mouseBackPointer = null;
+            kotvHandleAppBack?.call();
+          },
+          onPointerCancel: (e) {
+            if (e.pointer == _mouseBackPointer) _mouseBackPointer = null;
           },
           child: ScaledLayoutBox(child: child ?? const SizedBox.shrink()),
         );

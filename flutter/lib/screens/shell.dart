@@ -47,7 +47,7 @@ class _AppShellState extends ConsumerState<AppShell> {
   RemoteBridge? _bridge;
   PostMsgHost? _postMsg;
   DateTime? _lastHomeBackAt;
-  /// 防止 PopScope / 右键 Listener / 画面 onSecondaryTap 短时间内连触发两次。
+  /// 防止 PopScope、按键与右键返回在同一次操作里连触发两次。
   bool _handlingBack = false;
   Timer? _handlingBackReset;
   /// 稳定 Navigator key：切 Tab 用 pushAndRemoveUntil 换根页，勿用 GlobalObjectKey(page)

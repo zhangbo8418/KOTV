@@ -320,8 +320,11 @@ class NativeMpvPlayback extends KotvPlayback {
     } catch (_) {}
   }
 
-  bool get _hasRealVideoTrack =>
-      _videoTracks.any((t) => kotvIsRealVideoTrack(id: t.id, codec: t.codec));
+  /// 去掉封面/图片轨（png/mjpeg 等）；切轨自救只在这些轨里试。
+  Iterable<KotvTrack> get _realVideoTracks =>
+      _videoTracks.where((t) => kotvIsRealVideoTrack(id: t.id, codec: t.codec));
+
+  bool get _hasRealVideoTrack => _realVideoTracks.isNotEmpty;
 
   bool get _hasRealAudioTrack => _audioTracks.isNotEmpty;
 
@@ -1233,12 +1236,13 @@ class NativeMpvPlayback extends KotvPlayback {
     if (_url.isEmpty) return;
     try {
       await _refreshTracks();
-      if (_videoTracks.isEmpty) {
+      final candidates = _realVideoTracks.toList();
+      if (candidates.isEmpty) {
         if (_audioTracks.isNotEmpty) return;
         await play();
         return;
       }
-      for (final t in _videoTracks) {
+      for (final t in candidates) {
         await setVideoTrack(t.id);
         await Future<void>.delayed(const Duration(milliseconds: 350));
         if (_w > 0 && _h > 0) return;

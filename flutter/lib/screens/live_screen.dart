@@ -3794,10 +3794,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
   }
 
   void _onLiveFsPointerDown(PointerDownEvent e) {
-    if (e.buttons == kSecondaryMouseButton) {
-      kotvHandleAppBack?.call();
-      return;
-    }
     if (e.buttons != kPrimaryButton) return;
     if (_leftOpen || _rightOpen || _epgOpen) return;
     // 电视：只保留短点三分区，不启拖/滚手势。
@@ -5392,7 +5388,6 @@ class _LiveScreenState extends ConsumerState<LiveScreen> with WidgetsBindingObse
                 GestureDetector(
                   behavior: HitTestBehavior.opaque,
                   onTap: _togglePortraitChrome,
-                  onSecondaryTap: () => kotvHandleAppBack?.call(),
                   onDoubleTap: _onLiveDoubleTap,
                   child: _buildSharedLiveVideo(),
                 ),

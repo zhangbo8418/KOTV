@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import '../nav/kotv_page.dart';
 import '../player/kotv_platform.dart';
 import '../player/kotv_playback.dart';
 
@@ -92,40 +91,36 @@ class _MiniHoverShellState extends State<MiniHoverShell> {
       onEnter: (_) => _enter(),
       onExit: (_) => _leave(),
       onHover: (_) => _enter(),
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onSecondaryTap: () => kotvHandleAppBack?.call(),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            ColoredBox(color: const Color(0xFF0A0A12), child: widget.video),
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              child: IgnorePointer(
-                ignoring: !_show,
-                child: AnimatedOpacity(
-                  opacity: _show ? 1 : 0,
-                  duration: const Duration(milliseconds: 180),
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          Colors.black.withOpacity(0),
-                          Colors.black.withOpacity(0.55),
-                        ],
-                      ),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          ColoredBox(color: const Color(0xFF0A0A12), child: widget.video),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: IgnorePointer(
+              ignoring: !_show,
+              child: AnimatedOpacity(
+                opacity: _show ? 1 : 0,
+                duration: const Duration(milliseconds: 180),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.black.withOpacity(0),
+                        Colors.black.withOpacity(0.55),
+                      ],
                     ),
-                    child: widget.chrome,
                   ),
+                  child: widget.chrome,
                 ),
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
     if (kotvIsWindows7()) return shell;
