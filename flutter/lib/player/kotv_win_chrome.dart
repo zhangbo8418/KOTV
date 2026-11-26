@@ -359,11 +359,15 @@ class KotvWinChrome {
   static bool _covered = false;
   static bool _sentSuspended = false;
 
+  /// 挂起层归零时自增；mpv 洞监听后重发显隐（与 PopupRouteObserver 互补）。
+  static final ValueNotifier<int> unsuspendTick = ValueNotifier<int>(0);
+
   static Future<void> _pushSuspended() async {
     final want = _suspendDepth > 0 || _covered;
     if (want == _sentSuspended) return;
     _sentSuspended = want;
     await update({'suspended': want});
+    if (!want) unsuspendTick.value++;
   }
 
   /// 播放页被别的 Flutter 路由（对话框、底部弹层）盖住：原生壳是置顶分层窗，须整体挂起。

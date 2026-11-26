@@ -985,8 +985,24 @@ class KotvMpvPlugin : public flutter::Plugin {
     SetWindowPos(core_->hwnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
   }
 
+  // 仅藏/显 HWND，不动 allow_show_。Flutter 弹窗盖住时用；关掉后还靠 allow_show_ 再亮。
+  void SetVideoWindowVisible(bool show) {
+    if (!core_ || !core_->hwnd) return;
+    if (show) {
+      if (!visible_ || !have_frame_ || !allow_show_) return;
+      if (IsWindowVisible(core_->hwnd)) return;
+      ShowWindow(core_->hwnd, SW_SHOWNOACTIVATE);
+      NotifySurface();
+      return;
+    }
+    if (IsWindowVisible(core_->hwnd)) {
+      ShowWindow(core_->hwnd, SW_HIDE);
+      NotifySurface();
+    }
+  }
+
   void HideVideo(HWND h) {
-    // 换集/停播：禁止 updateFrame 再把窗抢先亮出来（否则 STATIC/空窗白闪）。
+    // 换集/停播：禁止 updateFrame 再把空窗抢先亮出来（否则 STATIC/白闪）。
     allow_show_ = false;
     if (h && IsWindowVisible(h)) {
       ShowWindow(h, SW_HIDE);
@@ -1500,15 +1516,9 @@ class KotvMpvPlugin : public flutter::Plugin {
       return;
     }
     if (method == "setVisible") {
+      // 弹窗显隐：勿走 HideVideo（会清 allow_show_，关弹窗后 ShowVideo 永远 return → 黑屏）。
       visible_ = ArgBool(args, "visible");
-      if (core_ && core_->hwnd) {
-        // 无有效几何前不 Show，避免默认窗停在客户区左上角。
-        if (visible_ && have_frame_) {
-          ShowVideo();
-        } else {
-          HideVideo(core_->hwnd);
-        }
-      }
+      SetVideoWindowVisible(visible_);
       result->Success();
       return;
     }

@@ -178,6 +178,7 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
     super.initState();
     KotvMpvUnderlayHole._resync.addListener(_sync);
     KotvPopupRouteObserver.open.addListener(_syncNextFrame);
+    if (_win7Overlay) KotvWinChrome.unsuspendTick.addListener(_syncNextFrame);
     WidgetsBinding.instance.addPostFrameCallback((_) => _sync());
   }
 
@@ -190,8 +191,9 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
   void dispose() {
     KotvMpvUnderlayHole._resync.removeListener(_sync);
     KotvPopupRouteObserver.open.removeListener(_syncNextFrame);
-    if (_win7Overlay) KotvWinChrome.setCovered(false);
     if (_win7Overlay) {
+      KotvWinChrome.unsuspendTick.removeListener(_syncNextFrame);
+      KotvWinChrome.setCovered(false);
       _setVisible(false);
     }
     super.dispose();
@@ -246,13 +248,19 @@ class _KotvMpvUnderlayHoleState extends State<KotvMpvUnderlayHole> {
 
     // Win7：路由被盖住或根上有弹窗时藏 HWND，避免挡住对话框。
     final route = ModalRoute.of(context);
+    final overlayCovered = _win7Overlay &&
+        ((route != null && !route.isCurrent) || KotvPopupRouteObserver.open.value > 0);
     // 原生播控是置顶分层窗，Flutter 弹窗盖上来时一并挂起。
-    if (_win7Overlay && ((route != null && !route.isCurrent) || KotvPopupRouteObserver.open.value > 0)) {
+    if (overlayCovered) {
       KotvWinChrome.setCovered(true);
       await _setVisible(false);
       return;
     }
-    if (_win7Overlay) KotvWinChrome.setCovered(false);
+    if (_win7Overlay) {
+      // 刚从弹窗回来：强制再发一次 show（避免 _lastVisible 与原生不同步）。
+      if (_lastVisible == false) _lastVisible = null;
+      KotvWinChrome.setCovered(false);
+    }
 
     final origin = box.localToGlobal(Offset.zero);
     final size = box.size;
