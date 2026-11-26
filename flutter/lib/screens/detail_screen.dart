@@ -769,9 +769,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     unawaited(() async {
       final idx = _danmakuSources.indexWhere((s) => s.url == u);
       if (idx < 0) return;
+      // 只登记/加载；显示完全跟「开启弹幕」，猫源推送不得强开。
       await _loadDanmakuSource(idx, playSerial: serial);
-      if (!mounted || serial != _playAtSerial) return;
-      if (!_danmakuOn) setState(() => _danmakuOn = true);
     }());
   }
 
@@ -880,15 +879,29 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     unawaited(() async {
       final items = await _fetchDanmaku(path.trim());
       if (!mounted || items == null) return;
-      _danmakuItems.value = items;
-      if (!_danmakuOn) setState(() => _danmakuOn = true);
+      _setDanmakuItems(items);
     }());
   }
 
   void _onRemoteLiveDanmaku(DanmakuItem item) {
     if (!mounted) return;
-    _danmakuItems.value = kotvAppendLiveDanmaku(_danmakuItems.value, item, _playback.position);
-    if (!_danmakuOn) setState(() => _danmakuOn = true);
+    _setDanmakuItems(
+      kotvAppendLiveDanmaku(_danmakuItems.value, item, _playback.position),
+    );
+  }
+
+  /// 更新弹幕列表并同步 Win7 原生层；不改「开启弹幕」（显示只看 [_danmakuOn]）。
+  void _setDanmakuItems(List<DanmakuItem> items) {
+    _danmakuItems.value = items;
+    _syncDanmakuDisplay();
+  }
+
+  /// 开关或列表变化后，立刻把显隐推到 Flutter / Win7 原生壳。
+  void _syncDanmakuDisplay() {
+    if (!mounted) return;
+    if (KotvWinChrome.isNeeded && !_immersiveFullscreen) {
+      _syncWinInlineChrome();
+    }
   }
 
   /// 放开 PopScope，否则随后的 popUntil 会被 canPop:false 拦住。
@@ -1947,7 +1960,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     // 片头已写入 queueNext(startAt)；此处勿再 seek，避免 keep-open/EOF 切集窗口打到旧文件。
     _openingSeekDone = true;
     _playHeaders = q.headers;
-    _danmakuItems.value = const [];
+    _setDanmakuItems(const []);
     _spiderDanmakuSources = kotvDanmakuSourcesFrom(q.data['danmaku']);
     _nodeDanmuPushUrl = null;
     setState(() {
@@ -2064,7 +2077,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     if (pushUrl.isNotEmpty) {
       _ensureDanmakuPushSource(pushUrl);
     } else {
-      _danmakuItems.value = const [];
+      _setDanmakuItems(const []);
     }
     try {
       final res = await ref.read(apiProvider).danmakuAuto(
@@ -2110,7 +2123,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     if (index < 0 || index >= _danmakuSources.length) return;
     final items = await _fetchDanmaku(_danmakuSources[index].url, notify: notify);
     if (!mounted || serial != _playAtSerial) return;
-    _danmakuItems.value = items ?? const [];
+    _setDanmakuItems(items ?? const []);
   }
 
   /// 引擎拉取并解析一个弹幕源，套上当前时轴偏移；失败返回 null。
@@ -2161,8 +2174,10 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         idx = 0;
       }
       _danmakuSourceIdx = idx;
+      // 用户主动搜弹幕：开显示并落盘，避免设置页仍显示关。
       _danmakuOn = true;
     });
+    unawaited(_persistPlayerSetting('danmaku', 'true'));
     await _loadDanmakuSource(idx, notify: true);
   }
 
@@ -2220,7 +2235,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     _unwireEpisodeEnd();
     _posSub?.cancel();
     _posSub = null;
-    _danmakuItems.value = const [];
+    _setDanmakuItems(const []);
     _spiderDanmakuSources = const [];
     _nodeDanmuPushUrl = null;
     final canDirect = _episodeCanDirectPlay(ep.url);
@@ -3171,6 +3186,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       final settings = await KotvSettingsCache.fetch(ref.read(apiProvider));
       if (!mounted) return;
       setState(() => _applyDanmakuPrefsFromSettings(settings));
+      _syncDanmakuDisplay();
     } catch (_) {}
   }
 
@@ -4023,12 +4039,13 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     }
     if (k == 'danmaku') {
       setState(() => _danmakuOn = v.toLowerCase() == 'true');
+      _syncDanmakuDisplay();
     }
     if (k == 'danmakuOffsetMs') {
       final next = ((int.tryParse(v) ?? 0) / 1000.0);
       final delta = next - _danmakuOffsetSec;
       _danmakuOffsetSec = next;
-      _danmakuItems.value = kotvShiftDanmaku(_danmakuItems.value, delta);
+      _setDanmakuItems(kotvShiftDanmaku(_danmakuItems.value, delta));
       if (mounted) setState(() {});
     }
     if (const {'danmakuLoad', 'danmakuAuto', 'danmakuSpiderFirst', 'danmakuApi'}.contains(k)) {

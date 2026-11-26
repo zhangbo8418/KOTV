@@ -1155,7 +1155,14 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
     if (oldWidget.renderMode != widget.renderMode) _renderMode = widget.renderMode;
     if (oldWidget.aspect.key != widget.aspect.key) _aspect = widget.aspect;
     if (oldWidget.epIdx != widget.epIdx) _epIdx = widget.epIdx;
-    if (oldWidget.danmakuOn != widget.danmakuOn) _danmakuOn = widget.danmakuOn;
+    var winDanmakuDirty = false;
+    if (oldWidget.danmakuOn != widget.danmakuOn) {
+      _danmakuOn = widget.danmakuOn;
+      winDanmakuDirty = true;
+    }
+    if (!identical(oldWidget.danmakuItems, widget.danmakuItems)) {
+      winDanmakuDirty = true;
+    }
     if (oldWidget.ambientOn != widget.ambientOn) _ambientOn = widget.ambientOn;
     if (!identical(oldWidget.playback, widget.playback)) {
       oldWidget.playback.removeListener(_onPlaybackChanged);
@@ -1163,9 +1170,11 @@ class DetailFullscreenPageState extends State<DetailFullscreenPage>
       _bindPlaybackStreams(widget.playback);
       _refreshForceLandscapeBtn();
     }
-    // 片头片尾由父页回写；原生播控只在 update 时取新值。
+    // 片头片尾 / 弹幕开关与列表：立刻推原生壳，勿等下一次播态 notify。
     if (KotvWinChrome.isNeeded &&
-        (oldWidget.openingSec != widget.openingSec || oldWidget.endingSec != widget.endingSec)) {
+        (winDanmakuDirty ||
+            oldWidget.openingSec != widget.openingSec ||
+            oldWidget.endingSec != widget.endingSec)) {
       _syncWinChrome();
     }
   }
