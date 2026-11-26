@@ -310,7 +310,10 @@ class PostMsgHost {
 
     if (msg.startsWith('OPENWEB:')) {
       final raw = msg.substring(8).trim();
-      if (raw.isNotEmpty) unawaited(kotvOpenExternalUrl(raw));
+      if (raw.isNotEmpty) {
+        kotvNoteOpenWeb();
+        unawaited(kotvOpenExternalUrl(raw));
+      }
       return;
     }
 

@@ -4,11 +4,33 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"sync"
 
 	"github.com/bobo/KOTV/internal/hostclient"
 	"github.com/bobo/KOTV/internal/localproxy"
 	"github.com/bobo/KOTV/internal/playproxy"
 )
+
+// detailOpenWeb：本会话详情过程中是否已 emit OPENWEB（按 Scope 记，供详情 API 同步带回）。
+var detailOpenWeb sync.Map // scope -> struct{}
+
+func noteDetailOpenWeb(scope string) {
+	scope = strings.TrimSpace(scope)
+	if scope == "" {
+		scope = "_"
+	}
+	detailOpenWeb.Store(scope, struct{}{})
+}
+
+// TakeDetailOpenWeb 取出并清除本会话的「详情已开网页」标记。
+func TakeDetailOpenWeb(scope string) bool {
+	scope = strings.TrimSpace(scope)
+	if scope == "" {
+		scope = "_"
+	}
+	_, ok := detailOpenWeb.LoadAndDelete(scope)
+	return ok
+}
 
 // callerSnap 最近一次引擎→Node 调用方会话，供本机 /msg 的 OPENWEB 恢复 Bind。
 type callerSnap struct {
@@ -117,6 +139,7 @@ func emitOpenWeb(raw, prefix string) {
 	}
 	if raw != "" {
 		jsPostMsg("OPENWEB:"+raw, scope)
+		noteDetailOpenWeb(scope)
 	}
 }
 

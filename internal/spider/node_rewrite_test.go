@@ -206,4 +206,10 @@ func TestHandleNodeMsgOpenWebUsesCaller(t *testing.T) {
 	if gotScope != "u:user-a" {
 		t.Fatalf("scope=%q", gotScope)
 	}
+	if !TakeDetailOpenWeb("u:user-a") {
+		t.Fatal("openInternalWebview should note detail openWeb for caller scope")
+	}
+	if TakeDetailOpenWeb("u:user-a") {
+		t.Fatal("TakeDetailOpenWeb should clear")
+	}
 }

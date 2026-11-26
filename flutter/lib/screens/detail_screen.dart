@@ -53,6 +53,7 @@ import '../theme/kotv_palette.dart';
 import '../theme/kotv_theme.dart';
 import '../theme/stable_focus.dart';
 import '../util/kotv_app_dirs.dart';
+import '../util/kotv_open_url.dart';
 import '../vod/content_clicker.dart';
 import '../widgets/auth_gate.dart';
 import '../widgets/buffering_overlay.dart';
@@ -419,6 +420,12 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   String _routeTitle = '';
   final List<({String site, String id})> _emptyTried = [];
   bool _emptyFallbackExhausted = false;
+
+  /// 本次 [_load] 开始时的 OPENWEB 戳；引擎 [openWeb] 或期间 PostMsg 推高戳则空线路精搜让路。
+  int _loadOpenWebStamp = 0;
+
+  /// 本次详情 API 标明已开网页（与 PostMsg 竞态无关的同步信号）。
+  bool _detailOpenedWeb = false;
   String _routeMark = '';
   KotvEmbedBackend get _backend => kotvEmbedBackend(_playerVal);
 
@@ -1402,6 +1409,8 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       _loading = true;
       _error = null;
     });
+    _loadOpenWebStamp = kotvOpenWebStamp();
+    _detailOpenedWeb = false;
     try {
       Object? fetchError;
       Map<String, dynamic>? fetched;
@@ -1414,6 +1423,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       if (await kotvConsumeJarDetailDismissed()) {
         if (mounted) await _leavePage();
         return;
+      }
+      if (fetched != null) {
+        _detailOpenedWeb = fetched['openWeb'] == true;
       }
       if (fetchError != null) {
         if (await _switchEmptyDetail(_routeTitle)) return;
@@ -5174,8 +5186,9 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   Future<bool> _switchEmptyDetail(String name) async {
     final q = name.trim();
     if (q.isEmpty || _emptyFallbackExhausted) return false;
-    // 当前站关换源（changeable≠1）：留下详情，不拿标题去全网精搜。
-    // 空源常关搜索（searchable=0）但仍可换源精搜；门禁只看本站 changeable。
+    // 详情已开网页（API openWeb 或 OPENWEB PostMsg）：留下本页，勿拿标题精搜跳片。
+    if (_detailOpenedWeb || kotvOpenWebSince(_loadOpenWebStamp)) return false;
+    // 当前站关换源（changeable≠1）：留下详情。空源可 searchable=0 但仍可换源精搜。
     final cached = ref.read(configProvider).valueOrNull;
     if (cached != null) {
       final key = _routeSite.trim();

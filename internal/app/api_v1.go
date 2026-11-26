@@ -373,6 +373,8 @@ func (a *App) APIDetail(siteKey, vodID string) (map[string]any, error) {
 		vod.Site = &h
 	}
 	detail, err := sites.DetailContent(siteKey, vod)
+	// 无论成败都取出：openInternalWebview 可能已在 detail 过程中投递 OPENWEB。
+	openedWeb := spider.TakeDetailOpenWeb(hostclient.ScopeID())
 	if err != nil {
 		return nil, err
 	}
@@ -384,11 +386,12 @@ func (a *App) APIDetail(siteKey, vodID string) (map[string]any, error) {
 	needMagnet := thunder.NeedsParse(&detail)
 	needPlaylist := source.NeedsPlaylistExpand(&detail)
 	return map[string]any{
-		"ok":     true,
-		"vod":    vodDetailDTO(detail, sk, detailRules(cfg)),
-		"magnet": needMagnet,
-		"expand": needMagnet || needPlaylist,
-		"desc":   model.CleanDesc(detail.VodContent),
+		"ok":      true,
+		"vod":     vodDetailDTO(detail, sk, detailRules(cfg)),
+		"magnet":  needMagnet,
+		"expand":  needMagnet || needPlaylist,
+		"desc":    model.CleanDesc(detail.VodContent),
+		"openWeb": openedWeb,
 	}, nil
 }
 
