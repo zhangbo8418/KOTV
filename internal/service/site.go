@@ -931,7 +931,29 @@ func (s *SiteService) Action(site model.Site, action string) (string, error) {
 	if strings.TrimSpace(out) == "" {
 		return "{}", nil
 	}
-	return out, nil
+	// Result 无 web 字段；action 开网页指令必须从原文写回。
+	return mergeActionWebJSON(raw, out), nil
+}
+
+// mergeActionWebJSON 把原文里的 web 合并进规范化 JSON，避免 EncodeJSON(Result) 丢掉开页指令。
+func mergeActionWebJSON(raw, encoded string) string {
+	var src map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &src); err != nil {
+		return encoded
+	}
+	web, ok := src["web"]
+	if !ok || web == nil {
+		return encoded
+	}
+	var dst map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(encoded)), &dst); err != nil || dst == nil {
+		dst = map[string]any{}
+	}
+	dst["web"] = web
+	if out := util.EncodeJSON(dst); strings.TrimSpace(out) != "" {
+		return out
+	}
+	return encoded
 }
 
 // ManualVideoCheck 是否由爬虫接管视频格式判定。

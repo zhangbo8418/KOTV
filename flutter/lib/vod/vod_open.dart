@@ -16,6 +16,7 @@ import '../remote/remote_bridge.dart';
 import '../screens/detail_screen.dart';
 import '../widgets/auth_gate.dart';
 import '../screens/folder_screen.dart';
+import '../util/kotv_open_url.dart';
 
 /// 网盘授权等会写 `/TVBox/`；API 30+ 需「所有文件访问」。失败返回 false。
 Future<bool> _ensureSharedStorageWrite() async {
@@ -201,6 +202,11 @@ Future<void> _openVodItemBody(
       if (!context.mounted) return;
       // 网盘授权等会改 jar 磁盘凭证；刷首页登录态文案。
       ref.read(vodContentEpochProvider.notifier).state++;
+      final web = res['web'];
+      final webUrl = web is Map ? '${web['url'] ?? ''}'.trim() : '';
+      if (webUrl.isNotEmpty) {
+        unawaited(kotvOpenExternalUrl(webUrl));
+      }
       final msg = '${res['msg'] ?? ''}'.trim();
       if (msg.isNotEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(

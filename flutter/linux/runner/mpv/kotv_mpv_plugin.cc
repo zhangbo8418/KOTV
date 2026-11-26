@@ -253,6 +253,10 @@ bool ensure_mpv() {
   }
   mpv_set_option_string(g_state->mpv, "hwdec", g_state->hwdec.c_str());
   mpv_set_option_string(g_state->mpv, "hwdec-software-fallback", "yes");
+  mpv_set_option_string(g_state->mpv, "target-contrast", "inf");
+  mpv_set_option_string(g_state->mpv, "target-colorspace-hint", "auto");
+  mpv_set_option_string(g_state->mpv, "tone-mapping", "auto");
+  mpv_set_option_string(g_state->mpv, "hdr-compute-peak", "auto");
   mpv_set_option_string(g_state->mpv, "keep-open", "yes");
   // 本集将完时提前打开排队的下一集（无缝换集）。
   mpv_set_option_string(g_state->mpv, "prefetch-playlist", "yes");

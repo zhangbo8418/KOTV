@@ -6,14 +6,12 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
-import 'package:flutter/services.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../api/kotv_api.dart';
 import '../player/kotv_platform.dart';
 import '../theme/kotv_palette.dart';
 import '../theme/layout_scale.dart';
-import '../util/kotv_io.dart';
+import '../util/kotv_open_url.dart';
 import '../util/kotv_ui_socket.dart';
 import 'kotv_ui_markup.dart';
 import 'kotv_ui_view.dart';
@@ -1018,43 +1016,7 @@ class PostMsgHost {
     });
   }
 
-  Future<bool> _openExternal(String raw) async {
-    final s = raw.trim();
-    if (s.isEmpty) return false;
-    if (!kIsWeb && Platform.isAndroid) {
-      try {
-        final ok = await const MethodChannel('kotv_android').invokeMethod<bool>('openView', {'url': s});
-        if (ok == true) return true;
-      } catch (_) {}
-    }
-    final uri = Uri.tryParse(s.contains(':') ? s : 'package:$s');
-    if (uri == null || !uri.hasScheme) return false;
-    if (!kIsWeb && Platform.isAndroid && (uri.scheme == 'package' || uri.scheme == 'intent')) return false;
-    if (kIsWeb) {
-      if (uri.scheme.toLowerCase() == 'javascript') return false;
-      try {
-        return await launchUrl(uri, mode: LaunchMode.externalApplication);
-      } catch (_) {
-        return false;
-      }
-    }
-    try {
-      final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
-      if (ok) return true;
-    } catch (_) {}
-    try {
-      if (Platform.isMacOS) {
-        return (await Process.run('open', [s])).exitCode == 0;
-      } else if (Platform.isWindows) {
-        // 勿用 `cmd /c start URL`：查询串里的 & 会被 cmd 当成命令分隔符截断。
-        return (await Process.run('rundll32', ['url.dll,FileProtocolHandler', s])).exitCode == 0;
-      } else if (Platform.isLinux) {
-        return (await Process.run('xdg-open', [s])).exitCode == 0;
-      }
-    } catch (_) {}
-    return false;
-  }
-
+  Future<bool> _openExternal(String raw) => kotvOpenExternalUrl(raw);
 }
 
 /// 弹窗里的竖向列表。

@@ -322,6 +322,7 @@ func (a *App) APIAction(siteKey, action string) (map[string]any, error) {
 		return nil, err
 	}
 	msg := ""
+	var web any
 	var parsed map[string]any
 	if json.Unmarshal([]byte(strings.TrimSpace(raw)), &parsed) == nil {
 		// 用 Result 语义：code!=0 时清空 msg
@@ -339,12 +340,19 @@ func (a *App) APIAction(siteKey, action string) (map[string]any, error) {
 				msg = strings.TrimSpace(m)
 			}
 		}
+		if w, ok := parsed["web"]; ok && w != nil {
+			web = w
+		}
 	}
-	return map[string]any{
+	out := map[string]any{
 		"ok":  true,
 		"msg": msg,
 		"raw": raw,
-	}, nil
+	}
+	if web != nil {
+		out["web"] = web
+	}
+	return out, nil
 }
 
 func (a *App) APIDetail(siteKey, vodID string) (map[string]any, error) {

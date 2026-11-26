@@ -533,6 +533,8 @@ final class KotvMpvCore {
     mpv_set_option_string(handle, "hwdec-codecs", "all")
     mpv_set_option_string(handle, "hwdec-software-fallback", "yes")
     mpv_set_option_string(handle, "target-colorspace-hint", "auto")
+    mpv_set_option_string(handle, "tone-mapping", "auto")
+    mpv_set_option_string(handle, "hdr-compute-peak", "auto")
     mpv_set_option_string(handle, "keep-open", "yes")
     // 本集将完时提前打开排队的下一集（无缝换集）。
     mpv_set_option_string(handle, "prefetch-playlist", "yes")

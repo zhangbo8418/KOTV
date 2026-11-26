@@ -237,7 +237,45 @@ func (s *nodeSpider) Proxy(params map[string]string) (int, string, []byte, map[s
 }
 
 func (s *nodeSpider) Action(action string) (string, error) {
-	return "", nil
+	if err := s.ensureInit(); err != nil {
+		return "", err
+	}
+	raw, err := s.postOptional("action", map[string]any{"action": action})
+	if err != nil {
+		return "", err
+	}
+	return rewriteNodeActionWeb(raw, s), nil
+}
+
+// rewriteNodeActionWeb 把 action 返回的 web.url 改成引擎可打开的地址（本机反代 / 远端带 token）。
+func rewriteNodeActionWeb(raw string, s *nodeSpider) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "{}" || s == nil {
+		return raw
+	}
+	var m map[string]any
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		return raw
+	}
+	web, _ := m["web"].(map[string]any)
+	if web == nil {
+		return raw
+	}
+	u, _ := web["url"].(string)
+	u = strings.TrimSpace(u)
+	if u == "" {
+		return raw
+	}
+	if p, err := s.pkg(); err == nil && p != nil {
+		u = p.RewriteOpenWebURL(u)
+	}
+	web["url"] = u
+	m["web"] = web
+	out, err := json.Marshal(m)
+	if err != nil {
+		return raw
+	}
+	return string(out)
 }
 
 func (s *nodeSpider) ManualVideoCheck() (bool, error) { return false, nil }
