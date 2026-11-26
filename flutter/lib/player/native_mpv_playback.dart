@@ -632,15 +632,18 @@ class NativeMpvPlayback extends KotvPlayback {
       // 开播 mime：无扩展名的 /proxy/play 须靠 mime 触发 lavf HLS demuxer。
       final mime = kotvPlayMime(url, format);
       // 缺省也带 force-iso=no，避免会话复用后粘滞。
+      // lavf 基线 + HLS loadOptions：桌面/Apple 原生插件依赖此处；安卓 ensurePlayer 自带同串，多写幂等。
       final openProps = <String, String>{
         'force-iso': 'no',
-        // Windows 原生插件不自带 lavf 基线；与安卓同串。
-        if (kotvIsWindows()) ...{'demuxer-lavf-o': kotvDemuxerLavfO, 'ytdl': 'no'},
+        'demuxer-lavf-o': kotvDemuxerLavfO,
+        'ytdl': 'no',
+        'playlist-exts': kotvPlaylistExts,
+        'image-exts': kotvImageExts,
         ..._extraOpenProps,
       };
       _extraOpenProps = const {};
       final loadOpts = <String>[];
-      if (kotvIsWindows()) kotvAppendLavfHlsLoadOpts(url, mime, loadOpts);
+      kotvAppendLavfHlsLoadOpts(url, mime, loadOpts);
       await _ch.invokeMethod('open', {
         'serial': loadSerial,
         'url': url,
@@ -883,7 +886,7 @@ class NativeMpvPlayback extends KotvPlayback {
     try {
       final mime = kotvPlayMime(url, format);
       final loadOpts = <String>[];
-      if (kotvIsWindows()) kotvAppendLavfHlsLoadOpts(url, mime, loadOpts);
+      kotvAppendLavfHlsLoadOpts(url, mime, loadOpts);
       final ok = await _ch.invokeMethod<bool>('queueNext', {
         'id': id,
         'url': url,

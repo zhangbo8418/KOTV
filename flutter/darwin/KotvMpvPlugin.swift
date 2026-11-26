@@ -181,6 +181,7 @@ final class KotvMpvPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
       let startAt = (args?["startAtMs"] as? NSNumber)?.int64Value ?? 0
       let props = args?["props"] as? [String: Any]
       let headers = args?["headers"] as? [String: String]
+      let loadOptions = (args?["loadOptions"] as? String) ?? ""
       ensureCore { [weak self] res in
         switch res {
         case .success(let c):
@@ -198,7 +199,7 @@ final class KotvMpvPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
                 .joined(separator: ",")
               c.setProperty("http-header-fields", fields)
             }
-            c.open(url: url, startAtMs: startAt)
+            c.open(url: url, startAtMs: startAt, loadOptions: loadOptions)
             DispatchQueue.main.async { result(nil) }
           }
         case .failure(let e):
@@ -366,12 +367,13 @@ final class KotvMpvPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
       let url = (args?["url"] as? String) ?? ""
       let startAt = (args?["startAtMs"] as? NSNumber)?.int64Value ?? 0
       let subs = (args?["subs"] as? [[String: Any]]) ?? []
+      let loadOptions = (args?["loadOptions"] as? String) ?? ""
       guard let c = core, !livePlayback, !repeatOne, !id.isEmpty, !url.isEmpty else {
         result(false)
         return
       }
       c.asyncMpv {
-        c.queueNext(id: id, url: url, startAtMs: startAt, subs: subs)
+        c.queueNext(id: id, url: url, startAtMs: startAt, subs: subs, loadOptions: loadOptions)
         DispatchQueue.main.async { result(true) }
       }
     case "clearNext":

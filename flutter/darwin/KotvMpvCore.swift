@@ -247,7 +247,7 @@ final class KotvMpvCore {
     }
   }
 
-  func open(url: String, startAtMs: Int64 = 0) {
+  func open(url: String, startAtMs: Int64 = 0, loadOptions: String = "") {
     pendingStartMs = max(0, startAtMs)
     // loadfile replace 清掉整个播放列表，排好的下一集随之作废。
     clearQueued()
@@ -255,7 +255,13 @@ final class KotvMpvCore {
     DispatchQueue.main.async { [weak self] in self?.setVisible(true) }
     // replace 即可换片；勿 stop（会打断无缝换集），勿 pause。
     // 勿把 start= 写进 loadfile：硬解 VT 在 underlay 上会长期不出 FILE_LOADED。
-    command(["loadfile", url, "replace"])
+    // loadOptions：HLS lavf（demuxer-lavf-format 等）；与 Win/Android 同口径，缺了代理无扩展名会只播几段。
+    let opts = loadOptions.trimmingCharacters(in: .whitespacesAndNewlines)
+    if opts.isEmpty {
+      command(["loadfile", url, "replace"])
+    } else {
+      command(["loadfile", url, "replace", "-1", opts])
+    }
     command(["set", "pause", "no"])
     pausedState = false
   }
@@ -317,13 +323,18 @@ final class KotvMpvCore {
 
   /// 无缝换集：下一集追加到播放列表下标 1，keep-open=no 让片尾自然前进。
   /// 续播点不写进 loadfile（见 [pendingStartMs]），切入后在 FILE_LOADED 再 seek。
-  func queueNext(id: String, url: String, startAtMs: Int64, subs: [[String: Any]]) {
+  func queueNext(id: String, url: String, startAtMs: Int64, subs: [[String: Any]], loadOptions: String = "") {
     queuedId = id
     queuedStartMs = max(0, startAtMs)
     queuedSubs = subs
     // 只留正在播的一项，新排的总在下标 1。
     command(["playlist-clear"])
-    command(["loadfile", url, "append"])
+    let opts = loadOptions.trimmingCharacters(in: .whitespacesAndNewlines)
+    if opts.isEmpty {
+      command(["loadfile", url, "append"])
+    } else {
+      command(["loadfile", url, "append", "-1", opts])
+    }
     setProperty("keep-open", "no")
   }
 
@@ -732,11 +743,14 @@ final class KotvMpvCore {
 
   private func emitPosition() {
     guard let handle = mpv, !destroyed else { return }
-    var pos = 0.0, dur = 0.0, buf = 0.0, speed = 0.0
+    var pos = 0.0, dur = 0.0, durFull = 0.0, buf = 0.0, speed = 0.0
     var pause: Int32 = 1, cache: Int32 = 0, eof: Int32 = 0
     var idle: Int32 = 0, coreIdle: Int32 = 0, seeking: Int32 = 0
     mpv_get_property(handle, "time-pos", MPV_FORMAT_DOUBLE, &pos)
     mpv_get_property(handle, "duration", MPV_FORMAT_DOUBLE, &dur)
+    // HLS 整表时长：duration 常只是已解复用段；与安卓 duration/full 优先一致。
+    mpv_get_property(handle, "duration/full", MPV_FORMAT_DOUBLE, &durFull)
+    if durFull.isFinite, durFull > (dur.isFinite ? dur : 0) { dur = durFull }
     mpv_get_property(handle, "demuxer-cache-duration", MPV_FORMAT_DOUBLE, &buf)
     mpv_get_property(handle, "cache-speed", MPV_FORMAT_DOUBLE, &speed)
     mpv_get_property(handle, "pause", MPV_FORMAT_FLAG, &pause)

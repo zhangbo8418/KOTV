@@ -155,10 +155,13 @@ FlValue* disc_info() {
 
 void emit_position() {
   if (!g_state || !g_state->mpv) return;
-  double pos = 0, dur = 0, buf = 0, speed = 0;
+  double pos = 0, dur = 0, dur_full = 0, buf = 0, speed = 0;
   int pause = 1, cache = 0, eof = 0, idle = 0, core_idle = 0, seeking = 0;
   mpv_get_property(g_state->mpv, "time-pos", MPV_FORMAT_DOUBLE, &pos);
   mpv_get_property(g_state->mpv, "duration", MPV_FORMAT_DOUBLE, &dur);
+  // HLS 整表：优先 duration/full（与安卓 / Win / Darwin 一致）。
+  mpv_get_property(g_state->mpv, "duration/full", MPV_FORMAT_DOUBLE, &dur_full);
+  if (std::isfinite(dur_full) && dur_full > (std::isfinite(dur) ? dur : 0)) dur = dur_full;
   mpv_get_property(g_state->mpv, "demuxer-cache-duration", MPV_FORMAT_DOUBLE, &buf);
   mpv_get_property(g_state->mpv, "cache-speed", MPV_FORMAT_DOUBLE, &speed);
   mpv_get_property(g_state->mpv, "pause", MPV_FORMAT_FLAG, &pause);
@@ -499,15 +502,53 @@ void method_call(FlMethodChannel*, FlMethodCall* call, gpointer) {
     // loadfile replace 清掉整个播放列表，排好的下一集随之作废。
     clear_queued();
     mpv_set_property_string(g_state->mpv, "http-header-fields", header_fields(args).c_str());
+    // Dart open.props：lavf 基线 / ytdl=no 等。
+    if (FlValue* props = args ? fl_value_lookup_string(args, "props") : nullptr;
+        props && fl_value_get_type(props) == FL_VALUE_TYPE_MAP) {
+      const size_t n = fl_value_get_length(props);
+      for (size_t i = 0; i < n; i++) {
+        FlValue* k = fl_value_get_map_key(props, i);
+        FlValue* v = fl_value_get_map_value(props, i);
+        if (!k || !v || fl_value_get_type(k) != FL_VALUE_TYPE_STRING) continue;
+        const char* key = fl_value_get_string(k);
+        if (!key || !*key) continue;
+        std::string val;
+        switch (fl_value_get_type(v)) {
+          case FL_VALUE_TYPE_STRING:
+            val = fl_value_get_string(v) ? fl_value_get_string(v) : "";
+            break;
+          case FL_VALUE_TYPE_INT:
+            val = std::to_string(fl_value_get_int(v));
+            break;
+          case FL_VALUE_TYPE_FLOAT:
+            val = std::to_string(fl_value_get_float(v));
+            break;
+          case FL_VALUE_TYPE_BOOL:
+            val = fl_value_get_bool(v) ? "yes" : "no";
+            break;
+          default:
+            break;
+        }
+        if (!val.empty()) mpv_set_property_string(g_state->mpv, key, val.c_str());
+      }
+    }
     std::string url = map_str(args, "url");
     int64_t start = map_int(args, "startAtMs");
-    // replace 即可换片；勿 stop（打断无缝换集）。选项是第 4 个参数，第 3 个是插入位置。
+    std::string file_opts = map_str(args, "loadOptions");
+    // replace 即可换片；勿 stop。选项是第 4 参；HLS lavf 经 loadOptions，start 可拼入。
     if (start > 0) {
       char start_opt[64];
       snprintf(start_opt, sizeof(start_opt), "start=%.3f", start / 1000.0);
-      command({"loadfile", url, "replace", "-1", start_opt});
-    } else {
+      if (file_opts.empty()) {
+        file_opts = start_opt;
+      } else {
+        file_opts = std::string(start_opt) + "," + file_opts;
+      }
+    }
+    if (file_opts.empty()) {
       command({"loadfile", url, "replace"});
+    } else {
+      command({"loadfile", url, "replace", "-1", file_opts});
     }
     command({"set", "pause", "no"});
     fl_method_call_respond_success(call, nullptr, nullptr);
@@ -686,12 +727,20 @@ void method_call(FlMethodChannel*, FlMethodCall* call, gpointer) {
     // 只留正在播的一项，新排的总在下标 1。
     command({"playlist-clear"});
     const int64_t start = map_int(args, "startAtMs");
+    std::string file_opts = map_str(args, "loadOptions");
     if (start > 0) {
       char start_opt[64];
       snprintf(start_opt, sizeof(start_opt), "start=%.3f", start / 1000.0);
-      command({"loadfile", url, "append", "-1", start_opt});
-    } else {
+      if (file_opts.empty()) {
+        file_opts = start_opt;
+      } else {
+        file_opts = std::string(start_opt) + "," + file_opts;
+      }
+    }
+    if (file_opts.empty()) {
       command({"loadfile", url, "append"});
+    } else {
+      command({"loadfile", url, "append", "-1", file_opts});
     }
     mpv_set_property_string(g_state->mpv, "keep-open", "no");
     fl_method_call_respond_success(call, fl_value_new_bool(TRUE), nullptr);

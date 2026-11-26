@@ -40,6 +40,7 @@ Future<void> kotvApplyLavfForOpen({
 
 /// loadfile 一次性选项：仅 HLS 时追加 `demuxer-lavf-format` / `demuxer-lavf-o-add`。
 /// 与安卓 [KotvAndroidPlayback.appendLavfHlsLoadOpts] 同语义。
+/// 桌面/Apple 原生须把返回串写入 loadfile 第 4 参；勿只认 Windows。
 void kotvAppendLavfHlsLoadOpts(
   String url,
   String? mimeOrFormat,

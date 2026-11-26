@@ -526,10 +526,13 @@ void RefreshInfoCache(MpvCore* core, mpv_handle* m) {
 }
 
 EncodableMap PositionEvent(mpv_handle* m) {
-  double pos = 0, dur = 0, buf = 0, speed = 0;
+  double pos = 0, dur = 0, dur_full = 0, buf = 0, speed = 0;
   int pause = 1, cache = 0, eof = 0, idle = 0, core_idle = 0, seeking = 0;
   mpv_get_property(m, "time-pos", MPV_FORMAT_DOUBLE, &pos);
   mpv_get_property(m, "duration", MPV_FORMAT_DOUBLE, &dur);
+  // HLS 整表：duration 常只是已解复用段；优先 duration/full（与安卓 effectiveDurationSec 一致）。
+  mpv_get_property(m, "duration/full", MPV_FORMAT_DOUBLE, &dur_full);
+  if (std::isfinite(dur_full) && dur_full > (std::isfinite(dur) ? dur : 0)) dur = dur_full;
   mpv_get_property(m, "demuxer-cache-duration", MPV_FORMAT_DOUBLE, &buf);
   mpv_get_property(m, "cache-speed", MPV_FORMAT_DOUBLE, &speed);
   mpv_get_property(m, "pause", MPV_FORMAT_FLAG, &pause);
