@@ -61,6 +61,28 @@ func T2S(text string) string { return t2s(text) }
 // S2T 简体转繁体（Result.trans / JS s2t）。
 func S2T(text string) string { return s2t(text) }
 
+// ConvertSearchKeyword 按站 lang 转换发给爬虫的搜索词（单站一次，勿在外层再全局转换）。
+// lang 空：本机繁体环境时繁→简，否则原样。
+// zh-TW/HK/MO/Hant：强制简→繁；zh-CN/SG/Hans：强制繁→简；其它 lang：原样。
+func ConvertSearchKeyword(text, lang string) string {
+	if text == "" {
+		return text
+	}
+	switch strings.ToLower(strings.TrimSpace(lang)) {
+	case "":
+		if TransEnabled() {
+			return t2s(text)
+		}
+		return text
+	case "zh-tw", "zh-hk", "zh-mo", "zh-hant":
+		return s2t(text)
+	case "zh-cn", "zh-sg", "zh-hans":
+		return t2s(text)
+	default:
+		return text
+	}
+}
+
 // TransEnabled 系统国家为 TW，或设置语言为 zh-Hant 时对 CMS/Spider 结果做 s2t。
 func TransEnabled() bool {
 	lang := strings.TrimSpace(settings.Get(settings.Language))

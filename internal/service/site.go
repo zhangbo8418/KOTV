@@ -651,11 +651,9 @@ func (s *SiteService) Search(keyword string, siteKeys []string) ([]model.Collect
 }
 
 // SearchParallel 多站并发搜索，maxConcurrent 为并发上限（<=0 时默认 4）。
+// 关键词按各站 lang 在 searchSite 内转换，此处不做全局繁简。
 func (s *SiteService) SearchParallel(keyword string, siteKeys []string, maxConcurrent int) ([]model.Collect, error) {
 	keyword = strings.TrimSpace(keyword)
-	if spider.TransEnabled() {
-		keyword = spider.T2S(keyword)
-	}
 	sites := s.cfg.Sites()
 	if len(siteKeys) > 0 {
 		filtered := make([]model.Site, 0)
@@ -733,14 +731,11 @@ func (s *SiteService) SearchParallel(keyword string, siteKeys []string, maxConcu
 
 // SearchFirstExact 只在可搜索、可换源、允许快速搜索的站里找片名完全相等的第一条。
 // 命中后立刻返回，不等其余站。不写入 SearchResult。
+// 比对用原始片名；发给爬虫的词在 searchSite 按站 lang 转换。
 func (s *SiteService) SearchFirstExact(keyword string, siteKeys []string, exclude []model.VodKey) (model.Vod, bool, error) {
 	matchName := strings.TrimSpace(keyword)
 	if matchName == "" {
 		return model.Vod{}, false, nil
-	}
-	query := matchName
-	if spider.TransEnabled() {
-		query = spider.T2S(matchName)
 	}
 	sites := s.cfg.Sites()
 	if len(siteKeys) > 0 {
@@ -755,7 +750,7 @@ func (s *SiteService) SearchFirstExact(keyword string, siteKeys []string, exclud
 		sites = filtered
 	}
 	parent := hostclient.Snapshot()
-	vod, ok := searchFirstExact(sites, matchName, query, vodKeySet(exclude), func(site model.Site, kw string) ([]model.Vod, error) {
+	vod, ok := searchFirstExact(sites, matchName, matchName, vodKeySet(exclude), func(site model.Site, kw string) ([]model.Vod, error) {
 		done := hostclient.Bind(parent)
 		defer done()
 		return s.searchSite(site, kw, true, "1")
@@ -843,6 +838,7 @@ func searchFirstExact(sites []model.Site, matchName, query string, exclude map[s
 }
 
 func (s *SiteService) searchSite(site model.Site, keyword string, quick bool, page string) ([]model.Vod, error) {
+	keyword = spider.ConvertSearchKeyword(keyword, site.Lang)
 	switch spiderDispatchType(site) {
 	case 3:
 		// Node 推送无 search 路由。

@@ -5,6 +5,27 @@ import (
 	"testing"
 )
 
+func TestConvertSearchKeywordByLang(t *testing.T) {
+	if got := ConvertSearchKeyword("电影", "zh-TW"); got != "電影" {
+		t.Fatalf("zh-TW: got %q", got)
+	}
+	if got := ConvertSearchKeyword("電影", "zh-CN"); got != "电影" {
+		t.Fatalf("zh-CN: got %q", got)
+	}
+	if got := ConvertSearchKeyword("電影", "zh-Hans"); got != "电影" {
+		t.Fatalf("zh-Hans: got %q", got)
+	}
+	if got := ConvertSearchKeyword("电影", "zh-Hant"); got != "電影" {
+		t.Fatalf("zh-Hant: got %q", got)
+	}
+	if got := ConvertSearchKeyword("電影", "en"); got != "電影" {
+		t.Fatalf("other lang should keep text: got %q", got)
+	}
+	if got := ConvertSearchKeyword("", "zh-CN"); got != "" {
+		t.Fatalf("empty: got %q", got)
+	}
+}
+
 func TestS2tUnlessClicker_NoClicker(t *testing.T) {
 	in := "简体内容与专业"
 	got := s2tUnlessClicker(in)

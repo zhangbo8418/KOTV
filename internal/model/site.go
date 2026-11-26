@@ -22,6 +22,8 @@ type Site struct {
 	Jar         string     `json:"jar"`
 	Header      FlexHeader `json:"header"`
 	Click       string     `json:"click"`
+	// Lang 站源语言提示，搜索关键词转换用（如 zh-CN / zh-TW）；空则按本机繁简环境。
+	Lang string `json:"lang"`
 	// Danmaku 0 = 不自动搜索弹幕（片源自带的弹幕照常加载）；缺省为 1。
 	Danmaku FlexInt `json:"danmaku"`
 	ID      int     `json:"-"`

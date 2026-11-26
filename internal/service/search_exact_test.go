@@ -61,6 +61,7 @@ func TestSearchFirstExactSkipsCurrentAndNonQuick(t *testing.T) {
 }
 
 func TestSearchFirstExactMatchesOriginalName(t *testing.T) {
+	// 比对用原始片名；发给爬虫的 query 可另转（由 searchSite 按 lang 转换）。
 	site := model.Site{Key: "s", Name: "站"}
 	var gotQuery string
 	vod, ok := searchFirstExact([]model.Site{site}, "電影", "电影", nil, func(site model.Site, keyword string) ([]model.Vod, error) {
