@@ -1416,11 +1416,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
         return;
       }
       if (fetchError != null) {
-        // 不可搜索站（如配置中心）空详情不走全网精确搜，避免跳到无关影片。
-        if (_siteAllowsEmptyFallbackSearch() &&
-            await _switchEmptyDetail(_routeTitle)) {
-          return;
-        }
+        if (await _switchEmptyDetail(_routeTitle)) return;
         throw fetchError;
       }
       if (!mounted) return;
@@ -1428,9 +1424,7 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
       final vod = VodDetail.fromJson(Map<String, dynamic>.from(data['vod'] as Map));
       if (vod.flags.isEmpty) {
         final name = _routeTitle.trim().isNotEmpty ? _routeTitle.trim() : vod.name.trim();
-        if (_siteAllowsEmptyFallbackSearch() && await _switchEmptyDetail(name)) {
-          return;
-        }
+        if (await _switchEmptyDetail(name)) return;
       }
       _detailMagnet = data['magnet'] == true;
       _detailExpand = data['expand'] == true;
@@ -5177,21 +5171,21 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
     return false;
   }
 
-  /// 当前详情站是否允许「空线路 → 全网精确搜」。配置类站 searchable=0，应留下详情（扫码说明等）。
-  bool _siteAllowsEmptyFallbackSearch() {
-    final cfg = ref.read(configProvider).valueOrNull;
-    if (cfg == null) return true;
-    final key = _routeSite.trim();
-    if (key.isEmpty) return true;
-    for (final s in SiteInfo.listFromConfig(cfg)) {
-      if (s.key == key) return s.searchable;
-    }
-    return true;
-  }
-
   Future<bool> _switchEmptyDetail(String name) async {
     final q = name.trim();
     if (q.isEmpty || _emptyFallbackExhausted) return false;
+    // 当前站不可搜（searchable≠1，如配置锁 0）：留下详情，不拿标题去全网精搜。
+    // 普通可搜片源失效时仍会精搜；门禁只看本站，不看目标站列表。
+    final cached = ref.read(configProvider).valueOrNull;
+    if (cached != null) {
+      final key = _routeSite.trim();
+      for (final s in SiteInfo.listFromConfig(cached)) {
+        if (s.key == key) {
+          if (!s.searchable) return false;
+          break;
+        }
+      }
+    }
     _rememberEmptyTried(_routeSite, _routeId);
     try {
       final cfg = await ref.read(apiProvider).getConfig();

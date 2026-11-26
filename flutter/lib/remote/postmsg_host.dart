@@ -310,7 +310,7 @@ class PostMsgHost {
 
     if (msg.startsWith('OPENWEB:')) {
       final raw = msg.substring(8).trim();
-      if (raw.isNotEmpty) unawaited(_openExternal(raw));
+      if (raw.isNotEmpty) unawaited(kotvOpenExternalUrl(raw));
       return;
     }
 
@@ -854,7 +854,7 @@ class PostMsgHost {
             fontSize: (docFont > 0 ? docFont : 14) * uiScale,
             scale: uiScale,
             onAction: (id) => unawaited(fire(id)),
-            onLink: (url) => unawaited(_openExternal(url)),
+            onLink: (url) => unawaited(kotvOpenExternalUrl(url)),
             remote: KotvUiRemote.wrap,
           ),
         for (final el in flow) ...built(el),
@@ -1004,7 +1004,7 @@ class PostMsgHost {
   Future<void> _openElement(Map<String, dynamic> el) async {
     final url = '${el['url'] ?? ''}'.trim();
     if (url.isEmpty) return;
-    if (await _openExternal(url) || kIsWeb) return;
+    if (await kotvOpenExternalUrl(url) || kIsWeb) return;
     final fail = '${el['fail'] ?? ''}'.trim();
     if (fail.isEmpty) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1016,7 +1016,6 @@ class PostMsgHost {
     });
   }
 
-  Future<bool> _openExternal(String raw) => kotvOpenExternalUrl(raw);
 }
 
 /// 弹窗里的竖向列表。

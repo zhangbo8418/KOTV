@@ -242,7 +242,7 @@ func TestRestartCallerRuntime_RemoteOnlyKillUser(t *testing.T) {
 	}
 }
 
-func TestNodePostJSON_InterruptCancelsAndStops(t *testing.T) {
+func TestNodePostJSON_InterruptCancelsWithoutStop(t *testing.T) {
 	started := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		close(started)
@@ -296,8 +296,9 @@ func TestNodePostJSON_InterruptCancelsAndStops(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("PostJSON did not return after interrupt")
 	}
-	if pkg.Port() != 0 {
-		t.Fatalf("port still %d after Stop", pkg.Port())
+	// 软取消不停源包：配置中心等仍占用同一端口。
+	if pkg.Port() != port {
+		t.Fatalf("port=%d want %d (must not Stop on soft cancel)", pkg.Port(), port)
 	}
 }
 

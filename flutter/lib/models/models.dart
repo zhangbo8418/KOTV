@@ -305,12 +305,25 @@ class SiteInfo {
         key: '${j['key'] ?? ''}',
         name: '${j['name'] ?? ''}',
         home: j['home'] == true,
-        searchable: j['searchable'] != false,
-        changeable: j['changeable'] != false,
-        indexs: j['indexs'] == true,
+        // 与引擎 IsSearchable/IsChangeable 一致：未声明默认开；仅 true/1 为开。
+        searchable: _siteFlagOn(j['searchable']),
+        changeable: _siteFlagOn(j['changeable']),
+        indexs: j['indexs'] == true || j['indexs'] == 1,
         type: j['type'] is num ? (j['type'] as num).toInt() : int.tryParse('${j['type'] ?? ''}') ?? 0,
         styleType: VodItem._styleType(j['style']),
       );
+
+  /// 站源开关：null → 默认开；bool / 1 / "1" / "true" → 开；0/2/false → 关。
+  static bool _siteFlagOn(dynamic v) {
+    if (v == null) return true;
+    if (v is bool) return v;
+    if (v is num) return v.toInt() == 1;
+    final s = '$v'.trim().toLowerCase();
+    if (s.isEmpty) return true;
+    if (s == '1' || s == 'true') return true;
+    if (s == '0' || s == '2' || s == 'false') return false;
+    return true;
+  }
 
   /// 配置接口里的 `sites` 列表（已排除隐藏与用户禁用的站）。
   static List<SiteInfo> listFromConfig(Map<String, dynamic> cfg) =>

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:url_launcher/url_launcher.dart';
+import '../util/kotv_open_url.dart';
 
 import '../providers.dart';
 import '../remote/engine_tools.dart';
@@ -117,14 +117,6 @@ int kotvCompareVersion(String a, String b) {
   return 0;
 }
 
-Future<bool> _openExternalUrl(String raw) async {
-  final uri = Uri.tryParse(raw.trim());
-  if (uri == null || !(uri.isScheme('http') || uri.isScheme('https'))) {
-    return false;
-  }
-  return launchUrl(uri, mode: LaunchMode.externalApplication);
-}
-
 /// 关于：只展示管理端品牌配置（aboutUrl / welcome / support / footer）。
 /// 与「运行库」分离；未配置时提示去管理台填写。
 Future<void> showKotvAbout(BuildContext context, WidgetRef ref) async {
@@ -136,7 +128,7 @@ Future<void> showKotvAbout(BuildContext context, WidgetRef ref) async {
   final support = pol.brandOf('supportUrl');
 
   if (aboutUrl.isNotEmpty && welcome.isEmpty && footer.isEmpty && support.isEmpty) {
-    final ok = await _openExternalUrl(aboutUrl);
+    final ok = await kotvOpenExternalUrl(aboutUrl);
     if (!context.mounted) return;
     if (ok) return;
     showAppNews(context, '无法打开关于页\n$aboutUrl');
@@ -170,7 +162,7 @@ Future<void> showKotvAbout(BuildContext context, WidgetRef ref) async {
           KotvFocusAction(
             label: '打开链接',
             color: p.focus,
-            onPressed: () => _openExternalUrl(aboutUrl),
+            onPressed: () => kotvOpenExternalUrl(aboutUrl),
           ),
         KotvFocusAction(
           label: '关闭',
@@ -305,7 +297,7 @@ Future<void> _showNoticeDetail(
           KotvFocusAction(
             label: '打开链接',
             color: p.focus,
-            onPressed: () => _openExternalUrl(link),
+            onPressed: () => kotvOpenExternalUrl(link),
           ),
         KotvFocusAction(
           label: sticky ? '已知晓' : '关闭',
@@ -363,7 +355,7 @@ Future<void> kotvApplyGroupPolicyUI(
           if (pol.updateUrl.trim().isNotEmpty)
             TextButton(
               onPressed: () async {
-                await _openExternalUrl(pol.updateUrl);
+                await kotvOpenExternalUrl(pol.updateUrl);
                 if (ctx.mounted) Navigator.pop(ctx);
               },
               child: const Text('前往更新'),
@@ -406,7 +398,7 @@ Future<void> kotvApplyGroupPolicyUI(
         actions: [
           if (link.isNotEmpty)
             TextButton(
-              onPressed: () => _openExternalUrl(link),
+              onPressed: () => kotvOpenExternalUrl(link),
               child: const Text('打开链接'),
             ),
           TextButton(

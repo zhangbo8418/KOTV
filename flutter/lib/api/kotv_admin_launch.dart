@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import 'kotv_client_store.dart';
 import 'kotv_engine_url.dart';
+import '../util/kotv_open_url.dart';
 import '../widgets/chrome.dart';
 
 /// 解析当前（或指定）引擎的浏览器根地址，末尾带 `/`。
@@ -23,7 +23,7 @@ Future<Uri> kotvAdminConsoleUri({String? engineBaseUrl}) async {
 }
 
 Future<void> kotvOpenInExternalBrowser(BuildContext context, Uri uri) async {
-  final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+  final ok = await kotvOpenExternalUrl(uri.toString());
   if (!context.mounted) return;
   if (!ok) {
     showAppNews(context, '请用浏览器打开：\n$uri');

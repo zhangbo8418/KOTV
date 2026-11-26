@@ -216,23 +216,17 @@ func beginNodeCall(clientID, ownerUID, pkgID string) (context.Context, func()) {
 	}
 }
 
-// interruptNodeForClient 取消匹配 Scope 的 Node in-flight，并 Stop 被放弃调用所属用户桶内源包。
+// interruptNodeForClient 只取消匹配 Scope 的 Node in-flight，不停源包进程。
+// 配置中心等网页仍挂在同一 Node 端口上；软取消若 Stop 会把服务掐死。
+// 需要停进程时走 SoftCancelAll / KillUserRuntime / ClearAll。
 func interruptNodeForClient(clientID string) {
-	type stopKey struct{ uid, pkg string }
-	toStop := map[stopKey]struct{}{}
 	nodeInflightMu.Lock()
 	for _, g := range nodeInflightQ {
 		if clientID == "" || g.clientID == clientID {
 			g.cancel()
-			if g.pkgID != "" {
-				toStop[stopKey{uid: g.ownerUID, pkg: g.pkgID}] = struct{}{}
-			}
 		}
 	}
 	nodeInflightMu.Unlock()
-	for k := range toStop {
-		nodeHostForUser(k.uid).Stop(k.pkg)
-	}
 }
 
 // MsgPort 引擎本机端口，供 node 回调 /msg。
@@ -899,11 +893,12 @@ func (p *nodePkg) PostJSON(path string, body any) (string, error) {
 	req.Header.Set("Content-Type", "application/json; charset=utf-8")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		// 超时才停进程（防挂死）；软取消只返回 Interrupted，保留源包（配置页等仍用同一端口）。
+		if errors.Is(err, context.DeadlineExceeded) {
 			p.Stop()
-			if errors.Is(err, context.DeadlineExceeded) {
-				return "", fmt.Errorf("node 调用超过 %s", nodeCallTimeout)
-			}
+			return "", fmt.Errorf("node 调用超过 %s", nodeCallTimeout)
+		}
+		if errors.Is(err, context.Canceled) {
 			return "", ErrNodeInterrupted
 		}
 		return "", err
