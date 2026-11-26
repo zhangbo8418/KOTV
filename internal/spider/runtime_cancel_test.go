@@ -242,7 +242,7 @@ func TestRestartCallerRuntime_RemoteOnlyKillUser(t *testing.T) {
 	}
 }
 
-func TestNodePostJSON_InterruptCancelsWithoutStop(t *testing.T) {
+func TestNodePostJSON_SoftCancelStopsPackage(t *testing.T) {
 	started := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		close(started)
@@ -287,18 +287,63 @@ func TestNodePostJSON_InterruptCancelsWithoutStop(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("handler not started")
 	}
-	interruptNodeForClient(scope)
+	SoftCancelForClient(scope)
 	select {
 	case err := <-errCh:
 		if !errors.Is(err, ErrNodeInterrupted) {
 			t.Fatalf("got %v want ErrNodeInterrupted", err)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("PostJSON did not return after interrupt")
+		t.Fatal("PostJSON did not return after soft cancel")
 	}
-	// 软取消不停源包：配置中心等仍占用同一端口。
-	if pkg.Port() != port {
-		t.Fatalf("port=%d want %d (must not Stop on soft cancel)", pkg.Port(), port)
+	if pkg.Port() != 0 {
+		t.Fatalf("port=%d want 0 after soft cancel StopAll", pkg.Port())
+	}
+}
+
+func TestSoftCancelForClient_StopsIdleSharedNode(t *testing.T) {
+	h := sharedNodeHost
+	pkg := &nodePkg{id: "idle-soft-cancel-node", port: 65432, ownerUID: "", host: h}
+	h.mu.Lock()
+	h.pkgs[pkg.id] = pkg
+	h.mu.Unlock()
+	t.Cleanup(func() {
+		h.mu.Lock()
+		delete(h.pkgs, pkg.id)
+		h.mu.Unlock()
+	})
+	leave := hostclient.Enter("idle-soft-cancel-client")
+	defer leave()
+	SoftCancelForClient(hostclient.ScopeID())
+	if pkg.Port() != 0 {
+		t.Fatalf("idle shared node port=%d want 0", pkg.Port())
+	}
+}
+
+func TestSoftCancelForClient_StopsOnlyScopeUserNode(t *testing.T) {
+	sharedPkg := &nodePkg{id: "soft-shared-keep", port: 61001, ownerUID: ""}
+	sharedNodeHost.mu.Lock()
+	sharedNodeHost.pkgs[sharedPkg.id] = sharedPkg
+	sharedNodeHost.mu.Unlock()
+
+	user := nodeHostForUser("soft-cancel-user")
+	userPkg := &nodePkg{id: "soft-user-stop", port: 61002, ownerUID: "soft-cancel-user", host: user}
+	user.mu.Lock()
+	user.pkgs[userPkg.id] = userPkg
+	user.mu.Unlock()
+	t.Cleanup(func() {
+		sharedNodeHost.mu.Lock()
+		delete(sharedNodeHost.pkgs, sharedPkg.id)
+		sharedNodeHost.mu.Unlock()
+		destroyUserNodeHost("soft-cancel-user")
+	})
+
+	SoftCancelForClient("u:soft-cancel-user")
+	if userPkg.Port() != 0 {
+		t.Fatalf("user node port=%d want 0", userPkg.Port())
+	}
+	if sharedPkg.Port() != 61001 {
+		t.Fatalf("shared node should survive other user soft cancel, port=%d", sharedPkg.Port())
 	}
 }
 

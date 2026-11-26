@@ -14,7 +14,8 @@ import (
 
 // SoftCancelForClient 取消指定 Scope 下全部引擎进行中的调用。
 // JAR：Go ctx + OkHttp cancel，不杀唯一 JVM、不清租户 Spider。
-// Py/JS：打断匹配 Scope 的脚本槽；Node：只取消 in-flight，不停源包（配置网页仍挂原端口）。
+// Py/JS：打断匹配 Scope 的脚本槽。
+// Node：取消 in-flight，并停该 Scope 所属桶内源包（离开详情/换源后配置页一并回收；再进再起）。
 // 卡死需 hard / KillUserRuntime / clearTenant。clientID 为空时 no-op。
 func SoftCancelForClient(clientID string) {
 	if clientID == "" {
@@ -24,7 +25,7 @@ func SoftCancelForClient(clientID string) {
 }
 
 // SoftCancelAll 打断全部 Scope 的进行中调用（清缓存等全局操作）。
-// JAR：只 cancel in-flight，不杀唯一 JVM。Node：取消 in-flight 后 StopAll 源包进程。
+// JAR：只 cancel in-flight，不杀唯一 JVM。Node：取消 in-flight 后停全部源包。
 // 不毁 Chromium 进程。与 SoftCancelForClient("") 的 no-op 不同。
 func SoftCancelAll() {
 	softCancelEngines("")
@@ -35,12 +36,22 @@ func softCancelEngines(clientID string) {
 	cancelScopeHTTP(clientID)
 	interruptScriptSpidersForClient(clientID) // Python + QuickJS
 	interruptNodeForClient(clientID)
+	stopNodePackagesForSoftCancel(clientID)
 	if clientID == "" {
-		stopAllNodePackages()
 		runExtraSoftAll()
 	} else {
 		runExtraSoftScope(clientID)
 	}
+}
+
+// stopNodePackagesForSoftCancel 软取消后回收 Node 源包：全局停全部桶；
+// 指定 Scope 时只停该会话所属桶（u: → 用户桶，其余 → 本机共享），避免误伤其它远端租户。
+func stopNodePackagesForSoftCancel(clientID string) {
+	if clientID == "" {
+		stopAllNodePackages()
+		return
+	}
+	nodeHostForUser(hostclient.UserIDFromScope(clientID)).StopAll()
 }
 
 // stopAllNodePackages 停共享桶与全部用户桶内的 Node 进程（不清根别名等索引）。

@@ -72,7 +72,7 @@ type nodePkg struct {
 	caller   callerSnap
 }
 
-// 进行中的 Node HTTP 调用，按 ScopeID 软取消；取消/超时后回收**该用户桶**内源包进程。
+// 进行中的 Node HTTP 调用，按 ScopeID 登记，供软取消打断。
 type nodeInflight struct {
 	id       uint64
 	clientID string // ScopeID
@@ -216,9 +216,8 @@ func beginNodeCall(clientID, ownerUID, pkgID string) (context.Context, func()) {
 	}
 }
 
-// interruptNodeForClient 只取消匹配 Scope 的 Node in-flight，不停源包进程。
-// 配置中心等网页仍挂在同一 Node 端口上；软取消若 Stop 会把服务掐死。
-// 需要停进程时走 SoftCancelAll / KillUserRuntime / ClearAll。
+// interruptNodeForClient 取消匹配 Scope 的 Node in-flight。
+// 源包进程由 softCancelEngines → stopNodePackagesForSoftCancel 统一回收。
 func interruptNodeForClient(clientID string) {
 	nodeInflightMu.Lock()
 	for _, g := range nodeInflightQ {
@@ -874,7 +873,7 @@ func (p *nodePkg) FetchConfig() (string, error) {
 	return string(b), nil
 }
 
-// PostJSON POST 路径，返回响应正文。可被 SoftCancel 取消；超时或取消后 Stop 本源包进程。
+// PostJSON POST 路径，返回响应正文。可被 SoftCancel 取消；取消或超时均 Stop 本源包（与软取消收拢一致，幂等）。
 func (p *nodePkg) PostJSON(path string, body any) (string, error) {
 	base := p.baseURL()
 	if base == "" {
@@ -893,12 +892,11 @@ func (p *nodePkg) PostJSON(path string, body any) (string, error) {
 	req.Header.Set("Content-Type", "application/json; charset=utf-8")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		// 超时才停进程（防挂死）；软取消只返回 Interrupted，保留源包（配置页等仍用同一端口）。
-		if errors.Is(err, context.DeadlineExceeded) {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			p.Stop()
-			return "", fmt.Errorf("node 调用超过 %s", nodeCallTimeout)
-		}
-		if errors.Is(err, context.Canceled) {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return "", fmt.Errorf("node 调用超过 %s", nodeCallTimeout)
+			}
 			return "", ErrNodeInterrupted
 		}
 		return "", err
