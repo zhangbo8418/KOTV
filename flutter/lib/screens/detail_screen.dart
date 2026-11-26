@@ -5174,14 +5174,14 @@ class _DetailScreenState extends ConsumerState<DetailScreen> with WidgetsBinding
   Future<bool> _switchEmptyDetail(String name) async {
     final q = name.trim();
     if (q.isEmpty || _emptyFallbackExhausted) return false;
-    // 当前站不可搜（searchable≠1，如配置锁 0）：留下详情，不拿标题去全网精搜。
-    // 普通可搜片源失效时仍会精搜；门禁只看本站，不看目标站列表。
+    // 当前站关换源（changeable≠1）：留下详情，不拿标题去全网精搜。
+    // 空源常关搜索（searchable=0）但仍可换源精搜；门禁只看本站 changeable。
     final cached = ref.read(configProvider).valueOrNull;
     if (cached != null) {
       final key = _routeSite.trim();
       for (final s in SiteInfo.listFromConfig(cached)) {
         if (s.key == key) {
-          if (!s.searchable) return false;
+          if (!s.changeable) return false;
           break;
         }
       }
