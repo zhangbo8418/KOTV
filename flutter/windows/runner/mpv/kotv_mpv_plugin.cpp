@@ -8,6 +8,7 @@
 #include <flutter/standard_method_codec.h>
 #include <mpv/client.h>
 
+#include "../../../native/kotv_mpv_hdr.h"
 #include "../../../native/kotv_vulkan_probe.h"
 
 #include <algorithm>
@@ -790,12 +791,9 @@ void InitAndOpen(std::shared_ptr<MpvCore> core, std::shared_ptr<Bridge> bridge, 
     // Win7 换不成 10bit 交换链：libplacebo 默认挑 R10G10B10A2，每帧 ResizeBuffers 都 E_INVALIDARG，画面全黑。
     if (IsWindows7()) mpv_set_option_string(m, "d3d11-output-format", "rgba8");
     // auto 时 d3d11 取 DXGI 报的屏幕最低亮度当黑位，libplacebo 对 PQ 输出照办；报得比实际高的电视会黑位发灰。
-    // HDR10 电视自己做 PQ 映射，黑位按绝对黑给。mpv.conf 仍可覆盖。
+    // HDR10 电视自己做 PQ 映射，黑位按绝对黑给。mpv.conf 仍可覆盖。仅 Windows，勿套 Linux。
     mpv_set_option_string(m, "target-contrast", "inf");
-    // HDR 输出：向系统声明色彩空间；映射与峰值检测交给 libplacebo（conf 可覆盖）。
-    mpv_set_option_string(m, "target-colorspace-hint", "auto");
-    mpv_set_option_string(m, "tone-mapping", "auto");
-    mpv_set_option_string(m, "hdr-compute-peak", "auto");
+    kotv_mpv::set_hdr_output_defaults(m);
     // 本集将完时提前打开排队的下一集（无缝换集）。
     mpv_set_option_string(m, "prefetch-playlist", "yes");
     mpv_set_option_string(m, "hwdec", opts.hwdec.c_str());

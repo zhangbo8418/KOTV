@@ -532,6 +532,8 @@ final class KotvMpvCore {
     mpv_set_option_string(handle, "hwdec", "videotoolbox")
     mpv_set_option_string(handle, "hwdec-codecs", "all")
     mpv_set_option_string(handle, "hwdec-software-fallback", "yes")
+    // HDR 输出基线（与 flutter/native/kotv_mpv_hdr.h 一致；Swift 无法共用该头）。
+    // target-colorspace-hint 另由 setHdrOutput 运行期切换；conf 可覆盖。
     mpv_set_option_string(handle, "target-colorspace-hint", "auto")
     mpv_set_option_string(handle, "tone-mapping", "auto")
     mpv_set_option_string(handle, "hdr-compute-peak", "auto")

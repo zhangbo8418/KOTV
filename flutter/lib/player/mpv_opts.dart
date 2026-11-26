@@ -341,6 +341,9 @@ class KotvMpvOpts {
       };
 
   /// UI / 引擎托管、写入 mpv.conf 会被忽略的选项。
+  ///
+  /// 故意不含 HDR 输出键（`target-colorspace-hint` / `tone-mapping` /
+  /// `hdr-compute-peak` / `target-contrast`）：原生端有默认，conf 仍可覆盖。
   static const managedOptionNames = <String>{
     'vo',
     'wid',

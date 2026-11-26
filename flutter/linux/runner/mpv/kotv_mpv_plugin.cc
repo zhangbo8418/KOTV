@@ -2,6 +2,7 @@
 
 #include <mpv/client.h>
 
+#include "../../../native/kotv_mpv_hdr.h"
 #include "../../../native/kotv_vulkan_probe.h"
 
 #include <atomic>
@@ -253,10 +254,8 @@ bool ensure_mpv() {
   }
   mpv_set_option_string(g_state->mpv, "hwdec", g_state->hwdec.c_str());
   mpv_set_option_string(g_state->mpv, "hwdec-software-fallback", "yes");
-  mpv_set_option_string(g_state->mpv, "target-contrast", "inf");
-  mpv_set_option_string(g_state->mpv, "target-colorspace-hint", "auto");
-  mpv_set_option_string(g_state->mpv, "tone-mapping", "auto");
-  mpv_set_option_string(g_state->mpv, "hdr-compute-peak", "auto");
+  // HDR 基线见 native/kotv_mpv_hdr.h；无 Windows DXGI 黑位问题，不设 target-contrast。
+  kotv_mpv::set_hdr_output_defaults(g_state->mpv);
   mpv_set_option_string(g_state->mpv, "keep-open", "yes");
   // 本集将完时提前打开排队的下一集（无缝换集）。
   mpv_set_option_string(g_state->mpv, "prefetch-playlist", "yes");
