@@ -1051,6 +1051,7 @@ jobs:
           \) -print -exec cp -f {} ./release-files/ \;
           for spec in \
             "updater-linux-amd64/updater:updater-linux-amd64" \
+            "updater-linux-arm64/updater:updater-linux-arm64" \
             "updater-windows-amd64/updater.exe:updater-windows-amd64.exe" \
             "updater-windows-arm64/updater.exe:updater-windows-arm64.exe" \
             "updater-macos-amd64/updater:updater-macos-amd64" \

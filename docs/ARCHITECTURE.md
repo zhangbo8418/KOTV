@@ -147,15 +147,17 @@ CI 在 **KOTV Build**（`github-action.yml`）统一构建：
 |------|-----|------|
 | Windows x64 | `build-win-amd64` | ZIP + Inno 安装包 |
 | Windows x64（Win7） | `build-flutter-win7` | 同上加 `-win7` 后缀；子系统 6.01 + MSVCRT MinGW |
-| Windows ARM64 | `build-win-amd64`（arm 分支） | ZIP |
+| Windows aarch64 | `build-win-arm64`（`windows-11-arm`） | ZIP + Inno |
 | Linux x64 | `build-linux` | ZIP |
+| Linux aarch64 | `build-linux-arm64`（`ubuntu-24.04-arm`） | ZIP |
 | macOS arm64 | `build-mac-arm64` | DMG |
 | macOS x64 | `build-mac-amd64` | DMG |
 | Android | `build-android` | aarch64 / armv7 APK |
-| Web | `build-web` | linux-x64 引擎 + `webapp/` ZIP |
+| Web | `build-web` | musl 静态 linux-x64 引擎 + `webapp/` ZIP |
+| 群晖 DSM 7.2 | `build-synology-spk` | x86_64 / armv8 SPK（Web 形态；引擎与运行时均 Toolkit 编） |
 | iOS | `build-ios` | 未签名 IPA |
 
-> **Web / Win7 是主 CI 内的 job**，并非独立 workflow。
+> **Web / Win7 / 群晖是主 CI 内的 job**，并非独立 workflow。
 > **iOS**：CI 打未签名 IPA（`build-ios`）。端上没有本机引擎，只做 UI 与播放：不能动态加载 JAR/DEX，也不能跑 JVM/Python/QuickJS。内容解析走远端 Go 引擎（共用 `/api/v1`）。未签名包不能直接装到真机。
 > **大屏（leanback）**：当前无独立大屏构建，Android 仅手机/平板 APK。
 
