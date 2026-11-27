@@ -1244,6 +1244,8 @@ EOF
   if kotv_is_windows_build; then
     export CFLAGS="${CFLAGS:-} $(kotv_windows_mpv_cflags)"
     export CXXFLAGS="${CXXFLAGS:-} $(kotv_windows_mpv_cflags)"
+    # windows-11-arm：MINGW64 是 x86_64-gcc，但 meson host=aarch64 会让 libpng 开 NEON asm。
+    # 与 macOS 同口径：关掉 freetype 的 png/bzip2/brotli 回退，避免拉进 libpng asm。
     meson setup build \
       --prefix="$PREFIX" \
       --libdir=lib \
@@ -1253,6 +1255,9 @@ EOF
       -Dasm=disabled \
       --force-fallback-for=freetype2,fribidi,harfbuzz \
       -Dfreetype2:harfbuzz=disabled \
+      -Dfreetype2:png=disabled \
+      -Dfreetype2:bzip2=disabled \
+      -Dfreetype2:brotli=disabled \
       -Dharfbuzz:tests=disabled \
       -Dharfbuzz:cairo=disabled \
       -Dharfbuzz:gobject=disabled \

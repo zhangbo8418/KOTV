@@ -99,10 +99,20 @@ build_node() {
     --without-npm
     --dest-cpu="${TARGET_CPU}"
   )
+  local host_cc host_cxx
+  host_cc="${CC_host:-gcc}"
+  host_cxx="${CXX_host:-g++}"
   if [[ "$PLATFORM" == "rtd1296" ]]; then
     cfg+=(--cross-compiling)
+    # icupkg 等 host 工具必须是 x86_64；否则 Exec format error
+    if ! command -v "$host_cc" >/dev/null 2>&1; then
+      echo "ERROR: host C compiler required for Node cross-build: $host_cc" >&2
+      exit 1
+    fi
+    echo "[node] cross-compile: CC=$CC CC_host=$host_cc dest-cpu=${TARGET_CPU}"
   fi
-  CC="$CC" CXX="$CXX" ./configure "${cfg[@]}"
+  CC="$CC" CXX="$CXX" CC_host="$host_cc" CXX_host="$host_cxx" \
+    AR_host="${AR_host:-ar}" ./configure "${cfg[@]}"
   make -j"$JOBS"
   rm -rf "$dest"
   mkdir -p "$dest"
