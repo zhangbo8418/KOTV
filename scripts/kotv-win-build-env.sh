@@ -73,6 +73,11 @@ kotv_windows_vulkan_arch() {
   if kotv_windows_is_arm64; then echo ARM64; else echo X64; fi
 }
 
+# LunarG 下载路径平台段：ARM64 用 warm/，x64 用 windows/（ARM64 在 windows/ 下 404）。
+kotv_windows_vulkan_sdk_channel() {
+  if kotv_windows_is_arm64; then echo warm; else echo windows; fi
+}
+
 # x86_64 才把 mingw-msvcrt 前置；arm64 保留 PATH 上的 llvm-mingw，避免抢成 x86_64 gcc。
 kotv_windows_prefer_msvcrt_mingw() {
   kotv_is_windows_build || return 0

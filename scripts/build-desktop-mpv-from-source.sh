@@ -1408,10 +1408,57 @@ ensure_windows_vulkan() {
     echo "ERROR: Vulkan SDK missing (need Include/vulkan/vulkan.h). CI: scripts/ci-ensure-windows-vulkan-sdk.sh" >&2
     exit 1
   fi
+  # arm64：优先 Lib/ARM64；否则原生 ARM64 SDK 的 Lib/（.kotv_host_arch 或 COFF Machine=AA64）。
   if kotv_windows_is_arm64; then
-    lib_u="$sdk/Lib/ARM64"
-    [[ -f "$lib_u/vulkan-1.lib" ]] \
-      || { echo "ERROR: need $sdk/Lib/ARM64/vulkan-1.lib (X64 SDK Lib/ 会 machine type conflict)" >&2
+    lib_u=""
+    for cand in "$sdk/Lib/ARM64" "$sdk/Lib"; do
+      [[ -f "$cand/vulkan-1.lib" ]] || continue
+      if [[ "$cand" == */Lib/ARM64 ]]; then
+        lib_u="$cand"
+        break
+      fi
+      if [[ -f "$sdk/.kotv_host_arch" ]] && grep -qx 'ARM64' "$sdk/.kotv_host_arch"; then
+        lib_u="$cand"
+        break
+      fi
+      # COFF Machine 0xAA64 = ARM64
+      _vk_ok=0
+      for _py in python python3; do
+        command -v "$_py" >/dev/null 2>&1 || continue
+        if "$_py" - "$cand/vulkan-1.lib" <<'PY' 2>/dev/null
+import struct, sys
+data = open(sys.argv[1], "rb").read()
+mach = None
+if data.startswith(b"!<arch>\n"):
+    off = 8
+    while off + 60 <= len(data):
+        hdr = data[off:off+60]
+        name = hdr[:16].decode("ascii", "replace").rstrip()
+        try:
+            size = int(hdr[48:58].decode("ascii", "replace").strip())
+        except ValueError:
+            break
+        body = off + 60
+        if name not in ("/", "//"):
+            mach = struct.unpack_from("<H", data, body)[0]
+            break
+        off = body + size + (size & 1)
+elif len(data) >= 2:
+    mach = struct.unpack_from("<H", data, 0)[0]
+sys.exit(0 if mach == 0xAA64 else 1)
+PY
+        then
+          _vk_ok=1
+          break
+        fi
+      done
+      if [[ "$_vk_ok" -eq 1 ]]; then
+        lib_u="$cand"
+        break
+      fi
+    done
+    [[ -n "$lib_u" ]] \
+      || { echo "ERROR: no ARM64 vulkan-1.lib under $sdk/Lib or Lib/ARM64" >&2
            ls -la "$sdk/Lib" "$sdk/Lib/ARM64" 2>/dev/null || true; exit 1; }
   else
     lib_u="$sdk/Lib"

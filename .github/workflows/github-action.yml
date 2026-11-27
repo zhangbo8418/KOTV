@@ -220,7 +220,7 @@ jobs:
           choco install strawberryperl -y --no-progress || true
           chmod +x scripts/ci-ensure-windows-nasm.sh scripts/ci-ensure-windows-vulkan-sdk.sh
           ./scripts/ci-ensure-windows-nasm.sh || true
-          ./scripts/ci-ensure-windows-vulkan-sdk.sh || true
+          ./scripts/ci-ensure-windows-vulkan-sdk.sh
           python -m pip install meson ninja
           echo "C:\\Strawberry\\perl\\bin" >> "$GITHUB_PATH"
           echo "C:\\Program Files\\NASM" >> "$GITHUB_PATH"
