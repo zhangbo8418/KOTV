@@ -108,13 +108,19 @@ dav1d_meson_extra=()
 if kotv_is_windows_build; then
   # 编进 PREFIX 的静态库也要 Win7 宏，否则链进 mpv 后可能硬链 Win8+ API。
   cflags="$(kotv_win7_cflags)"
-  # windows-11-arm：runner/Git Bash 常把 aarch64 asm 喂给 x86 汇编器；关 asm 与 macOS 交叉同口径。
-  case "$(uname -m 2>/dev/null || true)" in
-    ARM64|arm64|aarch64)
-      dav1d_meson_extra+=(-Denable_asm=false)
-      echo "==> dav1d Windows aarch64: enable_asm=false"
-      ;;
-  esac
+  # windows-11-arm：MINGW64 下 uname -m 常是 x86_64，但 OS 串/PROCESSOR 带 ARM64；
+  # meson 会按 aarch64 启 asm，却用 x86_64-mingw gcc 喂汇编 → 失败。关 asm。
+  _win_os="$(uname -s 2>/dev/null || true)"
+  _win_m="$(uname -m 2>/dev/null || true)"
+  _win_pa="${PROCESSOR_ARCHITECTURE:-}"
+  _win_pa64="${PROCESSOR_ARCHITEW6432:-}"
+  if [[ "$_win_m" =~ ^(ARM64|arm64|aarch64)$ ]] \
+    || [[ "$_win_os" == *ARM64* || "$_win_os" == *aarch64* ]] \
+    || [[ "$_win_pa" == "ARM64" || "$_win_pa64" == "ARM64" ]]; then
+    dav1d_meson_extra+=(-Denable_asm=false)
+    echo "==> dav1d Windows aarch64: enable_asm=false (os=$_win_os m=$_win_m pa=$_win_pa)"
+  fi
+  unset _win_os _win_m _win_pa _win_pa64
 fi
 if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
   # 用真实硬件 arch：Rosetta 下 uname -m 会谎报 x86_64，导致漏写 cross-file 仍编 ARM asm。

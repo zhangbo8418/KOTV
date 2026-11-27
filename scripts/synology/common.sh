@@ -38,24 +38,28 @@ kotv_syno_env_dir() {
 }
 
 # 在 EnvDeploy 目录下找 sysroot（勿回落到 env 根目录，否则会混进错误头文件）
+# x86 Toolkit 常用 sys-root；armv8（rtd1296 等）常用 sysroot（无连字符）。
 kotv_syno_find_sysroot() {
   local env_dir="$1" d
   for d in \
     "$env_dir/usr/local/x86_64-pc-linux-gnu/x86_64-pc-linux-gnu/sys-root" \
+    "$env_dir/usr/local/x86_64-pc-linux-gnu/x86_64-pc-linux-gnu/sysroot" \
     "$env_dir/usr/local/aarch64-unknown-linux-gnu/aarch64-unknown-linux-gnu/sys-root" \
-    "$env_dir/usr/local/aarch64-unknown-linux-gnueabi/aarch64-unknown-linux-gnueabi/sys-root" ; do
+    "$env_dir/usr/local/aarch64-unknown-linux-gnu/aarch64-unknown-linux-gnu/sysroot" \
+    "$env_dir/usr/local/aarch64-unknown-linux-gnueabi/aarch64-unknown-linux-gnueabi/sys-root" \
+    "$env_dir/usr/local/aarch64-unknown-linux-gnueabi/aarch64-unknown-linux-gnueabi/sysroot" ; do
     if [[ -d "$d/usr/include" || -d "$d/usr/lib" || -d "$d/lib" ]]; then
       echo "$d"
       return 0
     fi
   done
-  d="$(find "$env_dir/usr/local" -type d -name 'sys-root' 2>/dev/null | head -1 || true)"
+  d="$(find "$env_dir/usr/local" \( -type d -name 'sys-root' -o -type d -name 'sysroot' \) 2>/dev/null | head -1 || true)"
   if [[ -n "$d" && ( -d "$d/usr/include" || -d "$d/usr/lib" || -d "$d/lib" ) ]]; then
     echo "$d"
     return 0
   fi
-  echo "ERROR: sys-root not found under $env_dir/usr/local" >&2
-  find "$env_dir/usr/local" -maxdepth 3 -type d 2>/dev/null | head -40 >&2 || true
+  echo "ERROR: sysroot/sys-root not found under $env_dir/usr/local" >&2
+  find "$env_dir/usr/local" -maxdepth 2 -mindepth 1 -type d 2>/dev/null | head -40 >&2 || true
   return 1
 }
 

@@ -129,5 +129,12 @@ if [[ ! -d "$ENV_DIR" ]]; then
   exit 1
 fi
 
+# 部署后立刻校验交叉 gcc + sysroot（rtd1296 为 sysroot，x86 多为 sys-root）
+if ! kotv_syno_export_toolchain "$ENV_DIR" >/dev/null; then
+  echo "ERROR: toolkit deployed but gcc/sysroot unusable: $ENV_DIR" >&2
+  ls -la "$ENV_DIR/usr/local" 2>/dev/null | head -40 >&2 || true
+  exit 1
+fi
+
 echo "==> deployed: $ENV_DIR"
 echo "$ENV_DIR"
