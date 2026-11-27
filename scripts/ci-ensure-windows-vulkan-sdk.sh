@@ -11,14 +11,31 @@ SDK_VER="${KOTV_VULKAN_SDK_VERSION:-1.4.363.1}"
 SDK_ROOT="/c/VulkanSDK/${SDK_VER}"
 SDK_ROOT_WIN="C:\\VulkanSDK\\${SDK_VER}"
 
+# 返回本机 arch 对应的 Lib 目录（相对 SDK root 的绝对路径）；不对则空。
+kotv_vulkan_sdk_libdir() {
+  local root="$1"
+  if kotv_windows_is_arm64; then
+    # 勿用 Lib/vulkan-1.lib：choco/X64 安装器会留下 x64 .lib，链上 arm64 必炸。
+    [[ -f "${root}/Lib/ARM64/vulkan-1.lib" ]] && { printf '%s' "${root}/Lib/ARM64"; return 0; }
+    return 1
+  fi
+  if [[ -f "${root}/Lib/vulkan-1.lib" ]]; then
+    printf '%s' "${root}/Lib"
+    return 0
+  fi
+  if [[ -f "${root}/Lib/X64/vulkan-1.lib" ]]; then
+    printf '%s' "${root}/Lib/X64"
+    return 0
+  fi
+  [[ -f "${root}/Lib/vulkan-1.dll.a" || -f "${root}/Lib/libvulkan-1.a" ]] \
+    && { printf '%s' "${root}/Lib"; return 0; }
+  return 1
+}
+
 kotv_vulkan_sdk_ready() {
   local root="$1"
   [[ -f "${root}/Include/vulkan/vulkan.h" ]] || return 1
-  # MinGW / meson 需要能链到 vulkan-1（SDK Lib 或 Lib/ARM64）。
-  [[ -f "${root}/Lib/vulkan-1.lib" \
-    || -f "${root}/Lib/ARM64/vulkan-1.lib" \
-    || -f "${root}/Lib/vulkan-1.dll.a" \
-    || -f "${root}/Lib/libvulkan-1.a" ]] || return 1
+  kotv_vulkan_sdk_libdir "$root" >/dev/null || return 1
   return 0
 }
 
@@ -91,16 +108,23 @@ main() {
     return 0
   fi
 
-  kotv_choco_install_vulkan_sdk || true
-  if root="$(kotv_pick_vulkan_sdk)"; then
-    kotv_export_vulkan_sdk "$root"
-    return 0
+  # windows-arm64：choco 社区包常装成 X64 SDK（Lib/ 无 ARM64），跳过直接走 LunarG ARM64。
+  if ! kotv_windows_is_arm64; then
+    kotv_choco_install_vulkan_sdk || true
+    if root="$(kotv_pick_vulkan_sdk)"; then
+      kotv_export_vulkan_sdk "$root"
+      return 0
+    fi
+    echo "WARN: choco vulkan-sdk unavailable; falling back to LunarG installer" >&2
+  else
+    echo "==> windows-arm64: skip choco vulkan-sdk (often X64); use LunarG ARM64" >&2
   fi
 
-  echo "WARN: choco vulkan-sdk unavailable; falling back to LunarG installer" >&2
   kotv_lunarg_install_vulkan_sdk
   root="$(kotv_pick_vulkan_sdk)" \
-    || { echo "ERROR: Vulkan SDK still missing after LunarG install" >&2; exit 1; }
+    || { echo "ERROR: Vulkan SDK still missing after LunarG install (need Lib/ARM64 on arm64)" >&2
+         ls -la "${SDK_ROOT}/Lib" "${SDK_ROOT}/Lib/ARM64" 2>/dev/null || true
+         exit 1; }
   kotv_export_vulkan_sdk "$root"
 }
 

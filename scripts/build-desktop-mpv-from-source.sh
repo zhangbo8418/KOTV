@@ -647,7 +647,15 @@ kotv_find_vulkan_loader_dll() {
     "$(ls -d /c/VulkanSDK/*/ 2>/dev/null | tail -1 || true)"; do
     [[ -n "$sdk" ]] || continue
     sdk="${sdk%/}"
-    for cand in "$sdk/Bin/vulkan-1.dll" "$sdk/Bin32/vulkan-1.dll"; do
+    for cand in \
+      "$sdk/Bin/ARM64/vulkan-1.dll" "$sdk/Bin/X64/vulkan-1.dll" \
+      "$sdk/Bin/vulkan-1.dll" "$sdk/Bin32/vulkan-1.dll"; do
+      # arm64 勿误收 Bin/ 下的 x64 loader
+      if kotv_windows_is_arm64; then
+        case "$cand" in
+          */Bin/vulkan-1.dll|*/Bin/X64/*|*/Bin32/*) continue ;;
+        esac
+      fi
       [[ -f "$cand" ]] && { printf '%s' "$cand"; return 0; }
     done
     for dir in "$sdk/Helpers" "$sdk/helpers"; do
@@ -1386,7 +1394,8 @@ ensure_windows_d3d11_shader_deps() {
 
 ensure_windows_vulkan() {
   # libplacebo / mpv 需要 Vulkan 头与 vulkan-1（Win7 同 Win10+）。
-  local sdk="" pref inc lib
+  # arm64 必须用 Lib/ARM64，勿链 Lib/ 下的 x64 vulkan-1.lib。
+  local sdk="" pref inc lib lib_u
   if [[ -n "${VULKAN_SDK:-}" ]]; then
     sdk="$(cygpath -u "${VULKAN_SDK}" 2>/dev/null || echo "${VULKAN_SDK}")"
     sdk="${sdk%/}"
@@ -1399,16 +1408,24 @@ ensure_windows_vulkan() {
     echo "ERROR: Vulkan SDK missing (need Include/vulkan/vulkan.h). CI: scripts/ci-ensure-windows-vulkan-sdk.sh" >&2
     exit 1
   fi
-  if [[ ! -f "$sdk/Lib/vulkan-1.lib" && ! -f "$sdk/Lib/vulkan-1.dll.a" && ! -f "$sdk/Lib/libvulkan-1.a" ]]; then
-    echo "ERROR: Vulkan SDK Lib/vulkan-1.* missing under $sdk/Lib" >&2
-    ls -la "$sdk/Lib" >&2 || true
-    exit 1
+  if kotv_windows_is_arm64; then
+    lib_u="$sdk/Lib/ARM64"
+    [[ -f "$lib_u/vulkan-1.lib" ]] \
+      || { echo "ERROR: need $sdk/Lib/ARM64/vulkan-1.lib (X64 SDK Lib/ 会 machine type conflict)" >&2
+           ls -la "$sdk/Lib" "$sdk/Lib/ARM64" 2>/dev/null || true; exit 1; }
+  else
+    lib_u="$sdk/Lib"
+    if [[ ! -f "$lib_u/vulkan-1.lib" && -f "$sdk/Lib/X64/vulkan-1.lib" ]]; then
+      lib_u="$sdk/Lib/X64"
+    fi
+    [[ -f "$lib_u/vulkan-1.lib" || -f "$lib_u/vulkan-1.dll.a" || -f "$lib_u/libvulkan-1.a" ]] \
+      || { echo "ERROR: Vulkan SDK vulkan-1.* missing under $lib_u" >&2; ls -la "$sdk/Lib" >&2 || true; exit 1; }
   fi
   export VULKAN_SDK="$(cygpath -m "$sdk" 2>/dev/null || echo "$sdk")"
-  echo "ok VULKAN_SDK=$VULKAN_SDK"
+  echo "ok VULKAN_SDK=$VULKAN_SDK libdir=$lib_u"
   pref="$(cygpath -m "$sdk" 2>/dev/null || echo "$sdk")"
   inc="$pref/Include"
-  lib="$pref/Lib"
+  lib="$(cygpath -m "$lib_u" 2>/dev/null || echo "$lib_u")"
   mkdir -p "$PREFIX/lib/pkgconfig"
   cat >"$PREFIX/lib/pkgconfig/vulkan.pc" <<EOF
 prefix=$pref
@@ -1422,7 +1439,7 @@ Libs: -L\${libdir} -lvulkan-1
 Cflags: -I\${includedir}
 EOF
   export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
-  echo "ok vulkan.pc -> $PREFIX/lib/pkgconfig/vulkan.pc"
+  echo "ok vulkan.pc -> $PREFIX/lib/pkgconfig/vulkan.pc (libdir=$lib)"
 }
 
 # Linux：ubuntu-24.04-arm 等系统 vulkan.pc 常 < 1.4.309（mpv 硬门槛）。
