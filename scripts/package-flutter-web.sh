@@ -53,20 +53,8 @@ echo "==> prepare runtime"
 "$ROOT/scripts/prepare-runtime.sh" "$PLAT"
 "$ROOT/scripts/verify-runtime.sh" runtime "$PLAT"
 
-echo "==> Flutter Web (base-href /)"
-# 与桌面/安卓同一套 pub get，否则 Web 会停在 pubspec.lock 里的旧 fvp。
-KOTV_FLUTTER_TARGET=web "$ROOT/scripts/flutter-pub-get.sh"
-# shellcheck source=kotv-flutter-asset-engines.sh
-source "$ROOT/scripts/kotv-flutter-asset-engines.sh"
-kotv_flutter_asset_engines_hide
-trap kotv_flutter_asset_engines_restore EXIT
-cd "$ROOT/flutter"
-"$FLUTTER_BIN" config --enable-web
-"$FLUTTER_BIN" build web --base-href / --no-wasm-dry-run
-kotv_flutter_asset_engines_restore
-kotv_flutter_asset_engines_reject "$ROOT/flutter/build/web"
-# Web 仍要 hls.js / no_sleep.js。引擎在包外的可执行文件，不在 flutter assets。
-kotv_flutter_strip_placeholder_assets "$ROOT/flutter/build/web/assets" 1
+export FLUTTER_BIN
+"$ROOT/scripts/build-flutter-webapp.sh"
 
 echo "==> build engine"
 (cd "$ROOT/internal/spider" && go run gen_qjsinc.go)

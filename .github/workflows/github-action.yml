@@ -159,6 +159,110 @@ jobs:
             KO影视-*-x86_64-setup.exe
           if-no-files-found: error
 
+  # Windows arm64 桌面包（原生 windows-11-arm；无 DComp / 非 Win7）
+  build-win-arm64:
+    runs-on: windows-11-arm
+    needs: [set-tag, build-updater]
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.2'
+          check-latest: true
+          cache: true
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: liberica
+          java-version: "21"
+
+      - name: Ensure Flutter
+        shell: bash
+        env:
+          FLUTTER_VERSION: ${{ env.FLUTTER_VERSION }}
+        run: |
+          chmod +x scripts/ci-ensure-flutter.sh
+          ./scripts/ci-ensure-flutter.sh
+          flutter precache --windows || true
+
+      - name: Setup MSVC + LLVM (CGO)
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: arm64
+
+      - name: Install LLVM for CGO
+        shell: pwsh
+        run: |
+          choco install llvm -y --no-progress
+          echo "C:\Program Files\LLVM\bin" >> $env:GITHUB_PATH
+          & "C:\Program Files\LLVM\bin\clang.exe" --version
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: updater-windows-arm64
+          path: cmd/updater
+
+      - name: Install desktop MPV source deps
+        shell: bash
+        run: |
+          choco install strawberryperl -y --no-progress || true
+          chmod +x scripts/ci-ensure-windows-nasm.sh scripts/ci-ensure-windows-vulkan-sdk.sh
+          ./scripts/ci-ensure-windows-nasm.sh || true
+          ./scripts/ci-ensure-windows-vulkan-sdk.sh || true
+          python -m pip install meson ninja
+          echo "C:\\Strawberry\\perl\\bin" >> "$GITHUB_PATH"
+          echo "C:\\Program Files\\NASM" >> "$GITHUB_PATH"
+
+      - name: Build desktop libmpv (Vulkan + AV3A source)
+        shell: bash
+        env:
+          KOTV_FETCH_DESKTOP_PLAT: windows
+          KOTV_BUILD_MPV_AV3A: "1"
+          KOTV_MPV_JOBS: "4"
+        run: |
+          chmod +x scripts/*.sh
+          export PATH="/c/Strawberry/perl/bin:/c/Program Files/NASM:/c/ProgramData/chocolatey/bin:$PATH"
+          export PATH="$(python -c 'import sysconfig; print(sysconfig.get_path("scripts"))'):$PATH"
+          ./scripts/fetch-desktop-mpv-libs.sh
+
+      - name: Package Flutter Windows arm64
+        shell: bash
+        env:
+          KOTV_VERSION: ${{ needs.set-tag.outputs.tag }}
+          CGO_ENABLED: "1"
+          CC: clang
+          CXX: clang++
+          KOTV_JAVA_TOOLCHAIN: "21"
+        run: |
+          chmod +x bridge/build.sh scripts/*.sh
+          ./scripts/package-flutter-windows.sh windows-arm64
+
+      - name: Build installer
+        shell: pwsh
+        env:
+          TAG: ${{ needs.set-tag.outputs.tag }}
+        run: |
+          $ver = $env:TAG.TrimStart("v")
+          choco install innosetup -y --no-progress
+          ./scripts/make-win-installer.ps1 `
+            -Plat windows-arm64 `
+            -Tag $env:TAG `
+            -Version $ver `
+            -SourceDir "flutter\build\windows\arm64\runner\Release" `
+            -ExeName kotv.exe
+          Get-ChildItem "KO影视-${ver}-aarch64*" | Format-Table Name, Length
+
+      - uses: actions/upload-artifact@v4
+        with:
+          retention-days: 1
+          name: win-aarch64
+          path: |
+            KO影视-*-aarch64.zip
+            KO影视-*-aarch64-setup.exe
+          if-no-files-found: error
+
   # Flutter Win7 实验线：ZIP + Inno 安装包
   build-flutter-win7:
     runs-on: windows-2022
@@ -338,7 +442,7 @@ jobs:
         run: |
           chmod +x bridge/build.sh scripts/*.sh
           chmod +x cmd/updater/updater || true
-          ./scripts/package-flutter-linux.sh
+          ./scripts/package-flutter-linux.sh linux-x64
           cp -f dist/KO影视-*-linux-x86_64.zip ./
 
       - uses: actions/upload-artifact@v4
@@ -346,6 +450,78 @@ jobs:
           retention-days: 1
           name: linux-x86_64
           path: KO影视-*-linux-x86_64.zip
+          if-no-files-found: error
+
+  # Linux aarch64 桌面包（原生 arm runner）
+  build-linux-arm64:
+    runs-on: ubuntu-24.04-arm
+    needs: [set-tag, build-updater]
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.2'
+          check-latest: true
+          cache: true
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: liberica
+          java-version: "21"
+
+      - name: Install Linux deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build meson pkg-config nasm yasm \
+            libgtk-3-dev liblzma-dev libgl1-mesa-dev xorg-dev libxkbcommon-dev \
+            libass-dev libarchive-dev libuchardet-dev librubberband-dev libdvbv5-dev \
+            libbluray-dev libdvdread-dev libdvdnav-dev \
+            liblua5.2-dev libluajit-5.1-dev \
+            libplacebo-dev libvulkan-dev libshaderc-dev liblcms2-dev libxxhash-dev \
+            libva-dev libdrm-dev libfontconfig1-dev \
+            libssl-dev libcurl4-openssl-dev libnghttp2-dev \
+            libasound2-dev libmpv-dev mpv \
+            p7zip-full unzip curl zip git
+
+      - name: Ensure Flutter
+        env:
+          FLUTTER_VERSION: ${{ env.FLUTTER_VERSION }}
+        run: |
+          chmod +x scripts/ci-ensure-flutter.sh
+          ./scripts/ci-ensure-flutter.sh
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: updater-linux-arm64
+          path: cmd/updater
+
+      - name: Build desktop libmpv (Vulkan + AV3A source)
+        env:
+          KOTV_FETCH_DESKTOP_PLAT: linux
+          KOTV_BUILD_MPV_AV3A: "1"
+          KOTV_MPV_JOBS: "4"
+        run: |
+          chmod +x scripts/*.sh
+          ./scripts/fetch-desktop-mpv-libs.sh
+
+      - name: Package Flutter Linux arm64
+        env:
+          KOTV_VERSION: ${{ needs.set-tag.outputs.tag }}
+          CGO_ENABLED: "1"
+          KOTV_JAVA_TOOLCHAIN: "21"
+        run: |
+          chmod +x bridge/build.sh scripts/*.sh
+          chmod +x cmd/updater/updater || true
+          ./scripts/package-flutter-linux.sh linux-arm64
+          cp -f dist/KO影视-*-linux-aarch64.zip ./
+
+      - uses: actions/upload-artifact@v4
+        with:
+          retention-days: 1
+          name: linux-aarch64
+          path: KO影视-*-linux-aarch64.zip
           if-no-files-found: error
 
   build-mac-arm64:
@@ -670,16 +846,11 @@ jobs:
           path: dist/KO影视-*-armv7.apk
           if-no-files-found: error
 
-  # Web 包 = 引擎 + webapp（同端口放出，不进 PC/安卓/iOS）
-  # 矩阵含 arm64：群晖 armv8 SPK 复用 musl 静态引擎
+  # Web 便携包 = musl 静态引擎 + 预编译 runtime + webapp（非群晖）
   build-web:
     runs-on: ubuntu-latest
     needs: [set-tag]
-    timeout-minutes: 180
-    strategy:
-      fail-fast: false
-      matrix:
-        plat: [linux-x64, linux-arm64]
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
@@ -703,10 +874,6 @@ jobs:
             libbluray-dev libdvdread-dev libdvdnav-dev \
             liblua5.2-dev libluajit-5.1-dev \
             p7zip-full unzip curl zip docker.io
-          if [ "${{ matrix.plat }}" = "linux-arm64" ]; then
-            sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu qemu-user-static binfmt-support
-            docker run --rm --privileged multiarch/qemu-user-static --reset -p yes || true
-          fi
 
       - uses: subosito/flutter-action@v2
         with:
@@ -721,13 +888,12 @@ jobs:
           KOTV_JAVA_TOOLCHAIN: "21"
         run: |
           flutter config --enable-web
-          chmod +x bridge/build.sh scripts/*.sh scripts/synology/*.sh
-          ./scripts/package-flutter-web.sh "${{ matrix.plat }}"
-          eng="dist/KOTV-web-${{ matrix.plat }}/kotv-engine"
-          file "$eng"
-          if ldd "$eng" >/dev/null 2>&1; then
+          chmod +x bridge/build.sh scripts/*.sh
+          ./scripts/package-flutter-web.sh linux-x64
+          file dist/KOTV-web-linux-x64/kotv-engine
+          if ldd dist/KOTV-web-linux-x64/kotv-engine >/dev/null 2>&1; then
             echo "engine still dynamically linked:" >&2
-            ldd "$eng" >&2
+            ldd dist/KOTV-web-linux-x64/kotv-engine >&2
             exit 1
           fi
           ls -lh dist/KO影视-*-web-*.zip
@@ -735,14 +901,14 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           retention-days: 1
-          name: flutter-web-${{ matrix.plat }}
+          name: flutter-web
           path: |
-            dist/KOTV-web-${{ matrix.plat }}/**
-            dist/KO影视-*-web-*.zip
+            dist/KO影视-*-web-linux-x86_64.zip
+            dist/KO影视-*-web-static.zip
           if-no-files-found: error
 
-  # 群晖 DSM 7.2：Toolkit 编译 Node/Python/JRE/Chromium
-  build-syno-toolkit-runtime:
+  # 群晖 DSM 7.2 SPK：Toolkit 编引擎 + 运行时；形态为 Web（engine+webapp）
+  build-synology-spk:
     runs-on: ubuntu-latest
     needs: [set-tag]
     timeout-minutes: 600
@@ -757,6 +923,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.2'
+          check-latest: true
+          cache: true
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -769,6 +941,12 @@ jobs:
             build-essential clang lld ninja-build pkg-config curl ca-certificates \
             autoconf automake libtool cmake unzip zip rsync
 
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
       - name: Cache Synology toolkit + sources
         uses: actions/cache@v4
         with:
@@ -777,109 +955,33 @@ jobs:
             .toolkit/toolkit_tarballs
             .toolkit/build_env
             .syno-src-cache
-          key: syno-toolkit-7.2-${{ matrix.toolkit_plat }}-${{ hashFiles('scripts/synology/versions.env') }}-v1
+          key: syno-toolkit-7.2-${{ matrix.toolkit_plat }}-${{ hashFiles('scripts/synology/versions.env') }}-v2
           restore-keys: |
             syno-toolkit-7.2-${{ matrix.toolkit_plat }}-
             syno-toolkit-7.2-
 
-      - name: Deploy toolkit + build runtimes
+      - name: Build SPK (Toolkit engine + runtime + webapp)
         env:
+          KOTV_VERSION: ${{ needs.set-tag.outputs.tag }}
           KOTV_TOOLKIT_ROOT: ${{ github.workspace }}/.toolkit
           KOTV_SYNO_SRC_CACHE: ${{ github.workspace }}/.syno-src-cache
           KOTV_SYNO_BUILD_ROOT: ${{ github.workspace }}/.syno-build/${{ matrix.toolkit_plat }}
+          KOTV_JAVA_TOOLCHAIN: "21"
         run: |
-          chmod +x scripts/synology/*.sh
-          ./scripts/synology/deploy-toolkit.sh "${{ matrix.toolkit_plat }}"
-          ./scripts/synology/build-runtime-in-chroot.sh "${{ matrix.toolkit_plat }}"
-          ls -lah "dist/syno-runtime-${{ matrix.arch_label }}"
-          # 打包 artifact 前清掉巨型中间构建目录，避免 runner 爆盘
+          chmod +x bridge/build.sh scripts/*.sh scripts/synology/*.sh
+          ./scripts/synology/build-spk.sh "${{ matrix.toolkit_plat }}"
+          ls -lh dist/KO影视-*-synology-*.spk
+          # 确认引擎为动态链接（Toolkit），非 musl 静态
+          eng="dist/syno-engine-${{ matrix.arch_label }}/kotv-engine"
+          file "$eng"
+          ldd "$eng" | head -20
           rm -rf .syno-build/${{ matrix.toolkit_plat }} || true
 
       - uses: actions/upload-artifact@v4
         with:
           retention-days: 1
-          name: syno-runtime-${{ matrix.arch_label }}
-          path: dist/syno-runtime-${{ matrix.arch_label }}/**
-          if-no-files-found: error
-
-  # 组装 SPK：musl 引擎/webapp + Toolkit 运行时
-  build-synology-spk:
-    runs-on: ubuntu-latest
-    needs: [set-tag, build-web, build-syno-toolkit-runtime]
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: x86_64
-            web_plat: linux-x64
-          - arch: armv8
-            web_plat: linux-arm64
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "21"
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: flutter-web-${{ matrix.web_plat }}
-          path: _web
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: syno-runtime-${{ matrix.arch }}
-          path: dist/syno-runtime-${{ matrix.arch }}
-
-      - name: Restore web package layout
-        run: |
-          set -euo pipefail
-          mkdir -p "dist/KOTV-web-${{ matrix.web_plat }}"
-          # artifact 可能是目录树或含 zip
-          if [[ -x "_web/dist/KOTV-web-${{ matrix.web_plat }}/kotv-engine" ]]; then
-            cp -a "_web/dist/KOTV-web-${{ matrix.web_plat }}/." "dist/KOTV-web-${{ matrix.web_plat }}/"
-          elif [[ -x "_web/KOTV-web-${{ matrix.web_plat }}/kotv-engine" ]]; then
-            cp -a "_web/KOTV-web-${{ matrix.web_plat }}/." "dist/KOTV-web-${{ matrix.web_plat }}/"
-          elif [[ -x "_web/kotv-engine" ]]; then
-            cp -a "_web/." "dist/KOTV-web-${{ matrix.web_plat }}/"
-          else
-            zip="$(find _web -name 'KO影视-*-web-*.zip' | head -1 || true)"
-            if [[ -z "$zip" ]]; then
-              echo "web artifact layout unknown:" >&2
-              find _web -maxdepth 4 -type f | head -80 >&2
-              exit 1
-            fi
-            tmp="$(mktemp -d)"
-            unzip -q "$zip" -d "$tmp"
-            if [[ -x "$tmp/kotv-engine" ]]; then
-              cp -a "$tmp/." "dist/KOTV-web-${{ matrix.web_plat }}/"
-            else
-              inner="$(find "$tmp" -name kotv-engine -type f | head -1)"
-              cp -a "$(dirname "$inner")/." "dist/KOTV-web-${{ matrix.web_plat }}/"
-            fi
-          fi
-          test -x "dist/KOTV-web-${{ matrix.web_plat }}/kotv-engine"
-          test -f "dist/KOTV-web-${{ matrix.web_plat }}/webapp/index.html"
-
-      - name: Build bridge jar (for SPK runtime)
-        run: |
-          chmod +x bridge/build.sh scripts/synology/*.sh
-          ./bridge/build.sh
-
-      - name: Package SPK
-        env:
-          KOTV_VERSION: ${{ needs.set-tag.outputs.tag }}
-        run: |
-          ./scripts/synology/package-spk.sh "${{ matrix.arch }}"
-          ls -lh dist/KO影视-*-synology-*.spk
-
-      - uses: actions/upload-artifact@v4
-        with:
-          retention-days: 1
-          name: synology-spk-${{ matrix.arch }}
-          path: dist/KO影视-*-synology-${{ matrix.arch }}.spk
+          name: synology-spk-${{ matrix.arch_label }}
+          path: dist/KO影视-*-synology-${{ matrix.arch_label }}.spk
           if-no-files-found: error
 
   build-ios:
@@ -917,8 +1019,10 @@ jobs:
       - set-tag
       - build-updater
       - build-win-amd64
+      - build-win-arm64
       - build-flutter-win7
       - build-linux
+      - build-linux-arm64
       - build-mac-arm64
       - build-mac-amd64
       - build-android
@@ -977,15 +1081,17 @@ jobs:
             "downloads": {
               "windows-amd64": f"{base}/KO影视-{ver}-x86_64.zip",
               "windows-amd64-setup": f"{base}/KO影视-{ver}-x86_64-setup.exe",
+              "windows-arm64": f"{base}/KO影视-{ver}-aarch64.zip",
+              "windows-arm64-setup": f"{base}/KO影视-{ver}-aarch64-setup.exe",
               "windows-amd64-flutter-win7": f"{base}/KO影视-{ver}-x86_64-win7.zip",
               "windows-amd64-flutter-win7-setup": f"{base}/KO影视-{ver}-x86_64-win7-setup.exe",
               "linux-amd64": f"{base}/KO影视-{ver}-linux-x86_64.zip",
+              "linux-arm64": f"{base}/KO影视-{ver}-linux-aarch64.zip",
               "darwin-arm64": f"{base}/KO影视-{ver}-aarch64.dmg",
               "darwin-amd64": f"{base}/KO影视-{ver}-x86_64.dmg",
               "android-arm64": f"{base}/KO影视-{ver}-aarch64.apk",
               "android-armv7": f"{base}/KO影视-{ver}-armv7.apk",
               "web-linux-amd64": f"{base}/KO影视-{ver}-web-linux-x86_64.zip",
-              "web-linux-arm64": f"{base}/KO影视-{ver}-web-linux-aarch64.zip",
               "web-static": f"{base}/KO影视-{ver}-web-static.zip",
               "synology-x86_64": f"{base}/KO影视-{ver}-synology-x86_64.spk",
               "synology-armv8": f"{base}/KO影视-{ver}-synology-armv8.spk",
@@ -1032,14 +1138,16 @@ jobs:
             echo "| 平台 | 文件 |"
             echo "|------|------|"
             echo "| Windows x86_64 | [安装包](${base}/KO影视-${ver}-x86_64-setup.exe) · [ZIP](${base}/KO影视-${ver}-x86_64.zip) |"
+            echo "| Windows aarch64 | [安装包](${base}/KO影视-${ver}-aarch64-setup.exe) · [ZIP](${base}/KO影视-${ver}-aarch64.zip) |"
             echo "| Windows x86_64 Win7 | [安装包](${base}/KO影视-${ver}-x86_64-win7-setup.exe) · [ZIP](${base}/KO影视-${ver}-x86_64-win7.zip) |"
             echo "| Linux x86_64 | [ZIP](${base}/KO影视-${ver}-linux-x86_64.zip) |"
+            echo "| Linux aarch64 | [ZIP](${base}/KO影视-${ver}-linux-aarch64.zip) |"
             echo "| macOS aarch64 | [DMG](${base}/KO影视-${ver}-aarch64.dmg) |"
             echo "| macOS x86_64 | [DMG](${base}/KO影视-${ver}-x86_64.dmg) |"
             echo "| Android aarch64 | [APK](${base}/KO影视-${ver}-aarch64.apk) |"
             echo "| Android armv7 | [APK](${base}/KO影视-${ver}-armv7.apk) |"
-            echo "| **Web 包**（引擎同端口） | [x86_64](${base}/KO影视-${ver}-web-linux-x86_64.zip) · [aarch64](${base}/KO影视-${ver}-web-linux-aarch64.zip) · [仅 webapp](${base}/KO影视-${ver}-web-static.zip) |"
-            echo "| **群晖 DSM 7.2 SPK** | [x86_64](${base}/KO影视-${ver}-synology-x86_64.spk) · [armv8](${base}/KO影视-${ver}-synology-armv8.spk) |"
+            echo "| **Web 包**（引擎同端口） | [引擎+Web](${base}/KO影视-${ver}-web-linux-x86_64.zip) · [仅 webapp](${base}/KO影视-${ver}-web-static.zip) |"
+            echo "| **群晖 DSM 7.2 SPK**（Toolkit 引擎+运行时） | [x86_64](${base}/KO影视-${ver}-synology-x86_64.spk) · [armv8](${base}/KO影视-${ver}-synology-armv8.spk) |"
             echo "| iOS（未签名） | [IPA](${base}/KO影视-${ver}-ios.ipa) |"
           } > ./RELEASE_NOTES.md
 

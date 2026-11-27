@@ -2,7 +2,8 @@
 
 ## v0.3.6
 
-- 新增群晖 DSM 7.2 SPK（x86_64 / armv8）：Web 引擎 + webapp，运行时 Node/Python/JRE/Chromium 由官方 Toolkit 在 CI 内编译；Chromium 每次解析 Chrome for Testing Stable 最新版编 headless_shell。
+- 新增群晖 DSM 7.2 SPK（x86_64 / armv8）：Web 服务形态（engine + webapp）；**引擎与** Node/Python/JRE/Chromium 均由官方 Toolkit 在 CI 编译（非 musl / 非 Liberica 预编译）。Chromium 解析 CFT Stable 最新版编 headless_shell。
+- CI 新增 Windows aarch64、Linux aarch64 桌面包。
 - 版本号同源升至 `0.3.6`（pubspec `0.3.6+46`）。
 
 ## v0.3.5

@@ -1,34 +1,43 @@
 #!/usr/bin/env bash
 # 打包 Flutter Linux：runtime + Go 引擎 + UI → ZIP
-# 产物：dist/KO影视-{ver}-linux-x86_64.zip
+# 用法: ./scripts/package-flutter-linux.sh [linux-x64|linux-arm64]
+# 产物：dist/KO影视-{ver}-linux-{x86_64|aarch64}.zip
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=kotv-release-name.sh
 source "$ROOT/scripts/kotv-release-name.sh"
 export PATH="${HOME}/flutter/bin:${PATH}"
 
+PLAT="${1:-linux-x64}"
+case "$PLAT" in
+  linux-x64) FLUTTER_LINUX_ARCH=x64; GOARCH_LINUX=amd64 ;;
+  linux-arm64) FLUTTER_LINUX_ARCH=arm64; GOARCH_LINUX=arm64 ;;
+  *) echo "usage: $0 [linux-x64|linux-arm64]" >&2; exit 1 ;;
+esac
+
 VERSION="$(kotv_release_version "$ROOT/flutter/pubspec.yaml")"
 kotv_check_version_literals "$VERSION"
-OUT_ZIP="$ROOT/dist/KO影视-${VERSION}-linux-x86_64.zip"
+REL_ARCH="$(kotv_release_arch "$PLAT")"
+OUT_ZIP="$ROOT/dist/KO影视-${VERSION}-linux-${REL_ARCH}.zip"
 ENGINE_OUT="$ROOT/flutter/assets/engine/kotv-engine"
-BUNDLE="$ROOT/flutter/build/linux/x64/release/bundle"
+BUNDLE="$ROOT/flutter/build/linux/${FLUTTER_LINUX_ARCH}/release/bundle"
 
-echo "==> Flutter Linux package version=$VERSION"
+echo "==> Flutter Linux package version=$VERSION plat=$PLAT"
 
 chmod +x "$ROOT/bridge/build.sh" "$ROOT"/scripts/*.sh
 echo "==> fetch desktop libmpv (AV3A source)"
+export KOTV_FETCH_DESKTOP_PLAT=linux
 "$ROOT/scripts/fetch-desktop-mpv-libs.sh"
-"$ROOT/scripts/prepare-runtime.sh" linux-x64
-"$ROOT/scripts/verify-runtime.sh" runtime linux-x64
+"$ROOT/scripts/prepare-runtime.sh" "$PLAT"
+"$ROOT/scripts/verify-runtime.sh" runtime "$PLAT"
 
 echo "==> build Go engine"
 (cd "$ROOT/internal/spider" && go run gen_qjsinc.go)
-# proxy.golang.org 偶发 INTERNAL_ERROR；多源 + 重试
 export GOPROXY="${GOPROXY:-https://proxy.golang.org,direct}"
 ok_eng=0
 for attempt in 1 2 3; do
   VER_LD="$(kotv_engine_version_ldflags "$VERSION")"
-  if (cd "$ROOT" && CGO_ENABLED=1 go build -ldflags "-s -w ${VER_LD}" -o "$ENGINE_OUT" ./cmd/engine); then
+  if (cd "$ROOT" && CGO_ENABLED=1 GOARCH="$GOARCH_LINUX" go build -ldflags "-s -w ${VER_LD}" -o "$ENGINE_OUT" ./cmd/engine); then
     ok_eng=1
     break
   fi
@@ -49,9 +58,7 @@ source "$ROOT/scripts/kotv-fvp-deps.sh"
 kotv_export_fvp_deps
 flutter config --enable-linux-desktop
 KOTV_FLUTTER_TARGET=linux "$ROOT/scripts/flutter-pub-get.sh"
-# mpv/FFmpeg 源码编可能留下 Unix Makefiles 等 CMake 变量；Flutter Linux 需要 Ninja + C 语言。
 unset CMAKE_GENERATOR CMAKE_TOOLCHAIN_FILE CMAKE_C_COMPILER CMAKE_CXX_COMPILER || true
-# 失败时打出详细链接错误
 if ! flutter build linux --release; then
   echo "==> flutter build failed; retry verbose for linker details" >&2
   flutter build linux --release -v 2>&1 | tail -200 >&2 || true
@@ -65,7 +72,6 @@ chmod +x "$BUNDLE/kotv-engine"
 chmod +x "$ROOT/scripts/bundle-app-libmpv.sh"
 "$ROOT/scripts/bundle-app-libmpv.sh" "$BUNDLE"
 [[ -f "$BUNDLE/lib/libmpv.so.2" ]] || { echo "missing $BUNDLE/lib/libmpv.so.2" >&2; exit 1; }
-# 与 macOS 同理：依赖须在 lib/ 旁，避免只靠系统 .so 或混载
 find "$BUNDLE/lib" -maxdepth 1 -name 'libplacebo.so*' | grep -q . \
   || { echo "ERROR: missing libplacebo next to libmpv.so.2" >&2; exit 1; }
 find "$BUNDLE/lib" -maxdepth 1 -name 'libass.so*' | grep -q . \
@@ -75,7 +81,7 @@ if [[ -f "$ROOT/cmd/updater/updater" ]]; then
   cp -f "$ROOT/cmd/updater/updater" "$BUNDLE/updater"
   chmod +x "$BUNDLE/updater"
 fi
-"$ROOT/scripts/verify-runtime.sh" "$BUNDLE/runtime" linux-x64
+"$ROOT/scripts/verify-runtime.sh" "$BUNDLE/runtime" "$PLAT"
 [[ -x "$BUNDLE/kotv-engine" ]] || { echo "missing $BUNDLE/kotv-engine" >&2; exit 1; }
 kotv_flutter_strip_placeholder_assets "$BUNDLE/data/flutter_assets"
 kotv_flutter_asset_engines_reject "$BUNDLE"

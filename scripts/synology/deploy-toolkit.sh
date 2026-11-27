@@ -49,15 +49,11 @@ if ls "$TOOLKIT_ROOT/toolkit_tarballs"/base_env-"${DSM_VER}"*.txz >/dev/null 2>&
   DEPLOY_FLAGS+=(-D)
   echo "==> using cached toolkit_tarballs (-D)"
 fi
-# EnvDeploy 把环境装到 pkgscripts-ng 同级的 build_env；用 symlink/对齐到 TOOLKIT_ROOT
+# EnvDeploy 把环境装到 pkgscripts-ng 同级的 build_env
 mkdir -p "$TOOLKIT_ROOT"
-# pkgscripts-ng 期望工作区在 /toolkit 布局：pkgscripts-ng 与 build_env / toolkit_tarballs 同级
-# 我们把 TOOLKIT_ROOT 当作该布局根；若脚本在子目录，设置环境变量或 cd 上级
+# 布局：TOOLKIT_ROOT/{pkgscripts-ng,build_env,toolkit_tarballs}
 export TOOLKIT_ROOT
-# 官方脚本相对 ../build_env；确保结构：
-# TOOLKIT_ROOT/{pkgscripts-ng,build_env,toolkit_tarballs}
 ln -sfn "$TOOLKIT_ROOT/toolkit_tarballs" "$PKGSCRIPT/../toolkit_tarballs" 2>/dev/null || true
-# 当 PKGSCRIPT=$TOOLKIT_ROOT/pkgscripts-ng 时，../build_env 即 $TOOLKIT_ROOT/build_env
 ./EnvDeploy "${DEPLOY_FLAGS[@]}"
 
 if [[ ! -d "$ENV_DIR" ]]; then

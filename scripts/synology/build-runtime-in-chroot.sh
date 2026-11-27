@@ -8,19 +8,16 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-# shellcheck source=versions.env
-source "$ROOT/scripts/synology/versions.env"
+# shellcheck source=common.sh
+source "$ROOT/scripts/synology/common.sh"
+kotv_syno_load_versions
 
 PLATFORM="${1:?usage: build-runtime-in-chroot.sh <braswell|rtd1296>}"
-case "$PLATFORM" in
-  braswell) ARCH_LABEL="x86_64"; TARGET_CPU="x64"; GN_CPU="x64" ;;
-  rtd1296)  ARCH_LABEL="armv8";  TARGET_CPU="arm64"; GN_CPU="arm64" ;;
-  *) echo "unsupported: $PLATFORM" >&2; exit 1 ;;
-esac
+read -r ARCH_LABEL _GOARCH TARGET_CPU <<<"$(kotv_syno_plat_meta "$PLATFORM")"
+GN_CPU="$TARGET_CPU"
 
-TOOLKIT_ROOT="${KOTV_TOOLKIT_ROOT:-$ROOT/.toolkit}"
 DSM_VER="${SYNO_DSM_VER}"
-ENV_DIR="$TOOLKIT_ROOT/build_env/ds.${PLATFORM}-${DSM_VER}"
+ENV_DIR="$(kotv_syno_env_dir "$PLATFORM")"
 OUT="$ROOT/dist/syno-runtime-${ARCH_LABEL}"
 SRC_CACHE="${KOTV_SYNO_SRC_CACHE:-$ROOT/.syno-src-cache}"
 BUILD_ROOT="${KOTV_SYNO_BUILD_ROOT:-$ROOT/.syno-build/${PLATFORM}}"
@@ -38,80 +35,8 @@ if [[ ! -d "$ENV_DIR" ]]; then
   exit 1
 fi
 
-# 定位 sysroot 与交叉编译器
-find_sysroot() {
-  local d
-  for d in \
-    "$ENV_DIR/usr/local/${PLATFORM}-linux-gnu/${PLATFORM}-linux-gnu/sys-root" \
-    "$ENV_DIR/usr/local/x86_64-pc-linux-gnu/x86_64-pc-linux-gnu/sys-root" \
-    "$ENV_DIR/usr/local/aarch64-unknown-linux-gnueabi/aarch64-unknown-linux-gnueabi/sys-root" \
-    "$ENV_DIR" ; do
-    if [[ -d "$d/usr/include" || -d "$d/usr/lib" ]]; then
-      echo "$d"
-      return 0
-    fi
-  done
-  # 回退：扫描
-  d="$(find "$ENV_DIR/usr/local" -type d -name 'sys-root' 2>/dev/null | head -1 || true)"
-  if [[ -n "$d" ]]; then
-    echo "$d"
-    return 0
-  fi
-  echo "$ENV_DIR"
-}
-
-find_tool() {
-  local name="$1"
-  local f
-  f="$(find "$ENV_DIR/usr/local" -type f -name "$name" 2>/dev/null | head -1 || true)"
-  if [[ -n "$f" ]]; then
-    echo "$f"
-    return 0
-  fi
-  return 1
-}
-
-SYSROOT="$(find_sysroot)"
+kotv_syno_export_toolchain "$ENV_DIR"
 echo "==> platform=$PLATFORM arch=$ARCH_LABEL sysroot=$SYSROOT"
-
-CC_BIN="$(find_tool "*-gcc" || find_tool "gcc" || true)"
-CXX_BIN="$(find_tool "*-g++" || find_tool "g++" || true)"
-AR_BIN="$(find_tool "*-ar" || find_tool "ar" || true)"
-RANLIB_BIN="$(find_tool "*-ranlib" || find_tool "ranlib" || true)"
-STRIP_BIN="$(find_tool "*-strip" || find_tool "strip" || true)"
-
-if [[ -z "${CC_BIN:-}" ]]; then
-  # braswell 常见前缀
-  for p in \
-    "$ENV_DIR/usr/local/x86_64-pc-linux-gnu/bin/x86_64-pc-linux-gnu-gcc" \
-    "$ENV_DIR/usr/local/aarch64-unknown-linux-gnueabi/bin/aarch64-unknown-linux-gnueabi-gcc" \
-    "$ENV_DIR/usr/bin/gcc" ; do
-    if [[ -x "$p" ]]; then CC_BIN="$p"; break; fi
-  done
-fi
-if [[ -z "${CXX_BIN:-}" && -n "${CC_BIN:-}" ]]; then
-  CXX_BIN="${CC_BIN%gcc}g++"
-  [[ -x "$CXX_BIN" ]] || CXX_BIN="${CC_BIN%-gcc}-g++"
-fi
-
-if [[ -z "${CC_BIN:-}" || ! -x "${CC_BIN}" ]]; then
-  echo "ERROR: cannot find Toolkit gcc under $ENV_DIR" >&2
-  find "$ENV_DIR/usr/local" -name '*gcc' 2>/dev/null | head -20 || true
-  exit 1
-fi
-echo "==> CC=$CC_BIN"
-echo "==> CXX=${CXX_BIN:-none}"
-
-export CC="$CC_BIN"
-export CXX="${CXX_BIN:-$CC_BIN}"
-export AR="${AR_BIN:-ar}"
-export RANLIB="${RANLIB_BIN:-ranlib}"
-export STRIP="${STRIP_BIN:-strip}"
-export CFLAGS="${CFLAGS:--O2 -pipe} --sysroot=${SYSROOT}"
-export CXXFLAGS="${CXXFLAGS:--O2 -pipe} --sysroot=${SYSROOT}"
-export LDFLAGS="${LDFLAGS:--Wl,-O1} --sysroot=${SYSROOT}"
-export PKG_CONFIG_SYSROOT_DIR="$SYSROOT"
-export PKG_CONFIG_PATH="${SYSROOT}/usr/lib/pkgconfig:${SYSROOT}/usr/local/lib/pkgconfig"
 
 download() {
   local url="$1" dest="$2"

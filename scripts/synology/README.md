@@ -1,16 +1,17 @@
 # 群晖 DSM 7.2 SPK（CI 专用）
 
-仅在 GitHub Actions 构建，不在本机跑 Toolkit / Chromium。
+形态与 Web 包相同（`kotv-engine` + `webapp/` + `runtime/`），因 NAS 只能跑服务端 Web。
+**引擎与运行时均由官方 Toolkit 编译**（动态链 DSM sysroot），不用 musl 静态引擎、不用 Liberica/CFT 预编译充数。
 
-## 流程
+仅在 GitHub Actions 构建。
 
-1. `deploy-toolkit.sh <braswell|rtd1296>` — 部署官方 `pkgscripts-ng` DSM 7.2 环境  
-2. `build-runtime-in-chroot.sh <...>` — 用 Toolkit sysroot 编 Node / Python / OpenJDK JRE / Chromium(headless) / ffmpeg → `dist/syno-runtime-{x86_64|armv8}/`  
-3. Web：`package-flutter-web.sh linux-x64|linux-arm64`（musl 静态引擎）  
-4. `package-spk.sh <x86_64|armv8>` → `dist/KO影视-{ver}-synology-{arch}.spk`
+## 一站入口
 
-套件元数据在 `synology/kotv/`。`prepare-runtime.sh synology-*` 只复制 Toolkit 产物，不下 Liberica/CFT。
+```bash
+./scripts/synology/build-spk.sh braswell   # → synology-x86_64.spk
+./scripts/synology/build-spk.sh rtd1296    # → synology-armv8.spk
+```
 
-## 版本
+内部顺序：`deploy-toolkit` → `build-flutter-webapp` → `build-engine`（Toolkit）→ `build-runtime-in-chroot`（Node/Python/JRE/Chromium）→ `package-spk`。
 
-见 `versions.env`。Node / Python / JRE 有版本钉；**Chromium 默认 `latest`**，每次构建解析 Chrome for Testing Stable 最新版（可用 `SYNO_CHROMIUM_TAG` / `SYNO_CHROMIUM_COMMIT` 覆盖）。
+共用逻辑在 `common.sh`。Chromium 默认解析 CFT Stable 最新版（`versions.env`）。

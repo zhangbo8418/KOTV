@@ -1,26 +1,41 @@
 #!/usr/bin/env bash
 # 打包 Flutter Windows：runtime + Go 引擎 + UI
+# 用法: ./scripts/package-flutter-windows.sh [windows-x64|windows-arm64]
 # 环境变量：
 #   KOTV_VERSION          发行版本（可带 v）
-#   KOTV_WIN7=1           Win7 线（子系统 6.01 + check-win7-deps）
+#   KOTV_WIN7=1           Win7 线（仅 windows-x64；子系统 6.01 + check-win7-deps）
 #   KOTV_OUT_SUFFIX       文件名后缀，如 -win7 → KO影视-ver-x86_64-win7.zip
 # 产物（仓库根目录）：
-#   KO影视-{ver}-x86_64{suffix}.zip
+#   KO影视-{ver}-{x86_64|arm64}{suffix}.zip
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=kotv-release-name.sh
 source "$ROOT/scripts/kotv-release-name.sh"
 
+PLAT="${1:-windows-x64}"
+case "$PLAT" in
+  windows-x64) FLUTTER_WIN_ARCH=x64; GOARCH_WIN=amd64 ;;
+  windows-arm64)
+    FLUTTER_WIN_ARCH=arm64
+    GOARCH_WIN=arm64
+    if [[ "${KOTV_WIN7:-}" == "1" ]]; then
+      echo "ERROR: Win7 线不支持 windows-arm64" >&2
+      exit 1
+    fi
+    ;;
+  *) echo "usage: $0 [windows-x64|windows-arm64]" >&2; exit 1 ;;
+esac
+
 VERSION="$(kotv_release_version "$ROOT/flutter/pubspec.yaml")"
 kotv_check_version_literals "$VERSION"
-ARCH="$(kotv_release_arch windows-x64)"
+ARCH="$(kotv_release_arch "$PLAT")"
 SUFFIX="${KOTV_OUT_SUFFIX:-}"
 OUT_ZIP="${ROOT}/KO影视-${VERSION}-${ARCH}${SUFFIX}.zip"
 ENGINE_DIR="$ROOT/dist/_win_engine"
 ENGINE_OUT="$ENGINE_DIR/kotv-engine.exe"
-RELEASE_DIR="$ROOT/flutter/build/windows/x64/runner/Release"
+RELEASE_DIR="$ROOT/flutter/build/windows/${FLUTTER_WIN_ARCH}/runner/Release"
 
-echo "==> Flutter Windows package version=$VERSION arch=$ARCH suffix=${SUFFIX:-<none>}"
+echo "==> Flutter Windows package version=$VERSION plat=$PLAT arch=$ARCH suffix=${SUFFIX:-<none>}"
 
 chmod +x "$ROOT/bridge/build.sh" "$ROOT"/scripts/*.sh
 
@@ -38,21 +53,28 @@ if [[ "${KOTV_WIN7:-}" == "1" ]]; then
   export KOTV_MPV_WIN7=1
 fi
 echo "==> fetch desktop libmpv (AV3A source)"
+export KOTV_FETCH_DESKTOP_PLAT=windows
 "$ROOT/scripts/fetch-desktop-mpv-libs.sh"
 echo "==> prepare runtime"
-"$ROOT/scripts/prepare-runtime.sh" windows-x64
-"$ROOT/scripts/verify-runtime.sh" runtime windows-x64
+"$ROOT/scripts/prepare-runtime.sh" "$PLAT"
+"$ROOT/scripts/verify-runtime.sh" runtime "$PLAT"
 
 echo "==> build Go engine"
 (cd "$ROOT/internal/spider" && go run gen_qjsinc.go)
-EXTLD="-static-libgcc -static-libstdc++ -Wl,-Bstatic -l:libwinpthread.a -Wl,-Bdynamic"
+# x64 MinGW：静态链 libgcc/winpthread。arm64：用宿主 clang/MSVC 友好标志（由 CI 设 CC）。
+EXTLD=""
+if [[ "$PLAT" == "windows-x64" ]]; then
+  EXTLD="-static-libgcc -static-libstdc++ -Wl,-Bstatic -l:libwinpthread.a -Wl,-Bdynamic"
+fi
 if [[ "${KOTV_WIN7:-}" == "1" ]]; then
   EXTLD="${EXTLD} -Wl,--subsystem,windows:6.01"
 fi
 mkdir -p "$ENGINE_DIR"
 # 相对路径输出，避免 Git Bash 绝对路径让 go/Windows 写丢
 VER_LD="$(kotv_engine_version_ldflags "$VERSION")"
-(cd "$ROOT" && go build -ldflags "-s -w ${VER_LD} -extldflags '${EXTLD}'" \
+LD_ARGS="-s -w ${VER_LD}"
+[[ -n "$EXTLD" ]] && LD_ARGS="${LD_ARGS} -extldflags '${EXTLD}'"
+(cd "$ROOT" && GOARCH="$GOARCH_WIN" go build -ldflags "$LD_ARGS" \
   -o "dist/_win_engine/kotv-engine.exe" ./cmd/engine)
 [[ -f "$ENGINE_OUT" ]] || { echo "missing engine: $ENGINE_OUT" >&2; ls -la "$ENGINE_DIR" >&2; exit 1; }
 if [[ "${KOTV_WIN7:-}" == "1" ]] && command -v pwsh >/dev/null 2>&1; then
@@ -65,8 +87,8 @@ source "$ROOT/scripts/kotv-flutter-asset-engines.sh"
 kotv_flutter_asset_engines_hide
 trap kotv_flutter_asset_engines_restore EXIT
 
-# Win8+：灌入 DComp 补丁引擎（与钉死的 Flutter 3.47.1 同 stamp）。Win7 跳过。
-if [[ "${KOTV_WIN7:-}" != "1" ]]; then
+# Win8+ x64：灌入 DComp 补丁引擎（与钉死的 Flutter 3.47.1 同 stamp）。Win7 / arm64 跳过。
+if [[ "${KOTV_WIN7:-}" != "1" && "$PLAT" == "windows-x64" ]]; then
   echo "==> install DComp Windows engine"
   chmod +x "$ROOT/scripts/install-flutter-windows-dcomp-engine.sh"
   "$ROOT/scripts/install-flutter-windows-dcomp-engine.sh"
@@ -120,7 +142,7 @@ fi
 if [[ -f "$ROOT/cmd/updater/updater.exe" ]]; then
   cp -f "$ROOT/cmd/updater/updater.exe" "$RELEASE_DIR/updater.exe"
 fi
-"$ROOT/scripts/verify-runtime.sh" "$RELEASE_DIR/runtime" windows-x64
+"$ROOT/scripts/verify-runtime.sh" "$RELEASE_DIR/runtime" "$PLAT"
 
 chmod +x "$ROOT/scripts/bundle-app-libmpv.sh"
 "$ROOT/scripts/bundle-app-libmpv.sh" "$RELEASE_DIR"
