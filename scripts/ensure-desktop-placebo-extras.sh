@@ -62,11 +62,7 @@ mkdir -p "$src" "$PREFIX/lib/pkgconfig" "$PREFIX/include" "$PREFIX/lib"
 cmake_gen="Ninja"
 command -v ninja >/dev/null || cmake_gen="Unix Makefiles"
 if kotv_is_windows_build; then
-  if command -v ninja >/dev/null; then
-    cmake_gen="Ninja"
-  else
-    cmake_gen="MinGW Makefiles"
-  fi
+  cmake_gen="$(kotv_windows_cmake_generator)"
 fi
 
 echo "==> placebo extras (lcms2 + xxhash) -> $PREFIX"

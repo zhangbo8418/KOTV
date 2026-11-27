@@ -267,6 +267,12 @@ EOF
   printf '%s\n' "$ini"
 }
 
+# Windows CMake 生成器：统一 MinGW Makefiles。
+# 勿用 Ninja 同时塞 CMAKE_MAKE_PROGRAM=mingw32-make——CMake 会把 `make -v` 当成 ninja 版本而失败。
+kotv_windows_cmake_generator() {
+  echo "MinGW Makefiles"
+}
+
 # Windows CMake：使用当前 CC/CXX（须先 kotv_windows_export_cc / clean_win_path）。
 kotv_windows_cmake_compiler_args() {
   kotv_is_windows_build || return 0

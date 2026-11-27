@@ -86,11 +86,7 @@ mkdir -p "$src" "$PREFIX"
 cmake_gen="Ninja"
 command -v ninja >/dev/null || cmake_gen="Unix Makefiles"
 if kotv_is_windows_build; then
-  if command -v ninja >/dev/null; then
-    cmake_gen="Ninja"
-  else
-    cmake_gen="MinGW Makefiles"
-  fi
+  cmake_gen="$(kotv_windows_cmake_generator)"
 fi
 
 echo "==> parity libs -> $PREFIX"
@@ -147,6 +143,13 @@ EOF
           "$mf" 2>/dev/null || true
       done
       make -j"$JOBS" -C libcharset
+      # lib/ 用 -I../include；clang（Win arm llvm-mingw）不会从 localcharset.c 所在目录
+      # 冒泡到 libcharset/include，需把生成头拷到顶层 include。
+      mkdir -p include
+      cp -f libcharset/include/localcharset.h include/localcharset.h 2>/dev/null \
+        || cp -f libcharset/include/localcharset.h.inst include/localcharset.h
+      cp -f libcharset/include/libcharset.h include/libcharset.h 2>/dev/null \
+        || cp -f libcharset/include/libcharset.h.inst include/libcharset.h || true
       make -j"$JOBS" -C lib
       make -C libcharset install
       make -C lib install
