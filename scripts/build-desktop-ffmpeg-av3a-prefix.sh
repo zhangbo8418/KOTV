@@ -24,7 +24,8 @@ echo "ok FFmpeg ${FFMPEG_COMMIT:0:12} (ref=${FFMPEG_REF})"
 # gcc / FFmpeg 在 Windows 上更吃 D:/ 路径；MSYS 绝对路径 /d/ 偶发链接探测失败。
 
 if kotv_is_windows_build; then
-  if [[ -d "/c/mingw-msvcrt/mingw64/bin" ]]; then
+  # x86_64 Win7 线才优先 mingw-msvcrt；arm64 用 PATH 上的 llvm-mingw，勿抢成 x86_64 gcc。
+  if ! kotv_windows_is_arm64 && [[ -d "/c/mingw-msvcrt/mingw64/bin" ]]; then
     export PATH="/c/mingw-msvcrt/mingw64/bin:$PATH"
   fi
   export PATH="/c/Program Files/NASM:/c/ProgramData/chocolatey/bin:$PATH"
@@ -361,7 +362,14 @@ FFMPEG_EXTRA+=(--enable-libdav1d)
 FFMPEG_EXTRA+=(--enable-libxml2)
 FFMPEG_EXTRA+=(--enable-libaribcaption)
 if kotv_is_windows_build; then
-  FFMPEG_EXTRA+=(--target-os=mingw64 --arch=x86_64)
+  if kotv_windows_is_arm64; then
+    # MINGW64 谎报 x86_64 时，若不显式 --arch=aarch64，会开 x86 emms/nasm 却用 aarch64 clang。
+    echo "==> FFmpeg Windows aarch64 (llvm-mingw)"
+    FFMPEG_EXTRA+=(--target-os=mingw32 --arch=aarch64)
+    FFMPEG_EXTRA+=(--disable-x86asm --disable-inline-asm)
+  else
+    FFMPEG_EXTRA+=(--target-os=mingw64 --arch=x86_64)
+  fi
   FFMPEG_EXTRA+=(--pkg-config="$PKG_BIN/pkg-config")
   # 勿对 FFmpeg 全局 -D_WIN32_WINNT=0x0601：mf_utils 会缺 Win8+ 符号而编不过。
   FFMPEG_EXTRA+=(--disable-mediafoundation)

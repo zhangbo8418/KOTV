@@ -10,6 +10,22 @@ kotv_is_windows_build() {
   [[ "${OS:-}" == "Windows_NT" ]]
 }
 
+# Windows ARM64：MINGW64 下 uname -m 常谎报 x86_64，需看 OS 串 / PROCESSOR / CC dumpmachine。
+kotv_windows_is_arm64() {
+  kotv_is_windows_build || return 1
+  local os m pa pa64 dump
+  os="$(uname -s 2>/dev/null || true)"
+  m="$(uname -m 2>/dev/null || true)"
+  pa="${PROCESSOR_ARCHITECTURE:-}"
+  pa64="${PROCESSOR_ARCHITEW6432:-}"
+  case "$m" in ARM64|arm64|aarch64) return 0 ;; esac
+  [[ "$os" == *ARM64* || "$os" == *aarch64* ]] && return 0
+  [[ "$pa" == "ARM64" || "$pa64" == "ARM64" ]] && return 0
+  dump="$("${CC:-gcc}" -dumpmachine 2>/dev/null || true)"
+  [[ "$dump" == aarch64* || "$dump" == arm64* ]] && return 0
+  return 1
+}
+
 # macOS 应用的最低系统版本：取 Xcode 工程里的 MACOSX_DEPLOYMENT_TARGET（随包 dylib 须不高于它）。
 kotv_macos_deployment_target() {
   local root

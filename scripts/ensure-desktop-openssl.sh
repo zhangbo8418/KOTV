@@ -393,7 +393,12 @@ cfg_args=(--prefix="$pref" --libdir=lib shared no-docs no-tests enable-quic)
 if kotv_is_windows_build; then
   export CFLAGS="${WIN7_CFLAGS} ${CFLAGS:-}"
   export CXXFLAGS="${WIN7_CFLAGS} ${CXXFLAGS:-}"
-  "$PERL" ./Configure mingw64 "${cfg_args[@]}"
+  if kotv_windows_is_arm64; then
+    echo "==> OpenSSL Configure mingwarm64"
+    "$PERL" ./Configure mingwarm64 "${cfg_args[@]}"
+  else
+    "$PERL" ./Configure mingw64 "${cfg_args[@]}"
+  fi
 elif [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
   local_arch="$(kotv_macos_target_arch)"
   export CFLAGS="-arch ${local_arch} ${CFLAGS:-}"
