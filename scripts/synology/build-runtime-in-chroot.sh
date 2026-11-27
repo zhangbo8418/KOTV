@@ -332,10 +332,49 @@ build_jre() {
   echo "[jre] ready: $dest"
 }
 
+# 解析最新 Chromium 修订：CFT Stable 版本号 → 对应 git tag；失败则用 src.git HEAD。
+resolve_latest_chromium_ref() {
+  local meta="$SRC_CACHE/chrome-for-testing-latest.json"
+  local ver=""
+  mkdir -p "$SRC_CACHE"
+  if curl -fsSL --http1.1 --connect-timeout 30 \
+    "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json" \
+    -o "$meta"; then
+    ver="$(python3 - "$meta" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+print(d.get("channels", {}).get("Stable", {}).get("version", "") or "")
+PY
+)"
+  fi
+  if [[ -n "$ver" ]]; then
+    echo "$ver"
+    return 0
+  fi
+  # 回落：chromium src 远端主分支 tip
+  ver="$(git ls-remote --heads https://chromium.googlesource.com/chromium/src.git main \
+    | awk '{print $1; exit}')"
+  if [[ -n "$ver" ]]; then
+    echo "$ver"
+    return 0
+  fi
+  echo "ERROR: cannot resolve latest Chromium version" >&2
+  return 1
+}
+
 # ---------- Chromium headless_shell ----------
 build_chromium() {
-  local tag="${SYNO_CHROMIUM_TAG}"
+  local tag="${SYNO_CHROMIUM_TAG:-latest}"
+  local commit="${SYNO_CHROMIUM_COMMIT:-}"
   local dest="$OUT/chromium"
+
+  if [[ -n "$commit" ]]; then
+    tag="$commit"
+  elif [[ "$tag" == "latest" || -z "$tag" ]]; then
+    tag="$(resolve_latest_chromium_ref)"
+    echo "[chromium] resolved latest → $tag"
+  fi
+
   if stamp_ok chromium "$tag" && [[ -x "$dest/chrome-headless-shell" || -x "$dest/chrome" ]]; then
     echo "[chromium] skip (cached $tag)"
     return 0
@@ -379,14 +418,32 @@ EOF
       tar -xf "$KOTV_SYNO_CHROMIUM_TARBALL" -C src --strip-components=1
     else
       fetch --nohooks --no-history chromium || {
-        # fetch 失败时尝试手动 clone
-        git clone --depth 1 --branch "$tag" \
-          https://chromium.googlesource.com/chromium/src.git src \
-          || git clone --depth 1 https://chromium.googlesource.com/chromium/src.git src
+        # fetch 失败时尝试手动 clone：版本 tag 或 commit
+        if [[ "$tag" =~ ^[0-9a-f]{40}$ ]]; then
+          git clone --depth 1 https://chromium.googlesource.com/chromium/src.git src
+          git -C src fetch --depth 1 origin "$tag" && git -C src checkout "$tag"
+        else
+          git clone --depth 1 --branch "$tag" \
+            https://chromium.googlesource.com/chromium/src.git src \
+            || {
+              git clone --depth 1 https://chromium.googlesource.com/chromium/src.git src
+              git -C src fetch --tags --depth 1 origin "refs/tags/${tag}:refs/tags/${tag}" 2>/dev/null || true
+              git -C src checkout "$tag" 2>/dev/null || true
+            }
+        fi
       }
       (cd src && gclient sync --nohooks --no-history -D -j"$JOBS" || true)
       (cd src && gclient runhooks || true)
     fi
+  elif [[ -d "$chrome_src/.git" ]]; then
+    echo "[chromium] existing src → checkout $tag"
+    git -C "$chrome_src" fetch --depth 1 origin "$tag" 2>/dev/null \
+      || git -C "$chrome_src" fetch --tags --depth 1 origin "refs/tags/${tag}:refs/tags/${tag}" 2>/dev/null \
+      || true
+    git -C "$chrome_src" checkout "$tag" 2>/dev/null \
+      || git -C "$chrome_src" checkout FETCH_HEAD 2>/dev/null \
+      || true
+    (cd "$chrome_src" && gclient sync --nohooks --no-history -D -j"$JOBS" || true)
   fi
 
   cd "$chrome_src"

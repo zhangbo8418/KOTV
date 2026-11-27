@@ -11,6 +11,6 @@
 
 套件元数据在 `synology/kotv/`。`prepare-runtime.sh synology-*` 只复制 Toolkit 产物，不下 Liberica/CFT。
 
-## 版本钉
+## 版本
 
-见 `versions.env`。
+见 `versions.env`。Node / Python / JRE 有版本钉；**Chromium 默认 `latest`**，每次构建解析 Chrome for Testing Stable 最新版（可用 `SYNO_CHROMIUM_TAG` / `SYNO_CHROMIUM_COMMIT` 覆盖）。
