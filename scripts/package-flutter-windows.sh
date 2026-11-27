@@ -61,10 +61,28 @@ echo "==> prepare runtime"
 
 echo "==> build Go engine"
 (cd "$ROOT/internal/spider" && go run gen_qjsinc.go)
-# x64 MinGW：静态链 libgcc/winpthread。arm64：用宿主 clang/MSVC 友好标志（由 CI 设 CC）。
+# x64 MinGW：静态链 libgcc/winpthread。
+# arm64：必须用 llvm-mingw 的 aarch64-w64-mingw32-clang；普通 clang/x86_64-gcc
+# 会在 runtime/cgo 的 gcc_arm64.S 上炸（brackets expression / blr）。
 EXTLD=""
 if [[ "$PLAT" == "windows-x64" ]]; then
   EXTLD="-static-libgcc -static-libstdc++ -Wl,-Bstatic -l:libwinpthread.a -Wl,-Bdynamic"
+elif [[ "$PLAT" == "windows-arm64" ]]; then
+  if command -v aarch64-w64-mingw32-clang >/dev/null 2>&1; then
+    export CC=aarch64-w64-mingw32-clang
+    export CXX="${CXX:-aarch64-w64-mingw32-clang++}"
+  fi
+  if [[ -z "${CC:-}" ]] || ! command -v "${CC}" >/dev/null 2>&1; then
+    echo "ERROR: windows-arm64 CGO 需要 aarch64-w64-mingw32-clang（llvm-mingw）" >&2
+    exit 1
+  fi
+  if "$CC" --version 2>&1 | head -5 | grep -qiE 'x86_64-w64-mingw32|Target: x86_64'; then
+    echo "ERROR: CC=$CC 是 x86_64 工具链，无法编 windows/arm64 CGO" >&2
+    exit 1
+  fi
+  export CGO_CFLAGS="${CGO_CFLAGS:--O2}"
+  export CGO_CXXFLAGS="${CGO_CXXFLAGS:--O2}"
+  echo "[cgo] windows-arm64 CC=$CC CXX=${CXX:-}"
 fi
 if [[ "${KOTV_WIN7:-}" == "1" ]]; then
   EXTLD="${EXTLD} -Wl,--subsystem,windows:6.01"

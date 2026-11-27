@@ -41,6 +41,16 @@ if [[ ! -x ./gradlew || ! -f ./gradle/wrapper/gradle-wrapper.jar ]]; then
   bootstrap_wrapper
 fi
 
-./gradlew --no-daemon shadowJar
+# Maven Central 偶发 429：重试几次再放弃
+ok=0
+for i in 1 2 3 4 5; do
+  if ./gradlew --no-daemon shadowJar; then
+    ok=1
+    break
+  fi
+  echo "[bridge] gradle failed (attempt $i); retry in $((i * 15))s..." >&2
+  sleep $((i * 15))
+done
+[[ "$ok" == "1" ]] || { echo "ERROR: bridge gradle failed after retries" >&2; exit 1; }
 cp -f build/libs/spider-bridge.jar spider-bridge.jar
 echo "Built $ROOT/spider-bridge.jar"

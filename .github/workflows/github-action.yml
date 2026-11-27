@@ -187,17 +187,27 @@ jobs:
           ./scripts/ci-ensure-flutter.sh
           flutter precache --windows || true
 
-      - name: Setup MSVC + LLVM (CGO)
+      - name: Setup MSVC (Flutter Windows)
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: arm64
 
-      - name: Install LLVM for CGO
+      # Go CGO（quickjs / runtime/cgo gcc_arm64.S）必须用 llvm-mingw aarch64，
+      # 不能用 choco LLVM 的泛 clang（会按错误 target 汇编）。
+      - name: Install llvm-mingw aarch64 (CGO)
         shell: pwsh
         run: |
-          choco install llvm -y --no-progress
-          echo "C:\Program Files\LLVM\bin" >> $env:GITHUB_PATH
-          & "C:\Program Files\LLVM\bin\clang.exe" --version
+          $ver = "20260616"
+          $zip = "llvm-mingw-$ver-ucrt-aarch64.zip"
+          $url = "https://github.com/mstorsjo/llvm-mingw/releases/download/$ver/$zip"
+          curl.exe -sSL -o "$env:RUNNER_TEMP\$zip" $url
+          Expand-Archive -Path "$env:RUNNER_TEMP\$zip" -DestinationPath "C:\llvm-mingw" -Force
+          $clang = Get-ChildItem -Path "C:\llvm-mingw" -Recurse -Filter "aarch64-w64-mingw32-clang.exe" |
+            Select-Object -First 1
+          if (-not $clang) { throw "aarch64-w64-mingw32-clang.exe not found under C:\llvm-mingw" }
+          $bin = $clang.DirectoryName
+          echo $bin >> $env:GITHUB_PATH
+          & $clang.FullName --version
 
       - uses: actions/download-artifact@v4
         with:
@@ -232,8 +242,8 @@ jobs:
         env:
           KOTV_VERSION: ${{ needs.set-tag.outputs.tag }}
           CGO_ENABLED: "1"
-          CC: clang
-          CXX: clang++
+          CC: aarch64-w64-mingw32-clang
+          CXX: aarch64-w64-mingw32-clang++
           KOTV_JAVA_TOOLCHAIN: "21"
         run: |
           chmod +x bridge/build.sh scripts/*.sh
