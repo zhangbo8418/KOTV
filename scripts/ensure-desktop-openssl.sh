@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# 把 OpenSSL（3.5 起的 3.x，带 QUIC）源码编进 PREFIX，供 ngtcp2/curl HTTP/3。
-# Windows：./Configure mingw64 + Win7 宏（不用 MSYS2 预编译包，那些不支持 Win7）。
+# 把 OpenSSL（3.5–3.x 最新，带 QUIC）源码编进 PREFIX，供 ngtcp2/curl HTTP/3。
+# 不上 4.x：ASN1 不透明，当前 curl 8.14.1 编不过。Windows ARM64 需 ≥3.6（mingwarm64）。
+# Windows：./Configure mingw64/mingwarm64 + Win7 宏（不用 MSYS2 预编译包，那些不支持 Win7）。
 # macOS：总是源码编，跟随 MACOSX_DEPLOYMENT_TARGET（brew bottle 按 runner 系统版本编，随包后旧系统起不来）。
 # Linux：系统 ≥3.5 且带 QUIC 可用，否则 Configure。
 set -euo pipefail
@@ -11,7 +12,8 @@ source "$ROOT/scripts/kotv-win-build-env.sh"
 BUILD_DIR="${KOTV_MPV_BUILD_DIR:-$ROOT/.build/desktop-mpv}"
 PREFIX="${KOTV_DESKTOP_FFMPEG_PREFIX:-$BUILD_DIR/prefix}"
 JOBS="${KOTV_MPV_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "${NUMBER_OF_PROCESSORS:-4}")}"
-OPENSSL_VER="${KOTV_OPENSSL_VER:-3.5.2}"
+# 3.5+ 才有 QUIC cbs；4.x ASN1 不透明，当前 curl 8.14.1 编不过 → 锁在 3.x 最新（含 mingwarm64）。
+OPENSSL_VER="${KOTV_OPENSSL_VER:-3.6.5}"
 WIN7_CFLAGS="$(kotv_win7_cflags)"
 
 
@@ -395,26 +397,6 @@ if kotv_is_windows_build; then
   export CFLAGS="${WIN7_CFLAGS} ${CFLAGS:-}"
   export CXXFLAGS="${WIN7_CFLAGS} ${CXXFLAGS:-}"
   _ssl_tgt="$(kotv_windows_openssl_target)"
-  # 上游 3.5.x 无 mingwarm64（master/3.6+ 才有）；llvm-mingw aarch64 需本地补目标。
-  if [[ "$_ssl_tgt" == "mingwarm64" ]] && ! grep -Rq 'mingwarm64' Configurations 2>/dev/null; then
-    cat >Configurations/50-kotv-mingwarm64.conf <<'EOF'
-## -*- mode: perl; -*-
-# KOTV: Windows ARM64 + llvm-mingw（对齐 openssl master / MSYS2）
-my %targets = (
-    "mingwarm64" => {
-        inherit_from     => [ "mingw-common" ],
-        sys_id           => "MINGWARM64",
-        bn_ops           => add("SIXTY_FOUR_BIT"),
-        asm_arch         => 'aarch64',
-        uplink_arch      => 'armv8',
-        perlasm_scheme   => "win64",
-        shared_rcflag    => "",
-        multilib         => "-arm64",
-    },
-);
-EOF
-    echo "==> injected Configurations/50-kotv-mingwarm64.conf"
-  fi
   echo "==> OpenSSL Configure ${_ssl_tgt} CC=${CC:-}"
   "$PERL" ./Configure "$_ssl_tgt" "${cfg_args[@]}"
 elif [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then

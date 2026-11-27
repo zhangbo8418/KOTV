@@ -63,7 +63,7 @@ kotv_windows_rust_gnu_target() {
   if kotv_windows_is_arm64; then echo aarch64-pc-windows-gnullvm; else echo x86_64-pc-windows-gnu; fi
 }
 
-# OpenSSL Configure 目标：mingwarm64 | mingw64
+# OpenSSL Configure 目标：mingwarm64（OpenSSL ≥3.6）| mingw64
 kotv_windows_openssl_target() {
   if kotv_windows_is_arm64; then echo mingwarm64; else echo mingw64; fi
 }
