@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 群晖 SPK 一站入口（CI）：Toolkit 编引擎+运行时，Web 形态（webapp），打 SPK。
-# 用法: ./scripts/synology/build-spk.sh <braswell|rtd1296>
+# 用法: ./scripts/synology/build-spk.sh <geminilake|rtd1296>
 #
 # 产物:
 #   dist/syno-engine-{arch}/kotv-engine
@@ -12,7 +12,7 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 source "$ROOT/scripts/synology/common.sh"
 kotv_syno_load_versions
 
-PLATFORM="${1:?usage: build-spk.sh <braswell|rtd1296>}"
+PLATFORM="${1:?usage: build-spk.sh <geminilake|rtd1296>}"
 read -r ARCH_LABEL _GOARCH _TARGET <<<"$(kotv_syno_plat_meta "$PLATFORM")"
 
 chmod +x "$ROOT/scripts/synology/"*.sh "$ROOT/scripts/build-flutter-webapp.sh"

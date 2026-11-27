@@ -382,7 +382,7 @@ jobs:
             KO影视-*-x86_64-win7-setup.exe
           if-no-files-found: error
 
-  build-linux:
+  build-linux-amd64:
     runs-on: ubuntu-latest
     needs: [set-tag, build-updater]
     timeout-minutes: 180
@@ -916,7 +916,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - toolkit_plat: braswell
+          - toolkit_plat: geminilake
             arch_label: x86_64
           - toolkit_plat: rtd1296
             arch_label: armv8
@@ -939,7 +939,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y git python3 python3-pip xz-utils cifs-utils \
             build-essential clang lld ninja-build pkg-config curl ca-certificates \
-            autoconf automake libtool cmake unzip zip rsync
+            autoconf automake libtool cmake unzip zip rsync docker.io
+          sudo systemctl start docker || sudo service docker start || true
+          sudo usermod -aG docker "$USER" || true
+          # 当前 shell 立刻可用 docker（免重登）
+          sudo chmod 666 /var/run/docker.sock || true
+          docker version
 
       - uses: subosito/flutter-action@v2
         with:
@@ -955,7 +960,7 @@ jobs:
             .toolkit/toolkit_tarballs
             .toolkit/build_env
             .syno-src-cache
-          key: syno-toolkit-7.2-${{ matrix.toolkit_plat }}-${{ hashFiles('scripts/synology/versions.env') }}-v2
+          key: syno-toolkit-7.2-${{ matrix.toolkit_plat }}-${{ hashFiles('scripts/synology/versions.env') }}-v3
           restore-keys: |
             syno-toolkit-7.2-${{ matrix.toolkit_plat }}-
             syno-toolkit-7.2-
@@ -966,6 +971,7 @@ jobs:
           KOTV_TOOLKIT_ROOT: ${{ github.workspace }}/.toolkit
           KOTV_SYNO_SRC_CACHE: ${{ github.workspace }}/.syno-src-cache
           KOTV_SYNO_BUILD_ROOT: ${{ github.workspace }}/.syno-build/${{ matrix.toolkit_plat }}
+          KOTV_SYNO_DOCKER_DEPLOY: "1"
           KOTV_JAVA_TOOLCHAIN: "21"
         run: |
           chmod +x bridge/build.sh scripts/*.sh scripts/synology/*.sh
@@ -1021,7 +1027,7 @@ jobs:
       - build-win-amd64
       - build-win-arm64
       - build-flutter-win7
-      - build-linux
+      - build-linux-amd64
       - build-linux-arm64
       - build-mac-arm64
       - build-mac-amd64

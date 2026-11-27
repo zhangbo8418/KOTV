@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 用 DSM 7.2 Toolkit 编译 kotv-engine（动态链 sysroot glibc，非 musl）。
-# 用法: ./scripts/synology/build-engine.sh <braswell|rtd1296> [out-path]
+# 用法: ./scripts/synology/build-engine.sh <geminilake|rtd1296> [out-path]
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 # shellcheck source=common.sh
@@ -9,7 +9,7 @@ source "$ROOT/scripts/synology/common.sh"
 source "$ROOT/scripts/kotv-release-name.sh"
 kotv_syno_load_versions
 
-PLATFORM="${1:?usage: build-engine.sh <braswell|rtd1296> [out]}"
+PLATFORM="${1:?usage: build-engine.sh <geminilake|rtd1296> [out]}"
 read -r ARCH_LABEL GOARCH _TARGET <<<"$(kotv_syno_plat_meta "$PLATFORM")"
 OUT="${2:-$ROOT/dist/syno-engine-${ARCH_LABEL}/kotv-engine}"
 ENV_DIR="$(kotv_syno_env_dir "$PLATFORM")"

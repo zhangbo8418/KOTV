@@ -148,7 +148,7 @@ CI 在 **KOTV Build**（`github-action.yml`）统一构建：
 | Windows x64 | `build-win-amd64` | ZIP + Inno 安装包 |
 | Windows x64（Win7） | `build-flutter-win7` | 同上加 `-win7` 后缀；子系统 6.01 + MSVCRT MinGW |
 | Windows aarch64 | `build-win-arm64`（`windows-11-arm`） | ZIP + Inno |
-| Linux x64 | `build-linux` | ZIP |
+| Linux x64 | `build-linux-amd64` | ZIP |
 | Linux aarch64 | `build-linux-arm64`（`ubuntu-24.04-arm`） | ZIP |
 | macOS arm64 | `build-mac-arm64` | DMG |
 | macOS x64 | `build-mac-amd64` | DMG |

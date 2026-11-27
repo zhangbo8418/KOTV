@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 在 Synology DSM 7.2 Toolkit sysroot 下编译 Node / Python / JRE / Chromium(headless)
-# 用法: ./scripts/synology/build-runtime-in-chroot.sh <braswell|rtd1296>
+# 用法: ./scripts/synology/build-runtime-in-chroot.sh <geminilake|rtd1296>
 # 产出: dist/syno-runtime-{x86_64|armv8}/
 #
 # Node/Python/OpenJDK：Toolkit GCC + sysroot
@@ -12,7 +12,7 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 source "$ROOT/scripts/synology/common.sh"
 kotv_syno_load_versions
 
-PLATFORM="${1:?usage: build-runtime-in-chroot.sh <braswell|rtd1296>}"
+PLATFORM="${1:?usage: build-runtime-in-chroot.sh <geminilake|rtd1296>}"
 read -r ARCH_LABEL _GOARCH TARGET_CPU <<<"$(kotv_syno_plat_meta "$PLATFORM")"
 GN_CPU="$TARGET_CPU"
 

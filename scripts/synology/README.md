@@ -8,7 +8,7 @@
 ## 一站入口
 
 ```bash
-./scripts/synology/build-spk.sh braswell   # → synology-x86_64.spk
+./scripts/synology/build-spk.sh geminilake   # → synology-x86_64.spk
 ./scripts/synology/build-spk.sh rtd1296    # → synology-armv8.spk
 ```
 

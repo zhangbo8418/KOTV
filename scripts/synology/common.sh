@@ -12,13 +12,13 @@ kotv_syno_load_versions() {
   source "$(kotv_syno_root)/scripts/synology/versions.env"
 }
 
-# braswell|rtd1296 → 打印: arch_label goarch target_cpu
+# geminilake|rtd1296 → 打印: arch_label goarch target_cpu
 kotv_syno_plat_meta() {
   case "$1" in
-    braswell) echo "x86_64 amd64 x64" ;;
-    rtd1296)  echo "armv8 arm64 arm64" ;;
+    geminilake) echo "x86_64 amd64 x64" ;;
+    rtd1296)    echo "armv8 arm64 arm64" ;;
     *)
-      echo "unsupported toolkit platform: $1 (want braswell|rtd1296)" >&2
+      echo "unsupported toolkit platform: $1 (want geminilake|rtd1296)" >&2
       return 1
       ;;
   esac
