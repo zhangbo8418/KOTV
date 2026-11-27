@@ -12,7 +12,7 @@ source "$ROOT/scripts/kotv-win-build-env.sh"
 BUILD_DIR="${KOTV_MPV_BUILD_DIR:-$ROOT/.build/desktop-mpv}"
 PREFIX="${KOTV_DESKTOP_FFMPEG_PREFIX:-$BUILD_DIR/prefix}"
 JOBS="${KOTV_MPV_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "${NUMBER_OF_PROCESSORS:-4}")}"
-CURL_VER="${KOTV_CURL_VER:-8.14.1}"
+CURL_VER="${KOTV_CURL_VER:-8.23.0}"
 WIN7_CFLAGS="$(kotv_win7_cflags)"
 
 
@@ -74,10 +74,15 @@ if [[ -f "$PREFIX/lib/pkgconfig/libcurl.pc" ]] \
     fi
   fi
   if [[ "$cache_ok" == 1 ]]; then
-    echo "ok cached libcurl $(pkg-config --modversion libcurl 2>/dev/null || echo present) (HTTP3)"
-    exit 0
+    cur_ver="$(pkg-config --modversion libcurl 2>/dev/null || true)"
+    if [[ "$cur_ver" == "$CURL_VER" ]]; then
+      echo "ok cached libcurl $cur_ver (HTTP3)"
+      exit 0
+    fi
+    echo "WARN: cached libcurl $cur_ver != $CURL_VER; rebuilding" >&2
+  else
+    echo "WARN: cached curl lacks HTTP3/arch; rebuilding" >&2
   fi
-  echo "WARN: cached curl lacks HTTP3/arch; rebuilding" >&2
 fi
 
 chmod +x "$ROOT/scripts/ensure-desktop-nghttp2.sh"
@@ -111,7 +116,7 @@ mkdir -p "$build"
 gen=Ninja
 command -v ninja >/dev/null 2>&1 || gen="Unix Makefiles"
 if kotv_is_windows_build; then
-  gen="MinGW Makefiles"
+  gen="$(kotv_windows_cmake_generator)"
 fi
 
 echo "==> build libcurl $CURL_VER (OpenSSL + nghttp2 + ngtcp2/nghttp3) → $pref"

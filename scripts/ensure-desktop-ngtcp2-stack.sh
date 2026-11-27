@@ -8,8 +8,8 @@ source "$ROOT/scripts/kotv-win-build-env.sh"
 BUILD_DIR="${KOTV_MPV_BUILD_DIR:-$ROOT/.build/desktop-mpv}"
 PREFIX="${KOTV_DESKTOP_FFMPEG_PREFIX:-$BUILD_DIR/prefix}"
 JOBS="${KOTV_MPV_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "${NUMBER_OF_PROCESSORS:-4}")}"
-NGHTTP3_VER="${KOTV_NGHTTP3_VER:-1.11.0}"
-NGTCP2_VER="${KOTV_NGTCP2_VER:-1.14.0}"
+NGHTTP3_VER="${KOTV_NGHTTP3_VER:-1.19.0}"
+NGTCP2_VER="${KOTV_NGTCP2_VER:-1.26.0}"
 WIN7_CFLAGS="$(kotv_win7_cflags)"
 
 
@@ -21,6 +21,8 @@ chmod +x "$ROOT/scripts/ensure-desktop-openssl.sh"
 export PKG_CONFIG_PATH="$(kotv_native_path "$PREFIX/lib/pkgconfig")${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 
 if pkg-config --exists libnghttp3 libngtcp2 2>/dev/null \
+  && [[ "$(pkg-config --modversion libnghttp3 2>/dev/null || true)" == "$NGHTTP3_VER" ]] \
+  && [[ "$(pkg-config --modversion libngtcp2 2>/dev/null || true)" == "$NGTCP2_VER" ]] \
   && (pkg-config --exists libngtcp2_crypto_ossl 2>/dev/null || pkg-config --exists libngtcp2_crypto_quictls 2>/dev/null) \
   && { [[ -f "$PREFIX/lib/libnghttp3.a" || -f "$PREFIX/lib/libnghttp3.dll.a" || -f "$PREFIX/lib/libnghttp3.dylib" || -f "$PREFIX/lib/libnghttp3.so" \
       || -f "$PREFIX/bin/libnghttp3.dll" ]]; }; then

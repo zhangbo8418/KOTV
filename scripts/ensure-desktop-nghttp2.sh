@@ -8,15 +8,16 @@ source "$ROOT/scripts/kotv-win-build-env.sh"
 BUILD_DIR="${KOTV_MPV_BUILD_DIR:-$ROOT/.build/desktop-mpv}"
 PREFIX="${KOTV_DESKTOP_FFMPEG_PREFIX:-$BUILD_DIR/prefix}"
 JOBS="${KOTV_MPV_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "${NUMBER_OF_PROCESSORS:-4}")}"
-NGHTTP2_VER="${KOTV_NGHTTP2_VER:-1.64.0}"
+NGHTTP2_VER="${KOTV_NGHTTP2_VER:-1.71.0}"
 
 
 mkdir -p "$PREFIX/lib/pkgconfig" "$PREFIX/include" "$PREFIX/lib" "$BUILD_DIR"
 export PKG_CONFIG_PATH="$(kotv_native_path "$PREFIX/lib/pkgconfig")${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 
-# v2：静态库须带 PIC，才能链进共享 libcurl（否则 Linux R_X86_64_PC32）
-STAMP="$PREFIX/.kotv-nghttp2-pic-v2"
+# v3：静态库须带 PIC，才能链进共享 libcurl（否则 Linux R_X86_64_PC32）
+STAMP="$PREFIX/.kotv-nghttp2-pic-v3"
 if [[ -f "$STAMP" ]] && pkg-config --exists libnghttp2 2>/dev/null \
+  && [[ "$(pkg-config --modversion libnghttp2 2>/dev/null || true)" == "$NGHTTP2_VER" ]] \
   && [[ -f "$PREFIX/lib/libnghttp2.a" || -f "$PREFIX/lib/libnghttp2.dll.a" || -f "$PREFIX/lib/libnghttp2.so" || -f "$PREFIX/lib/libnghttp2.dylib" ]]; then
   echo "ok cached libnghttp2 $(pkg-config --modversion libnghttp2)"
   exit 0

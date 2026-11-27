@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# 把 OpenSSL（3.5–3.x 最新，带 QUIC）源码编进 PREFIX，供 ngtcp2/curl HTTP/3。
-# 不上 4.x：ASN1 不透明，当前 curl 8.14.1 编不过。Windows ARM64 需 ≥3.6（mingwarm64）。
+# 把 OpenSSL（≥3.5，默认 3.6.x 最新，带 QUIC）源码编进 PREFIX，供 ngtcp2/curl HTTP/3。
+# Windows ARM64 需 ≥3.6（mingwarm64）。OpenSSL 4 可用但默认不跟（ngtcp2 仍 experimental）。
 # Windows：./Configure mingw64/mingwarm64 + Win7 宏（不用 MSYS2 预编译包，那些不支持 Win7）。
 # macOS：总是源码编，跟随 MACOSX_DEPLOYMENT_TARGET（brew bottle 按 runner 系统版本编，随包后旧系统起不来）。
 # Linux：系统 ≥3.5 且带 QUIC 可用，否则 Configure。
@@ -12,7 +12,8 @@ source "$ROOT/scripts/kotv-win-build-env.sh"
 BUILD_DIR="${KOTV_MPV_BUILD_DIR:-$ROOT/.build/desktop-mpv}"
 PREFIX="${KOTV_DESKTOP_FFMPEG_PREFIX:-$BUILD_DIR/prefix}"
 JOBS="${KOTV_MPV_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "${NUMBER_OF_PROCESSORS:-4}")}"
-# 3.5+ 才有 QUIC cbs；4.x ASN1 不透明，当前 curl 8.14.1 编不过 → 锁在 3.x 最新（含 mingwarm64）。
+# 3.5+ 才有 QUIC cbs；curl ≥8.18 已适配 OpenSSL 4 ASN1，但 ngtcp2 仍标 OpenSSL QUIC 为 experimental，
+# 默认锁 3.x 最新（含 mingwarm64）。要试 4.x 可设 KOTV_OPENSSL_VER。
 OPENSSL_VER="${KOTV_OPENSSL_VER:-3.6.5}"
 WIN7_CFLAGS="$(kotv_win7_cflags)"
 
@@ -32,8 +33,8 @@ for p in v.split("."):
         parts.append(0)
 while len(parts) < 3:
     parts.append(0)
-# 4.x 把 ASN1_STRING 等结构改成不透明，curl 8.14.1 的 vtls/openssl.c 直接取成员，编不过。
-sys.exit(0 if (3, 5, 0) <= tuple(parts[:3]) < (4, 0, 0) else 1)
+# 默认接受 3.5+（含 4.x）。curl ≥8.18 已用 ASN1 accessor；仍建议默认 3.6.x。
+sys.exit(0 if tuple(parts[:3]) >= (3, 5, 0) else 1)
 PY
 }
 
@@ -68,8 +69,9 @@ openssl_has_quic_api() {
     "$PREFIX/lib/libssl.dylib" "$PREFIX/lib/libssl.3.dylib" \
     "$PREFIX/lib/libssl.a" \
     "$PREFIX/lib/libssl.so" "$PREFIX/lib/libssl.so.3" \
-    "$PREFIX/lib/libssl.dll.a" "$PREFIX/bin/libssl-3-x64.dll" "$PREFIX/bin/libssl-3.dll" \
-    "$PREFIX/lib/libssl-3.dll"; do
+    "$PREFIX/lib/libssl.dll.a" \
+    "$PREFIX/bin/libssl-3-x64.dll" "$PREFIX/bin/libssl-3.dll" "$PREFIX/lib/libssl-3.dll" \
+    "$PREFIX/bin/libssl-4-x64.dll" "$PREFIX/bin/libssl-4.dll" "$PREFIX/lib/libssl-4.dll"; do
     openssl_lib_has_quic "$lib" && return 0
   done
   # 兜底：头文件有 API 且静态库含 quic_tls_api 对象（交叉 arch 探测失败时）
