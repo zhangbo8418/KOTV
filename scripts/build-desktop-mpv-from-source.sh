@@ -146,9 +146,12 @@ ensure_mpv_libcurl_deps() {
 }
 
 verify_mpv_network() {
-  local bin="$1"
+  local bin="$1" blob=""
   [[ -f "$bin" ]] || return 1
-  if strings "$bin" 2>/dev/null | grep -Eiq 'List of enabled features:.*libcurl|libcurl=enabled|curl_easy_init|mpv_curl'; then
+  # pipefail 下 strings 对 PE 常非 0，不能直接 strings|grep；先吞进变量。
+  blob="$(strings "$bin" 2>/dev/null || true)"
+  if printf '%s\n' "$blob" | grep -Eiq \
+    'List of enabled features:.*libcurl|libcurl=enabled|prefer_libcurl|curl_easy_init|mpv_curl'; then
     echo "ok $(basename "$bin"): libcurl enabled"
   elif command -v otool >/dev/null 2>&1 && otool -L "$bin" 2>/dev/null | grep -Eiq 'libcurl'; then
     echo "ok $(basename "$bin"): libcurl linked (otool)"
@@ -156,14 +159,17 @@ verify_mpv_network() {
     echo "ok $(basename "$bin"): libcurl symbols (nm)"
   elif command -v dumpbin >/dev/null 2>&1 && dumpbin /DEPENDENTS "$bin" 2>/dev/null | grep -Eiq 'libcurl|curl'; then
     echo "ok $(basename "$bin"): libcurl linked (dumpbin)"
+  elif command -v llvm-readobj >/dev/null 2>&1 \
+    && llvm-readobj --coff-imports "$bin" 2>/dev/null | grep -Eiq 'libcurl|curl'; then
+    echo "ok $(basename "$bin"): libcurl linked (llvm-readobj)"
   else
     echo "ERROR: $(basename "$bin") built without libcurl" >&2
-    strings "$bin" 2>/dev/null | grep -i 'libcurl\|enabled features' | head -5 >&2 || true
+    printf '%s\n' "$blob" | grep -iE 'libcurl|enabled features' | head -5 >&2 || true
     otool -L "$bin" 2>/dev/null | head -30 >&2 || true
     return 1
   fi
   if kotv_is_windows_build; then
-    if strings "$bin" 2>/dev/null | grep -Eiq 'schannel|https protocol|tls_|HTTPS'; then
+    if printf '%s\n' "$blob" | grep -Eiq 'schannel|https protocol|tls_|HTTPS'; then
       echo "ok $(basename "$bin"): FFmpeg TLS/HTTPS markers present"
     else
       echo "WARN: $(basename "$bin") FFmpeg HTTPS markers weak" >&2
