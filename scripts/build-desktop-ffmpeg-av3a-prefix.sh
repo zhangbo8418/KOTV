@@ -17,9 +17,13 @@ PKG_BIN="$BUILD_DIR/bin"
 # shellcheck source=scripts/kotv-resolve-git-ref.sh
 source "$ROOT/scripts/kotv-resolve-git-ref.sh"
 
+# Windows：先保证 /usr/bin 在 PATH 前（Git for Windows），再解析 tip；勿被 MinGW git 抢前。
+if kotv_is_windows_build; then
+  export PATH="/usr/bin:/cmd:${PATH:-}"
+fi
+
 FFMPEG_COMMIT="$(kotv_resolve_git_ref "$FFMPEG_REPO" "$FFMPEG_REF" "${KOTV_FFMPEG_COMMIT:-}")"
 echo "ok FFmpeg ${FFMPEG_COMMIT:0:12} (ref=${FFMPEG_REF})"
-
 
 # gcc / FFmpeg 在 Windows 上更吃 D:/ 路径；MSYS 绝对路径 /d/ 偶发链接探测失败。
 

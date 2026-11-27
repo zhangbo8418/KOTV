@@ -93,7 +93,7 @@ if ! pkg-config --exists lcms2 2>/dev/null || [[ ! -f "$PREFIX/lib/liblcms2.a" &
           -Ddefault_library=static -Dutils=false -Dsamples=false -Dfastfloat=false -Dthreaded=false
           -Djpeg=disabled -Dtiff=disabled
         )
-        ((${#meson_native[@]})) && lcms_meson+=("${meson_native[@]}")
+        if ((${#meson_native[@]} > 0)); then lcms_meson+=("${meson_native[@]}"); fi
         meson setup "${lcms_meson[@]}"
         meson compile -C build -j "$JOBS"
         meson install -C build

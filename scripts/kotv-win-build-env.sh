@@ -81,7 +81,8 @@ kotv_windows_prefer_msvcrt_mingw() {
 }
 
 # 导出 Windows 本机 C/C++ 工具链（ffmpeg / mpv / codecs 等）。
-# arm64 优先 llvm-mingw 前缀；x86_64 优先 x86_64-w64-mingw32-* 或裸 gcc。
+# arm64：llvm-mingw 前缀 clang/gcc。x86_64：沿用 PATH 上的 gcc（CI 已前置 mingw-msvcrt），
+# 勿抢成其它前缀的 x86_64-w64-mingw32-gcc（可能来自不完整工具链）。
 kotv_windows_export_cc() {
   kotv_is_windows_build || return 0
   local t
@@ -97,16 +98,12 @@ kotv_windows_export_cc() {
       export CC="${CC:-gcc}"
       export CXX="${CXX:-g++}"
     fi
-    command -v "${t}-ar" >/dev/null 2>&1 && export AR="${AR:-${t}-ar}"
-  else
-    if command -v "${t}-gcc" >/dev/null 2>&1; then
-      export CC="${CC:-${t}-gcc}"
-      export CXX="${CXX:-${t}-g++}"
-      command -v "${t}-ar" >/dev/null 2>&1 && export AR="${AR:-${t}-ar}"
-    else
-      export CC="${CC:-gcc}"
-      export CXX="${CXX:-g++}"
+    if command -v "${t}-ar" >/dev/null 2>&1; then
+      export AR="${AR:-${t}-ar}"
     fi
+  else
+    export CC="${CC:-gcc}"
+    export CXX="${CXX:-g++}"
   fi
 }
 
@@ -139,7 +136,8 @@ kotv_windows_export_cargo_gnu() {
   export "CC_${key}=${CC}"
   export "CXX_${key}=${CXX}"
   export "AR_${key}=${AR:-ar}"
-  upper="$(printf '%s' "$target" | tr '[:lower:]-' '[:upper:]_')"
+  # 分两步 tr：部分环境对 '[:lower:]-' 一类字符集不友好。
+  upper="$(printf '%s' "$target" | tr '-' '_' | tr '[:lower:]' '[:upper:]')"
   export "CARGO_TARGET_${upper}_LINKER=${CC}"
   export CARGO_BUILD_TARGET="$target"
 }

@@ -188,8 +188,8 @@ if [[ ! -f "$PREFIX/lib/libz.a" && ! -f "$PREFIX/lib/libzlibstatic.a" ]]; then
     -DCMAKE_POLICY_VERSION_MINIMUM=3.5
     -DBUILD_SHARED_LIBS=OFF
   )
-  ((${#macos_cmake_arch[@]})) && zlib_cmake+=("${macos_cmake_arch[@]}")
-  ((${#win_cmake_cc[@]})) && zlib_cmake+=("${win_cmake_cc[@]}")
+  if ((${#macos_cmake_arch[@]} > 0)); then zlib_cmake+=("${macos_cmake_arch[@]}"); fi
+  if ((${#win_cmake_cc[@]} > 0)); then zlib_cmake+=("${win_cmake_cc[@]}"); fi
   cmake -S "$BUILD_DIR/zlib" -B "$BUILD_DIR/zlib-build" -G "$cmake_gen" "${zlib_cmake[@]}"
   # zlib 的 Windows CMake 仍会编 shared+zlib1.rc；只编静态并手动安装。
   if kotv_is_windows_build; then
@@ -243,8 +243,8 @@ uchardet_cmake=(
   -DBUILD_SHARED_LIBS=OFF
   -DBUILD_BINARY=OFF
 )
-((${#macos_cmake_arch[@]})) && uchardet_cmake+=("${macos_cmake_arch[@]}")
-((${#win_cmake_cc[@]})) && uchardet_cmake+=("${win_cmake_cc[@]}")
+if ((${#macos_cmake_arch[@]} > 0)); then uchardet_cmake+=("${macos_cmake_arch[@]}"); fi
+if ((${#win_cmake_cc[@]} > 0)); then uchardet_cmake+=("${win_cmake_cc[@]}"); fi
 cmake -S "$BUILD_DIR/uchardet" -B "$BUILD_DIR/uchardet-build" -G "$cmake_gen" "${uchardet_cmake[@]}"
 cmake --build "$BUILD_DIR/uchardet-build" -j"$JOBS"
 cmake --install "$BUILD_DIR/uchardet-build"
@@ -276,8 +276,8 @@ archive_cmake=(
   -DENABLE_PCREPOSIX=OFF
   -DENABLE_ZLIB=ON
 )
-((${#macos_cmake_arch[@]})) && archive_cmake+=("${macos_cmake_arch[@]}")
-((${#win_cmake_cc[@]})) && archive_cmake+=("${win_cmake_cc[@]}")
+if ((${#macos_cmake_arch[@]} > 0)); then archive_cmake+=("${macos_cmake_arch[@]}"); fi
+if ((${#win_cmake_cc[@]} > 0)); then archive_cmake+=("${win_cmake_cc[@]}"); fi
 cmake -S "$BUILD_DIR/libarchive" -B "$BUILD_DIR/libarchive-build" -G "$cmake_gen" "${archive_cmake[@]}"
 cmake --build "$BUILD_DIR/libarchive-build" -j"$JOBS"
 cmake --install "$BUILD_DIR/libarchive-build"
@@ -306,7 +306,7 @@ rubber_meson=(
   -Dcmdline=disabled
   -Dtests=disabled
 )
-((${#meson_native[@]})) && rubber_meson+=("${meson_native[@]}")
+if ((${#meson_native[@]} > 0)); then rubber_meson+=("${meson_native[@]}"); fi
 CXXFLAGS="${CXXFLAGS:-} -include cstddef" \
 meson setup "${rubber_meson[@]}"
 meson compile -C "$BUILD_DIR/rubberband-build" -j "$JOBS"

@@ -1634,15 +1634,15 @@ build_mpv_macos() {
 }
 
 build_mpv_windows() {
+  echo "==> build_mpv_windows start AV3A=$AV3A"
   need meson
   need ninja
   need git
   kotv_windows_prefer_msvcrt_mingw
   kotv_windows_export_cc
-  if kotv_windows_is_arm64; then
-    echo "==> mpv Windows aarch64 CC=$CC"
-  fi
+  echo "==> build_mpv_windows CC=${CC:-} CXX=${CXX:-} arm64=$(kotv_windows_is_arm64 && echo yes || echo no)"
   if [[ "$AV3A" == "1" ]]; then
+    echo "==> build_mpv_windows → FFmpeg AV3A prefix"
     "$ROOT/scripts/build-desktop-ffmpeg-av3a-prefix.sh"
   fi
   # FFmpeg 脚本在子进程里改 PATH 不会继承；这里强制自包含 pkg-config 在最前。
