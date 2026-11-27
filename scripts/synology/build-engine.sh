@@ -30,9 +30,11 @@ echo "==> Synology engine $PLATFORM ($ARCH_LABEL / GOARCH=$GOARCH) → $OUT"
   export CGO_ENABLED=1
   export GOOS=linux
   export GOARCH="$GOARCH"
-  export CGO_CFLAGS="${CFLAGS}"
-  export CGO_CXXFLAGS="${CXXFLAGS}"
-  export CGO_LDFLAGS="${LDFLAGS}"
+  # kotv_syno_export_toolchain 已设 CGO_*；此处再钉死，避免宿主头文件污染交叉编
+  export CGO_CFLAGS="${CGO_CFLAGS:-$CFLAGS}"
+  export CGO_CPPFLAGS="${CGO_CPPFLAGS:---sysroot=${SYSROOT}}"
+  export CGO_CXXFLAGS="${CGO_CXXFLAGS:-$CXXFLAGS}"
+  export CGO_LDFLAGS="${CGO_LDFLAGS:-$LDFLAGS}"
   go build -buildvcs=false -ldflags "-s -w ${VER_LD}" -o "$OUT" ./cmd/engine
 )
 chmod +x "$OUT"

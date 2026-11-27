@@ -1457,6 +1457,56 @@ EOF
   echo "ok vulkan.pc -> $PREFIX/lib/pkgconfig/vulkan.pc"
 }
 
+# Linux：ubuntu-24.04-arm 等系统 vulkan.pc 常 < 1.4.309（mpv 硬门槛）。
+# 把头文件装进 PREFIX，并写够版本号的 vulkan.pc，仍链系统 -lvulkan。
+ensure_linux_vulkan() {
+  [[ "$(uname -s 2>/dev/null)" == "Linux" ]] || return 0
+  mkdir -p "$PREFIX/lib/pkgconfig" "$PREFIX/include"
+  export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+  local need_ver="1.4.309" have=""
+  if pkg-config --exists "vulkan >= ${need_ver}" 2>/dev/null; then
+    echo "ok vulkan $(pkg-config --modversion vulkan) (>= ${need_ver})"
+    return 0
+  fi
+  have="$(pkg-config --modversion vulkan 2>/dev/null || echo none)"
+  echo "==> linux vulkan headers into PREFIX (system pc=$have, need >= ${need_ver})"
+  local vh_tag="${KOTV_VULKAN_HEADERS_TAG:-vulkan-sdk-1.4.357.0}"
+  local _cwd="$PWD"
+  mkdir -p "$BUILD_DIR"
+  cd "$BUILD_DIR"
+  if [[ ! -d vulkan-headers/.git ]]; then
+    git clone --depth 1 --branch "$vh_tag" https://github.com/KhronosGroup/Vulkan-Headers.git vulkan-headers \
+      || git clone --depth 1 https://github.com/KhronosGroup/Vulkan-Headers.git vulkan-headers
+  fi
+  git -C vulkan-headers fetch --depth 1 origin "refs/tags/${vh_tag}:refs/tags/${vh_tag}" 2>/dev/null || true
+  git -C vulkan-headers checkout -q "$vh_tag" 2>/dev/null \
+    || git -C vulkan-headers checkout -q "tags/$vh_tag" 2>/dev/null || true
+  rm -rf vulkan-headers/build
+  cmake -S vulkan-headers -B vulkan-headers/build -G Ninja \
+    -DCMAKE_INSTALL_PREFIX="$PREFIX"
+  cmake --install vulkan-headers/build
+  local ver_pc="${vh_tag#vulkan-sdk-}"
+  ver_pc="${ver_pc%.0}"
+  [[ "$ver_pc" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || ver_pc="1.4.357"
+  cat >"$PREFIX/lib/pkgconfig/vulkan.pc" <<EOF
+prefix=$PREFIX
+exec_prefix=\${prefix}
+libdir=\${prefix}/lib
+includedir=\${prefix}/include
+
+Name: Vulkan-Loader
+Description: Vulkan Loader (PREFIX headers + system libvulkan)
+Version: ${ver_pc}
+Libs: -lvulkan
+Cflags: -I\${includedir}
+EOF
+  export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+  pkg-config --exists "vulkan >= ${need_ver}" \
+    || { echo "ERROR: vulkan.pc still < ${need_ver} after ensure_linux_vulkan" >&2; pkg-config --modversion vulkan >&2 || true; exit 1; }
+  cd "$_cwd"
+  echo "ok linux vulkan $(pkg-config --modversion vulkan) (PREFIX headers)"
+}
+
 # Linux：依赖尽量静态链进 libmpv.so，减轻对宿主 glibc 版本（如 mpv-build 2.39 地板）的硬要求。
 # 完整 musl 全静态可另开工具链；默认仍产出 .so，但 FFmpeg/placebo 等走 PREFIX 静态库。
 build_mpv_linux() {
@@ -1467,6 +1517,7 @@ build_mpv_linux() {
   if [[ "$AV3A" == "1" ]]; then
     "$ROOT/scripts/build-desktop-ffmpeg-av3a-prefix.sh"
   fi
+  ensure_linux_vulkan
   ensure_libplacebo
   ensure_mpv_libcurl_deps
   ensure_iso_libs
@@ -1477,7 +1528,7 @@ build_mpv_linux() {
   kotv_checkout_mpv_src
   cd "$BUILD_DIR/mpv"
   rm -rf build
-  export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig:$PREFIX/lib/x86_64-linux-gnu/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+  export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig:$PREFIX/lib/x86_64-linux-gnu/pkgconfig:$PREFIX/lib/aarch64-linux-gnu/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
   rm -f "$PREFIX/lib/pkgconfig/libavdevice.pc" "$PREFIX/lib/libavdevice"* 2>/dev/null || true
   meson setup build \
     -Ddefault_library=shared \

@@ -62,12 +62,18 @@ download() {
 }
 
 stamp_ok() {
-  local name="$1" ver="$2" marker="$OUT/.kotv-syno-${name}"
+  # 勿写 local a="$1" b="$OUT/$a"：set -u 下同句展开会 unbound
+  local name ver marker
+  name="$1"
+  ver="$2"
+  marker="$OUT/.kotv-syno-${name}"
   [[ -f "$marker" && "$(cat "$marker" 2>/dev/null || true)" == "$ver" ]]
 }
 
 write_stamp() {
-  local name="$1" ver="$2"
+  local name ver
+  name="$1"
+  ver="$2"
   echo "$ver" >"$OUT/.kotv-syno-${name}"
 }
 

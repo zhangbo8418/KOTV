@@ -10,8 +10,11 @@ SDK_ROOT_WIN="C:\\VulkanSDK\\${SDK_VER}"
 kotv_vulkan_sdk_ready() {
   local root="$1"
   [[ -f "${root}/Include/vulkan/vulkan.h" ]] || return 1
-  # MinGW / meson 需要能链到 vulkan-1（SDK Lib 下的 .lib 即可）。
-  [[ -f "${root}/Lib/vulkan-1.lib" || -f "${root}/Lib/vulkan-1.dll.a" || -f "${root}/Lib/libvulkan-1.a" ]] || return 1
+  # MinGW / meson 需要能链到 vulkan-1（SDK Lib 或 Lib/ARM64）。
+  [[ -f "${root}/Lib/vulkan-1.lib" \
+    || -f "${root}/Lib/ARM64/vulkan-1.lib" \
+    || -f "${root}/Lib/vulkan-1.dll.a" \
+    || -f "${root}/Lib/libvulkan-1.a" ]] || return 1
   return 0
 }
 
@@ -61,11 +64,19 @@ kotv_choco_install_vulkan_sdk() {
   return 1
 }
 
+kotv_windows_vulkan_arch() {
+  case "$(uname -m 2>/dev/null || true)" in
+    ARM64|arm64|aarch64) echo "ARM64" ;;
+    *) echo "X64" ;;
+  esac
+}
+
 kotv_lunarg_install_vulkan_sdk() {
-  local url exe
-  url="${KOTV_VULKAN_SDK_URL:-https://sdk.lunarg.com/sdk/download/${SDK_VER}/windows/vulkansdk-windows-X64-${SDK_VER}.exe}"
-  exe="${RUNNER_TEMP:-/tmp}/vulkansdk-windows-X64-${SDK_VER}.exe"
-  echo "==> download Vulkan SDK ${SDK_VER} from LunarG"
+  local url exe arch
+  arch="$(kotv_windows_vulkan_arch)"
+  url="${KOTV_VULKAN_SDK_URL:-https://sdk.lunarg.com/sdk/download/${SDK_VER}/windows/vulkansdk-windows-${arch}-${SDK_VER}.exe}"
+  exe="${RUNNER_TEMP:-/tmp}/vulkansdk-windows-${arch}-${SDK_VER}.exe"
+  echo "==> download Vulkan SDK ${SDK_VER} (${arch}) from LunarG"
   curl -fsSL --connect-timeout 30 --retry 3 --retry-delay 5 --max-time 900 -o "$exe" "$url" \
     || { echo "ERROR: download Vulkan SDK failed: $url" >&2; return 1; }
   echo "==> silent install -> ${SDK_ROOT_WIN}"

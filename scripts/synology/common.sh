@@ -37,24 +37,26 @@ kotv_syno_env_dir() {
   echo "$(kotv_syno_toolkit_root)/build_env/ds.${plat}-${dsm}"
 }
 
-# 在 EnvDeploy 目录下找 sysroot
+# 在 EnvDeploy 目录下找 sysroot（勿回落到 env 根目录，否则会混进错误头文件）
 kotv_syno_find_sysroot() {
   local env_dir="$1" d
   for d in \
     "$env_dir/usr/local/x86_64-pc-linux-gnu/x86_64-pc-linux-gnu/sys-root" \
-    "$env_dir/usr/local/aarch64-unknown-linux-gnueabi/aarch64-unknown-linux-gnueabi/sys-root" \
-    "$env_dir/usr/local/${1}-linux-gnu/"*"/sys-root" ; do
-    if [[ -d "$d/usr/include" || -d "$d/usr/lib" ]]; then
+    "$env_dir/usr/local/aarch64-unknown-linux-gnu/aarch64-unknown-linux-gnu/sys-root" \
+    "$env_dir/usr/local/aarch64-unknown-linux-gnueabi/aarch64-unknown-linux-gnueabi/sys-root" ; do
+    if [[ -d "$d/usr/include" || -d "$d/usr/lib" || -d "$d/lib" ]]; then
       echo "$d"
       return 0
     fi
   done
   d="$(find "$env_dir/usr/local" -type d -name 'sys-root' 2>/dev/null | head -1 || true)"
-  if [[ -n "$d" ]]; then
+  if [[ -n "$d" && ( -d "$d/usr/include" || -d "$d/usr/lib" || -d "$d/lib" ) ]]; then
     echo "$d"
     return 0
   fi
-  echo "$env_dir"
+  echo "ERROR: sys-root not found under $env_dir/usr/local" >&2
+  find "$env_dir/usr/local" -maxdepth 3 -type d 2>/dev/null | head -40 >&2 || true
+  return 1
 }
 
 # 找 Toolkit gcc；成功则 export CC CXX AR RANLIB STRIP SYSROOT 及 CFLAGS/LDFLAGS
@@ -66,11 +68,12 @@ kotv_syno_export_toolchain() {
   cc=""
   for p in \
     "$env_dir/usr/local/x86_64-pc-linux-gnu/bin/x86_64-pc-linux-gnu-gcc" \
+    "$env_dir/usr/local/aarch64-unknown-linux-gnu/bin/aarch64-unknown-linux-gnu-gcc" \
     "$env_dir/usr/local/aarch64-unknown-linux-gnueabi/bin/aarch64-unknown-linux-gnueabi-gcc" ; do
     if [[ -x "$p" ]]; then cc="$p"; break; fi
   done
   if [[ -z "$cc" ]]; then
-    cc="$(find "$env_dir/usr/local" -type f -name '*-gcc' 2>/dev/null | head -1 || true)"
+    cc="$(find "$env_dir/usr/local" -type f -name '*-gcc' ! -name '*-gcc-*' 2>/dev/null | head -1 || true)"
   fi
   if [[ -z "$cc" || ! -x "$cc" ]]; then
     echo "ERROR: Toolkit gcc not found under $env_dir" >&2
@@ -90,9 +93,13 @@ kotv_syno_export_toolchain() {
   export AR="${ar:-ar}"
   export RANLIB="${ranlib:-ranlib}"
   export STRIP="${strip_bin:-strip}"
-  export CFLAGS="${CFLAGS:--O2 -pipe} --sysroot=${SYSROOT}"
-  export CXXFLAGS="${CXXFLAGS:--O2 -pipe} --sysroot=${SYSROOT}"
-  export LDFLAGS="${LDFLAGS:--Wl,-O1} --sysroot=${SYSROOT}"
+  export CFLAGS="--sysroot=${SYSROOT} -O2 -pipe"
+  export CXXFLAGS="--sysroot=${SYSROOT} -O2 -pipe"
+  export LDFLAGS="--sysroot=${SYSROOT} -Wl,-O1"
+  export CGO_CFLAGS="$CFLAGS"
+  export CGO_CPPFLAGS="--sysroot=${SYSROOT}"
+  export CGO_CXXFLAGS="$CXXFLAGS"
+  export CGO_LDFLAGS="$LDFLAGS"
   export PKG_CONFIG_SYSROOT_DIR="$SYSROOT"
   export PKG_CONFIG_PATH="${SYSROOT}/usr/lib/pkgconfig:${SYSROOT}/usr/local/lib/pkgconfig"
   echo "toolchain CC=$CC SYSROOT=$SYSROOT"
