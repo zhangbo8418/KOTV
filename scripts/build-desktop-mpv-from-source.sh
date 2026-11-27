@@ -1703,7 +1703,14 @@ EOF
     pkg_win="$PREFIX/lib/pkgconfig"
   fi
   # libplacebo / mpv 的 meson 都要能找到 pkg-config；必须在 ensure_libplacebo 之前写好。
+  # 同步塞 PREFIX -I/-L：llvm-mingw 无系统 iconv，dependency('iconv') 只靠编译器探测。
   mkdir -p "$BUILD_DIR"
+  pref_inc_win="$PREFIX/include"
+  pref_lib_win="$PREFIX/lib"
+  if command -v cygpath >/dev/null 2>&1; then
+    pref_inc_win="$(cygpath -m "$PREFIX/include")"
+    pref_lib_win="$(cygpath -m "$PREFIX/lib")"
+  fi
   cat >"$BUILD_DIR/meson-native-kotv.ini" <<EOF
 [binaries]
 pkg-config = '$pc_win'
@@ -1711,6 +1718,10 @@ pkgconfig = '$pc_win'
 
 [built-in options]
 pkg_config_path = '$pkg_win'
+c_args = ['-I$pref_inc_win']
+cpp_args = ['-I$pref_inc_win']
+c_link_args = ['-L$pref_lib_win']
+cpp_link_args = ['-L$pref_lib_win']
 EOF
   ensure_libplacebo
 
@@ -1734,6 +1745,11 @@ EOF
   if kotv_is_windows_build; then
     local mpv_vk=enabled
     local winver=""
+    local pref_inc="$PREFIX/include" pref_lib="$PREFIX/lib"
+    if command -v cygpath >/dev/null 2>&1; then
+      pref_inc="$(cygpath -m "$PREFIX/include")"
+      pref_lib="$(cygpath -m "$PREFIX/lib")"
+    fi
     if kotv_is_mpv_win7_build; then
       winver="'-D_WIN32_WINNT=0x0601','-DWINVER=0x0601','-DNTDDI_VERSION=0x06010000',"
     fi
@@ -1748,6 +1764,8 @@ EOF
       -Degl-angle=disabled
       -Dlua=enabled
     )
+    # meson dependency('iconv') 不用 pkg-config，只靠编译器探测；
+    # llvm-mingw 无系统 iconv，必须把 PREFIX 的 -I/-L 写进 c/cpp args（覆盖 native-file）。
     meson setup build \
       --native-file "$BUILD_DIR/meson-native-kotv.ini" \
       --buildtype=release \
@@ -1767,8 +1785,10 @@ EOF
     -Dcplugins=enabled \
       "${mpv_extra[@]}" \
       -Dlibavdevice=disabled \
-      -Dc_args="[${winver}'-DNDEBUG']" \
-      -Dcpp_args="[${winver}'-DNDEBUG']"
+      -Dc_args="[${winver}'-DNDEBUG','-I${pref_inc}']" \
+      -Dcpp_args="[${winver}'-DNDEBUG','-I${pref_inc}']" \
+      -Dc_link_args="['-L${pref_lib}']" \
+      -Dcpp_link_args="['-L${pref_lib}']"
   else
     meson setup build \
       --native-file "$BUILD_DIR/meson-native-kotv.ini" \

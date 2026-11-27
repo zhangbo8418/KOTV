@@ -162,7 +162,21 @@ EOF
         echo "ERROR: libiconv.h not found after build" >&2
         exit 1
       fi
+      [[ -f "$PREFIX/include/iconv.h" ]] || { echo "ERROR: iconv.h missing in PREFIX" >&2; exit 1; }
       [[ -f "$PREFIX/lib/libiconv.a" ]] || { echo "ERROR: libiconv.a missing" >&2; exit 1; }
+      # meson dependency('iconv') 不走 pkg-config；仍写 pc 方便排查与其它探测。
+      pref_pc="$(kotv_native_path "$PREFIX")"
+      cat >"$PREFIX/lib/pkgconfig/iconv.pc" <<EOF
+prefix=$pref_pc
+exec_prefix=\${prefix}
+libdir=\${prefix}/lib
+includedir=\${prefix}/include
+Name: iconv
+Description: GNU libiconv (KOTV static)
+Version: $ICONV_VER
+Libs: -L\${libdir} -liconv
+Cflags: -I\${includedir}
+EOF
       echo "ok libiconv $ICONV_VER (static lib, stub windres)"
       unset WINDRES RC
     else
