@@ -9,7 +9,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 source "$ROOT/scripts/kotv-win-build-env.sh"
 BUILD_DIR="${KOTV_MPV_BUILD_DIR:-$ROOT/.build/desktop-mpv}"
 PREFIX="${KOTV_DESKTOP_FFMPEG_PREFIX:-$BUILD_DIR/prefix}"
-STAMP="$PREFIX/.kotv-iso-libs-v6-fongmi-compat"
+STAMP="$PREFIX/.kotv-iso-libs-v7-mpv-tip-compat"
 JOBS="${KOTV_MPV_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "${NUMBER_OF_PROCESSORS:-4}")}"
 COMPAT_DIR="$ROOT/scripts/patches/kotv-iso-fongmi-compat"
 
@@ -172,8 +172,8 @@ src="$BUILD_DIR/src"
 
 extra_cflags=()
 if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
-  arch="${KOTV_MPV_MACOS_ARCH:-$(uname -m)}"
-  extra_cflags=(-Dc_args="-arch $arch" -Dcpp_args="-arch $arch" -Dc_link_args="-arch $arch" -Dcpp_link_args="-arch $arch")
+  # native-file 强制目标 arch（交叉时勿只靠 -Dc_args）。
+  MESON_NATIVE=(--native-file="$(kotv_macos_write_meson_native_file "$BUILD_DIR" "$PREFIX")")
 fi
 
 build_meson_lib() {
@@ -288,8 +288,7 @@ install_fongmi_iso_compat() {
     && -f "$COMPAT_DIR/title_layout.h" ]] \
     || { echo "ERROR: missing $COMPAT_DIR sources" >&2; exit 1; }
   if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
-    arch="${KOTV_MPV_MACOS_ARCH:-$(uname -m)}"
-    cflags+=(-arch "$arch")
+    cflags+=(-arch "$(kotv_macos_target_arch)")
   fi
   mkdir -p "$BUILD_DIR/iso-fongmi-compat" "$PREFIX/include/dvdnav"
   cp -f "$COMPAT_DIR/title_layout.h" "$PREFIX/include/dvdnav/title_layout.h"

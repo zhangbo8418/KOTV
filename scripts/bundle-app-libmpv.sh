@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 将自带 libmpv 打进桌面应用包，供原生 kotv_mpv 插件加载；位置与 fvp/mdk 相同（不进 runtime、不单独建 libmpv/ 目录）。
+# 将自带 libmpv 打进桌面应用包，供原生 kotv_mpv 插件加载（不进 runtime、不单独建 libmpv/ 目录）。
 #   Windows：与 kotv.exe / mdk.dll 同目录（整包 DLL + verify-windows-mpv-bundle 闭包）
 #   Linux：bundle/lib/ + 非 OS .so 依赖，RUNPATH=$ORIGIN（避免缺库 / 与系统混载）
 #   macOS：Contents/Frameworks/ + 非系统 dylib，清掉 Homebrew/Xcode LC_RPATH

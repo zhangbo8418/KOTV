@@ -46,14 +46,15 @@ if [[ -f "$STAMP" ]] && pkg-config --exists lcms2 2>/dev/null && pkg-config --ex
   exit 0
 fi
 
-cflags=""
-if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
-  arch="${KOTV_MPV_MACOS_ARCH:-$(uname -m)}"
-  cflags="-arch $arch"
+kotv_macos_export_arch_flags
+if kotv_is_windows_build; then
+  kotv_windows_prefer_msvcrt_mingw
+  kotv_windows_export_cc
 fi
-export CFLAGS="${CFLAGS:-} $cflags"
-export CXXFLAGS="${CXXFLAGS:-} $cflags"
-export LDFLAGS="${LDFLAGS:-} $cflags"
+meson_native=()
+if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
+  meson_native=(--native-file="$(kotv_macos_write_meson_native_file "$BUILD_DIR" "$PREFIX")")
+fi
 
 src="$BUILD_DIR/src"
 mkdir -p "$src" "$PREFIX/lib/pkgconfig" "$PREFIX/include" "$PREFIX/lib"
@@ -87,9 +88,13 @@ if ! pkg-config --exists lcms2 2>/dev/null || [[ ! -f "$PREFIX/lib/liblcms2.a" &
       cd "$BUILD_DIR/lcms2"
       if [[ -f meson.build ]] && command -v meson >/dev/null; then
         rm -rf build
-        meson setup build --prefix="$PREFIX" --libdir=lib \
-          -Ddefault_library=static -Dutils=false -Dsamples=false -Dfastfloat=false -Dthreaded=false \
+        lcms_meson=(
+          build --prefix="$PREFIX" --libdir=lib
+          -Ddefault_library=static -Dutils=false -Dsamples=false -Dfastfloat=false -Dthreaded=false
           -Djpeg=disabled -Dtiff=disabled
+        )
+        ((${#meson_native[@]})) && lcms_meson+=("${meson_native[@]}")
+        meson setup "${lcms_meson[@]}"
         meson compile -C build -j "$JOBS"
         meson install -C build
       else

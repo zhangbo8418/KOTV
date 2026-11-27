@@ -61,14 +61,23 @@ if [[ -f "$STAMP" && -f "$PREFIX/lib/pkgconfig/uchardet.pc" && -f "$PREFIX/lib/p
   exit 0
 fi
 
-cflags=""
-if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
-  arch="${KOTV_MPV_MACOS_ARCH:-$(uname -m)}"
-  cflags="-arch $arch"
+kotv_macos_export_arch_flags
+if kotv_is_windows_build; then
+  kotv_windows_prefer_msvcrt_mingw
+  kotv_windows_export_cc
 fi
-export CFLAGS="${CFLAGS:-} $cflags"
-export CXXFLAGS="${CXXFLAGS:-} $cflags"
-export LDFLAGS="${LDFLAGS:-} $cflags"
+macos_cmake_arch=()
+while IFS= read -r a; do
+  [[ -n "$a" ]] && macos_cmake_arch+=("$a")
+done < <(kotv_cmake_macos_arch_args)
+win_cmake_cc=()
+while IFS= read -r a; do
+  [[ -n "$a" ]] && win_cmake_cc+=("$a")
+done < <(kotv_windows_cmake_compiler_args)
+meson_native=()
+if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
+  meson_native=(--native-file="$(kotv_macos_write_meson_native_file "$BUILD_DIR" "$PREFIX")")
+fi
 
 src="$BUILD_DIR/src"
 mkdir -p "$src" "$PREFIX"
@@ -117,7 +126,7 @@ done
 [[ -z "$out" ]] && exit 0
 tmp="${out}.kotvempty.c"
 echo 'unsigned char kotv_iconv_res_stub;' >"$tmp"
-gcc -c -o "$out" "$tmp" 2>/dev/null || : >"$out"
+${CC:-gcc} -c -o "$out" "$tmp" 2>/dev/null || : >"$out"
 rm -f "$tmp"
 exit 0
 EOF
@@ -173,11 +182,15 @@ if [[ ! -f "$PREFIX/lib/libz.a" && ! -f "$PREFIX/lib/libzlibstatic.a" ]]; then
   rm -rf "$BUILD_DIR/zlib" "$BUILD_DIR/zlib-build"
   mkdir -p "$BUILD_DIR/zlib"
   tar -xf "$src/zlib-${ZLIB_VER}.tar.gz" -C "$BUILD_DIR/zlib" --strip-components=1
-  cmake -S "$BUILD_DIR/zlib" -B "$BUILD_DIR/zlib-build" -G "$cmake_gen" \
-    -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+  zlib_cmake=(
+    -DCMAKE_INSTALL_PREFIX="$PREFIX"
+    -DCMAKE_BUILD_TYPE=Release
+    -DCMAKE_POLICY_VERSION_MINIMUM=3.5
     -DBUILD_SHARED_LIBS=OFF
+  )
+  ((${#macos_cmake_arch[@]})) && zlib_cmake+=("${macos_cmake_arch[@]}")
+  ((${#win_cmake_cc[@]})) && zlib_cmake+=("${win_cmake_cc[@]}")
+  cmake -S "$BUILD_DIR/zlib" -B "$BUILD_DIR/zlib-build" -G "$cmake_gen" "${zlib_cmake[@]}"
   # zlib 的 Windows CMake 仍会编 shared+zlib1.rc；只编静态并手动安装。
   if kotv_is_windows_build; then
     cmake --build "$BUILD_DIR/zlib-build" -j"$JOBS" --target zlibstatic
@@ -222,13 +235,17 @@ fetch "https://gitlab.freedesktop.org/uchardet/uchardet/-/archive/v${UCHARDET_VE
 rm -rf "$BUILD_DIR/uchardet"
 mkdir -p "$BUILD_DIR/uchardet"
 tar -xf "$src/uchardet-${UCHARDET_VER}.tar.gz" -C "$BUILD_DIR/uchardet" --strip-components=1
-cmake -S "$BUILD_DIR/uchardet" -B "$BUILD_DIR/uchardet-build" -G "$cmake_gen" \
-  -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-  -DCMAKE_PREFIX_PATH="$PREFIX" \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
-  -DBUILD_SHARED_LIBS=OFF \
+uchardet_cmake=(
+  -DCMAKE_INSTALL_PREFIX="$PREFIX"
+  -DCMAKE_PREFIX_PATH="$PREFIX"
+  -DCMAKE_BUILD_TYPE=Release
+  -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+  -DBUILD_SHARED_LIBS=OFF
   -DBUILD_BINARY=OFF
+)
+((${#macos_cmake_arch[@]})) && uchardet_cmake+=("${macos_cmake_arch[@]}")
+((${#win_cmake_cc[@]})) && uchardet_cmake+=("${win_cmake_cc[@]}")
+cmake -S "$BUILD_DIR/uchardet" -B "$BUILD_DIR/uchardet-build" -G "$cmake_gen" "${uchardet_cmake[@]}"
 cmake --build "$BUILD_DIR/uchardet-build" -j"$JOBS"
 cmake --install "$BUILD_DIR/uchardet-build"
 
@@ -237,27 +254,31 @@ fetch "https://github.com/libarchive/libarchive/releases/download/v${ARCHIVE_VER
 rm -rf "$BUILD_DIR/libarchive"
 mkdir -p "$BUILD_DIR/libarchive"
 tar -xf "$src/libarchive-${ARCHIVE_VER}.tar.xz" -C "$BUILD_DIR/libarchive" --strip-components=1
-cmake -S "$BUILD_DIR/libarchive" -B "$BUILD_DIR/libarchive-build" -G "$cmake_gen" \
-  -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-  -DCMAKE_PREFIX_PATH="$PREFIX" \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
-  -DBUILD_SHARED_LIBS=OFF \
-  -DENABLE_TEST=OFF \
-  -DENABLE_TAR=OFF \
-  -DENABLE_CPIO=OFF \
-  -DENABLE_CAT=OFF \
-  -DENABLE_OPENSSL=OFF \
-  -DENABLE_LIBB2=OFF \
-  -DENABLE_LZ4=OFF \
-  -DENABLE_LZO=OFF \
-  -DENABLE_ZSTD=OFF \
-  -DENABLE_LZMA=OFF \
-  -DENABLE_BZip2=OFF \
-  -DENABLE_LIBXML2=OFF \
-  -DENABLE_EXPAT=OFF \
-  -DENABLE_PCREPOSIX=OFF \
+archive_cmake=(
+  -DCMAKE_INSTALL_PREFIX="$PREFIX"
+  -DCMAKE_PREFIX_PATH="$PREFIX"
+  -DCMAKE_BUILD_TYPE=Release
+  -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+  -DBUILD_SHARED_LIBS=OFF
+  -DENABLE_TEST=OFF
+  -DENABLE_TAR=OFF
+  -DENABLE_CPIO=OFF
+  -DENABLE_CAT=OFF
+  -DENABLE_OPENSSL=OFF
+  -DENABLE_LIBB2=OFF
+  -DENABLE_LZ4=OFF
+  -DENABLE_LZO=OFF
+  -DENABLE_ZSTD=OFF
+  -DENABLE_LZMA=OFF
+  -DENABLE_BZip2=OFF
+  -DENABLE_LIBXML2=OFF
+  -DENABLE_EXPAT=OFF
+  -DENABLE_PCREPOSIX=OFF
   -DENABLE_ZLIB=ON
+)
+((${#macos_cmake_arch[@]})) && archive_cmake+=("${macos_cmake_arch[@]}")
+((${#win_cmake_cc[@]})) && archive_cmake+=("${win_cmake_cc[@]}")
+cmake -S "$BUILD_DIR/libarchive" -B "$BUILD_DIR/libarchive-build" -G "$cmake_gen" "${archive_cmake[@]}"
 cmake --build "$BUILD_DIR/libarchive-build" -j"$JOBS"
 cmake --install "$BUILD_DIR/libarchive-build"
 
@@ -270,20 +291,24 @@ mkdir -p "$BUILD_DIR/rubberband"
 tar -xf "$src/rubberband-${RUBBER_VER}.tar.gz" -C "$BUILD_DIR/rubberband" --strip-components=1
 # rubberband 多处直接写 size_t 却不 include <cstddef>；Xcode 26 的 libc++ 不再顺带引入全局 size_t。
 # 只给这一次 setup 追加，保留上面导出的 -arch 等 CXXFLAGS。
-CXXFLAGS="${CXXFLAGS:-} -include cstddef" \
-meson setup "$BUILD_DIR/rubberband-build" "$BUILD_DIR/rubberband" \
-  --prefix="$PREFIX" \
-  --libdir=lib \
-  --buildtype=release \
-  -Ddefault_library=static \
-  -Dfft=builtin \
-  -Dresampler=builtin \
-  -Djni=disabled \
-  -Dladspa=disabled \
-  -Dlv2=disabled \
-  -Dvamp=disabled \
-  -Dcmdline=disabled \
+rubber_meson=(
+  "$BUILD_DIR/rubberband-build" "$BUILD_DIR/rubberband"
+  --prefix="$PREFIX"
+  --libdir=lib
+  --buildtype=release
+  -Ddefault_library=static
+  -Dfft=builtin
+  -Dresampler=builtin
+  -Djni=disabled
+  -Dladspa=disabled
+  -Dlv2=disabled
+  -Dvamp=disabled
+  -Dcmdline=disabled
   -Dtests=disabled
+)
+((${#meson_native[@]})) && rubber_meson+=("${meson_native[@]}")
+CXXFLAGS="${CXXFLAGS:-} -include cstddef" \
+meson setup "${rubber_meson[@]}"
 meson compile -C "$BUILD_DIR/rubberband-build" -j "$JOBS"
 meson install -C "$BUILD_DIR/rubberband-build"
 

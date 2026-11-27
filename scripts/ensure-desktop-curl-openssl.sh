@@ -134,10 +134,10 @@ cmake_args=(
   -DCURL_USE_LIBSSH2=OFF
 )
 if kotv_is_windows_build; then
+  while IFS= read -r a; do
+    [[ -n "$a" ]] && cmake_args+=("$a")
+  done < <(kotv_windows_cmake_compiler_args)
   cmake_args+=(
-    -DCMAKE_C_COMPILER=gcc
-    -DCMAKE_CXX_COMPILER=g++
-    -DCMAKE_MAKE_PROGRAM=mingw32-make
     -DCMAKE_C_FLAGS="${WIN7_CFLAGS} -DNGHTTP2_STATICLIB"
     -DCMAKE_CXX_FLAGS="${WIN7_CFLAGS}"
     -DCURL_CA_BUNDLE=none

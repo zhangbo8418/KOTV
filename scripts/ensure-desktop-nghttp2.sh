@@ -63,12 +63,10 @@ nghttp2_cmake=(
   -DBUILD_TESTING=OFF
 )
 if kotv_is_windows_build; then
-  nghttp2_cmake+=(
-    -DCMAKE_C_COMPILER=gcc
-    -DCMAKE_CXX_COMPILER=g++
-    -DCMAKE_MAKE_PROGRAM=mingw32-make
-    -DCMAKE_C_FLAGS="$(kotv_win7_cflags) -fPIC"
-  )
+  while IFS= read -r a; do
+    [[ -n "$a" ]] && nghttp2_cmake+=("$a")
+  done < <(kotv_windows_cmake_compiler_args)
+  nghttp2_cmake+=(-DCMAKE_C_FLAGS="$(kotv_win7_cflags) -fPIC")
 else
   nghttp2_cmake+=(-DCMAKE_C_FLAGS="-fPIC")
 fi

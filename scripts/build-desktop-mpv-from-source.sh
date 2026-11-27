@@ -313,47 +313,9 @@ kotv_macos_stage_network_dylibs() {
   [[ "$missing" == 0 ]] || exit 1
 }
 
-# macOS 目标架构：交叉编 x86_64 时由 KOTV_MPV_MACOS_ARCH 指定，否则本机。
-kotv_macos_target_arch() {
-  echo "${KOTV_MPV_MACOS_ARCH:-$(uname -m)}"
-}
-
 # Rosetta/arm64 宿主上 meson 常把 host 误判成 aarch64，导致 libpng 编进 ARM NEON。
-# 写 native-file 强制目标 arch。
 kotv_macos_write_meson_native() {
-  local arch cpu_family ini
-  arch="$(kotv_macos_target_arch)"
-  cpu_family="$arch"
-  [[ "$arch" == "arm64" ]] && cpu_family="aarch64"
-  mkdir -p "$BUILD_DIR"
-  ini="$BUILD_DIR/meson-native-macos-${arch}.ini"
-  cat >"$ini" <<EOF
-[binaries]
-c = ['clang', '-arch', '$arch']
-cpp = ['clang++', '-arch', '$arch']
-objc = ['clang', '-arch', '$arch']
-objcpp = ['clang++', '-arch', '$arch']
-ar = 'ar'
-strip = 'strip'
-pkg-config = 'pkg-config'
-pkgconfig = 'pkg-config'
-
-[built-in options]
-c_args = ['-arch', '$arch']
-cpp_args = ['-arch', '$arch']
-objc_args = ['-arch', '$arch']
-objcpp_args = ['-arch', '$arch']
-c_link_args = ['-arch', '$arch']
-cpp_link_args = ['-arch', '$arch']
-pkg_config_path = '$PREFIX/lib/pkgconfig'
-
-[host_machine]
-system = 'darwin'
-cpu_family = '$cpu_family'
-cpu = '$arch'
-endian = 'little'
-EOF
-  printf '%s\n' "$ini"
+  kotv_macos_write_meson_native_file "$BUILD_DIR" "$PREFIX"
 }
 
 # 把匹配目标 arch 的 Vulkan headers/loader（+ MoltenVK）装进 PREFIX，供 libplacebo/mpv 链接。
@@ -431,7 +393,8 @@ ensure_macos_vulkan() {
   # 3) MoltenVK ICD + 头文件（mpv gpu-context=moltenvk 要 MoltenVK/mvk_vulkan.h）：
   #    同架构优先从 Homebrew 拷进 PREFIX；交叉则下预编译包。
   local mvk="" mvk_inc="" brew_mvk=""
-  if [[ "$arch" == "$(uname -m)" ]]; then
+  # 仅当目标 arch 与真实硬件一致时用 Homebrew（Rosetta 下 uname 会谎报）。
+  if [[ "$arch" == "$(kotv_macos_hw_arch)" ]]; then
     for brew_mvk in \
       "$(brew --prefix molten-vk 2>/dev/null)/lib/libMoltenVK.dylib" \
       /opt/homebrew/opt/molten-vk/lib/libMoltenVK.dylib \

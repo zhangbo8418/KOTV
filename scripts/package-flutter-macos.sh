@@ -48,10 +48,12 @@ else
   export GOOS=darwin
   WANT_ENGINE_ARCH=x86_64
 fi
+# 与引擎同架构编 libmpv（Apple Silicon 打 macos-x64 时必须显式钉死，勿跟宿主编 arm64）。
+export KOTV_MPV_MACOS_ARCH="$WANT_ENGINE_ARCH"
 VERSION="$(kotv_release_version "$ROOT/flutter/pubspec.yaml")"
 kotv_check_version_literals "$VERSION"
 REL_ARCH="$(kotv_release_arch "$PLAT")"
-echo "==> version=$VERSION arch=$REL_ARCH ($PLAT) GOARCH=$GOARCH (uname=$(uname -m) arg=${PLAT_ARG:-} force=${KOTV_MACOS_FORCE_ARCH:-})"
+echo "==> version=$VERSION arch=$REL_ARCH ($PLAT) GOARCH=$GOARCH KOTV_MPV_MACOS_ARCH=$KOTV_MPV_MACOS_ARCH (hw=$(kotv_macos_hw_arch) uname=$(uname -m) arg=${PLAT_ARG:-} force=${KOTV_MACOS_FORCE_ARCH:-})"
 
 chmod +x "$ROOT/scripts/"*.sh
 

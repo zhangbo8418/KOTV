@@ -107,10 +107,10 @@ build_cmake_lib() {
     -DCMAKE_PREFIX_PATH="$pref"
   )
   if kotv_is_windows_build; then
+    while IFS= read -r a; do
+      [[ -n "$a" ]] && cmake_cmd+=("$a")
+    done < <(kotv_windows_cmake_compiler_args)
     cmake_cmd+=(
-      -DCMAKE_C_COMPILER=gcc
-      -DCMAKE_CXX_COMPILER=g++
-      -DCMAKE_MAKE_PROGRAM=mingw32-make
       -DCMAKE_C_FLAGS="${WIN7_CFLAGS}"
       -DCMAKE_CXX_FLAGS="${WIN7_CFLAGS}"
     )

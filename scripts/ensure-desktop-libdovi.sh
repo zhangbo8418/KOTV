@@ -83,10 +83,6 @@ cargo_c_host_runs() {
   "$1" --version >/dev/null 2>&1
 }
 
-macos_hw_is_arm64() {
-  [[ "$(sysctl -n hw.optional.arm64 2>/dev/null || echo 0)" == "1" ]]
-}
-
 install_cargo_c_from_source() {
   local bindir="$1"
   echo "==> cargo-c: build v${CARGO_C_VER} for host $(uname -m) (clean pkg-config)"
@@ -129,7 +125,7 @@ ensure_cargo_c() {
   # macOS：官方 zip 仅 arm64。Apple Silicon（含 arch -x86_64 / Rosetta）直接用 zip；
   # 真 Intel 才源码编，且清掉 PREFIX pkg-config，避免链到交叉产物的 libz。
   if [[ "$(uname -s)" == "Darwin" ]]; then
-    if macos_hw_is_arm64 || [[ "$(uname -m)" == "arm64" ]]; then
+    if [[ "$(kotv_macos_hw_arch)" == "arm64" ]]; then
       fetch_cargo_c_macos_zip "$bindir"
     elif [[ "$(uname -m)" == "x86_64" ]]; then
       install_cargo_c_from_source "$bindir"
@@ -302,8 +298,8 @@ if kotv_is_windows_build; then
   kotv_windows_export_cargo_gnu
 elif [[ "$(uname -s)" == "Darwin" ]]; then
   rustup target add "$TARGET" >/dev/null 2>&1 || true
-  local_arch="$(uname -m)"
-  want_arch="${KOTV_MPV_MACOS_ARCH:-$local_arch}"
+  local_arch="$(kotv_macos_hw_arch)"
+  want_arch="$(kotv_macos_target_arch)"
   if [[ "$want_arch" == "x86_64" && "$local_arch" == "arm64" ]]; then
     export CFLAGS="${CFLAGS:-} -arch x86_64"
     export CXXFLAGS="${CXXFLAGS:-} -arch x86_64"

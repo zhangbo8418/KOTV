@@ -216,6 +216,69 @@ kotv_cmake_macos_arch_args() {
   printf '%s\n' "-DCMAKE_OSX_ARCHITECTURES=$(kotv_macos_target_arch)"
 }
 
+# 导出 macOS 目标 -arch 进 CFLAGS/CXXFLAGS/LDFLAGS（非 Darwin 无操作）。
+kotv_macos_export_arch_flags() {
+  [[ "$(uname -s 2>/dev/null)" == "Darwin" ]] || return 0
+  local arch
+  arch="$(kotv_macos_target_arch)"
+  export CFLAGS="${CFLAGS:-} -arch ${arch}"
+  export CXXFLAGS="${CXXFLAGS:-} -arch ${arch}"
+  export LDFLAGS="${LDFLAGS:-} -arch ${arch}"
+}
+
+# 写出 meson native-file（强制目标 arch），打印路径。
+# $1=输出目录；$2=可选 PREFIX（写入 pkg_config_path）。
+kotv_macos_write_meson_native_file() {
+  [[ "$(uname -s 2>/dev/null)" == "Darwin" ]] || return 1
+  local outdir="${1:?outdir}" prefix="${2:-}" arch cpu_family ini pkg_line=""
+  arch="$(kotv_macos_target_arch)"
+  cpu_family="$arch"
+  [[ "$arch" == "arm64" ]] && cpu_family="aarch64"
+  mkdir -p "$outdir"
+  ini="$outdir/meson-native-macos-${arch}.ini"
+  if [[ -n "$prefix" ]]; then
+    pkg_line="pkg_config_path = '${prefix}/lib/pkgconfig'"
+  fi
+  cat >"$ini" <<EOF
+[binaries]
+c = ['clang', '-arch', '$arch']
+cpp = ['clang++', '-arch', '$arch']
+objc = ['clang', '-arch', '$arch']
+objcpp = ['clang++', '-arch', '$arch']
+ar = 'ar'
+strip = 'strip'
+pkg-config = 'pkg-config'
+pkgconfig = 'pkg-config'
+
+[built-in options]
+c_args = ['-arch', '$arch']
+cpp_args = ['-arch', '$arch']
+objc_args = ['-arch', '$arch']
+objcpp_args = ['-arch', '$arch']
+c_link_args = ['-arch', '$arch']
+cpp_link_args = ['-arch', '$arch']
+${pkg_line}
+
+[host_machine]
+system = 'darwin'
+cpu_family = '$cpu_family'
+cpu = '$arch'
+endian = 'little'
+EOF
+  printf '%s\n' "$ini"
+}
+
+# Windows CMake：使用当前 CC/CXX（须先 kotv_windows_export_cc / clean_win_path）。
+kotv_windows_cmake_compiler_args() {
+  kotv_is_windows_build || return 0
+  [[ -n "${CC:-}" ]] || kotv_windows_export_cc
+  printf '%s\n' "-DCMAKE_C_COMPILER=${CC}"
+  [[ -n "${CXX:-}" ]] && printf '%s\n' "-DCMAKE_CXX_COMPILER=${CXX}"
+  if command -v mingw32-make >/dev/null 2>&1; then
+    printf '%s\n' "-DCMAKE_MAKE_PROGRAM=mingw32-make"
+  fi
+}
+
 # dylib/可执行文件是否含目标 arch（lipo）。
 kotv_macos_file_has_arch() {
   local f="$1" want="$2" archs

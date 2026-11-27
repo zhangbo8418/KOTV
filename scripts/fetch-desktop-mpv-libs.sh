@@ -111,7 +111,7 @@ fetch_macos() {
     return
   fi
   echo "==> macOS libmpv: source build with AV3A + libdovi + dav1d + vo-avfoundation (kind=$want_kind)"
-  if [[ "${KOTV_MPV_MACOS_ARCH:-$(uname -m)}" == "x86_64" && "$(uname -m)" == "arm64" ]]; then
+  if [[ "$(kotv_macos_target_arch)" == "x86_64" && "$(kotv_macos_hw_arch)" == "arm64" ]]; then
     arch -x86_64 "$ROOT/scripts/build-desktop-mpv-from-source.sh" macos
   else
     "$ROOT/scripts/build-desktop-mpv-from-source.sh" macos
