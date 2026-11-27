@@ -39,14 +39,36 @@ echo "==> Synology engine $PLATFORM ($ARCH_LABEL / GOARCH=$GOARCH) → $OUT"
 )
 chmod +x "$OUT"
 file "$OUT" || true
-# 必须是动态链接到 sysroot/glibc 风格，禁止误用 musl 静态包冒充
-if command -v ldd >/dev/null 2>&1; then
-  if ! ldd "$OUT" >/dev/null 2>&1; then
+# 必须是动态链 glibc（Toolkit sysroot）。交叉产物上宿主 ldd 会误报「not a dynamic
+# executable」，改用 file/readelf（不执行目标二进制）。
+_eng_info="$(file -b "$OUT" 2>/dev/null || true)"
+case "$_eng_info" in
+  *statically\ linked*)
     echo "ERROR: engine is statically linked; Synology SPK 需要 Toolkit 动态链引擎" >&2
+    echo "$_eng_info" >&2
+    exit 1
+    ;;
+esac
+if [[ "$_eng_info" != *"dynamically linked"* ]]; then
+  echo "ERROR: expected dynamically linked engine, got: ${_eng_info:-unknown}" >&2
+  exit 1
+fi
+if [[ "$_eng_info" == *musl* ]]; then
+  echo "ERROR: musl-linked engine not allowed for Synology SPK" >&2
+  exit 1
+fi
+if command -v readelf >/dev/null 2>&1; then
+  if ! readelf -l "$OUT" 2>/dev/null | grep -q 'INTERP'; then
+    echo "ERROR: engine missing INTERP (not a dynamic ELF)" >&2
     exit 1
   fi
+  echo "engine dynamic deps (readelf):"
+  readelf -d "$OUT" 2>/dev/null | grep -E 'NEEDED|Shared library' | head -20 || true
+elif [[ "$GOARCH" == "$(go env GOHOSTARCH 2>/dev/null || true)" ]] \
+  && command -v ldd >/dev/null 2>&1; then
   echo "engine dynamic deps:"
   ldd "$OUT" | head -20 || true
 fi
+unset _eng_info
 ls -lh "$OUT"
 echo "$OUT"
