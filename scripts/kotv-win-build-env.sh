@@ -57,9 +57,10 @@ kotv_windows_triplet() {
   if kotv_windows_is_arm64; then echo aarch64-w64-mingw32; else echo x86_64-w64-mingw32; fi
 }
 
-# Rust gnu target：aarch64-pc-windows-gnu | x86_64-pc-windows-gnu
+# Rust MinGW target：arm64 用 llvm-mingw → gnullvm（rustc 无 aarch64-pc-windows-gnu）；
+# x86_64 仍用经典 gnu。
 kotv_windows_rust_gnu_target() {
-  if kotv_windows_is_arm64; then echo aarch64-pc-windows-gnu; else echo x86_64-pc-windows-gnu; fi
+  if kotv_windows_is_arm64; then echo aarch64-pc-windows-gnullvm; else echo x86_64-pc-windows-gnu; fi
 }
 
 # OpenSSL Configure 目标：mingwarm64 | mingw64

@@ -8,7 +8,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 source "$ROOT/scripts/kotv-win-build-env.sh"
 BUILD_DIR="${KOTV_MPV_BUILD_DIR:-$ROOT/.build/desktop-mpv}"
 PREFIX="${KOTV_DESKTOP_FFMPEG_PREFIX:-$BUILD_DIR/prefix}"
-STAMP="$PREFIX/.kotv-parity-libs-v7"
+STAMP="$PREFIX/.kotv-parity-libs-v8"
 JOBS="${KOTV_MPV_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "${NUMBER_OF_PROCESSORS:-4}")}"
 
 ICONV_VER=1.19
@@ -290,7 +290,7 @@ rm -rf "$BUILD_DIR/rubberband"
 mkdir -p "$BUILD_DIR/rubberband"
 tar -xf "$src/rubberband-${RUBBER_VER}.tar.gz" -C "$BUILD_DIR/rubberband" --strip-components=1
 # rubberband 多处直接写 size_t 却不 include <cstddef>；Xcode 26 的 libc++ 不再顺带引入全局 size_t。
-# 只给这一次 setup 追加，保留上面导出的 -arch 等 CXXFLAGS。
+# 勿依赖 CXXFLAGS：有 --native-file 时 meson 用文件里的 cpp_args，环境变量常被盖掉。
 rubber_meson=(
   "$BUILD_DIR/rubberband-build" "$BUILD_DIR/rubberband"
   --prefix="$PREFIX"
@@ -306,8 +306,19 @@ rubber_meson=(
   -Dcmdline=disabled
   -Dtests=disabled
 )
+if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
+  _rb_arch="$(kotv_macos_target_arch)"
+  # -D* 覆盖 native-file 里的 built-in options；必须自带 -arch，不能只靠 CXXFLAGS。
+  rubber_meson+=(
+    -Dc_args="-arch ${_rb_arch}"
+    -Dcpp_args="-arch ${_rb_arch} -include cstddef"
+    -Dc_link_args="-arch ${_rb_arch}"
+    -Dcpp_link_args="-arch ${_rb_arch}"
+  )
+else
+  rubber_meson+=(-Dcpp_args="-include cstddef")
+fi
 if ((${#meson_native[@]} > 0)); then rubber_meson+=("${meson_native[@]}"); fi
-CXXFLAGS="${CXXFLAGS:-} -include cstddef" \
 meson setup "${rubber_meson[@]}"
 meson compile -C "$BUILD_DIR/rubberband-build" -j "$JOBS"
 meson install -C "$BUILD_DIR/rubberband-build"

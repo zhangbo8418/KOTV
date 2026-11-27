@@ -272,15 +272,33 @@ if kotv_is_windows_build; then
     rustup target add x86_64-pc-windows-gnu --toolchain "$local_tc" >/dev/null 2>&1 || true
     export RUSTUP_TOOLCHAIN="$local_tc"
   elif kotv_windows_is_arm64; then
+    # arm64 + llvm-mingw → aarch64-pc-windows-gnullvm（不存在 *-windows-gnu）。
+    # 优先装带 host tools 的 gnullvm 工具链；否则 stable + target add。
     _rt="$(kotv_windows_rust_gnu_target)"
-    rustup toolchain install "stable-${_rt}" >/dev/null 2>&1 \
-      || rustup toolchain install stable >/dev/null 2>&1 || true
-    rustup target add "$_rt" >/dev/null 2>&1 || true
-    export RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-stable-${_rt}}"
+    echo "==> Windows arm64 libdovi: rust target ${_rt}"
+    if rustup toolchain install "stable-${_rt}" 2>/dev/null \
+      && rustup run "stable-${_rt}" rustc -vV >/dev/null 2>&1; then
+      export RUSTUP_TOOLCHAIN="stable-${_rt}"
+    else
+      rustup toolchain install stable
+      export RUSTUP_TOOLCHAIN=stable
+      rustup target add "$_rt" --toolchain stable \
+        || { echo "ERROR: rustup target add ${_rt} failed" >&2; rustup show >&2 || true; exit 1; }
+    fi
+    rustup target list --toolchain "$RUSTUP_TOOLCHAIN" --installed | grep -F "$_rt" >/dev/null \
+      || rustup target add "$_rt" --toolchain "$RUSTUP_TOOLCHAIN" \
+      || { echo "ERROR: rust target ${_rt} not installed" >&2; exit 1; }
   else
     _rt="$(kotv_windows_rust_gnu_target)"
-    rustup toolchain install "stable-${_rt}" >/dev/null 2>&1 || true
-    export RUSTUP_TOOLCHAIN="stable-${_rt}"
+    if rustup toolchain install "stable-${_rt}" 2>/dev/null \
+      && rustup run "stable-${_rt}" rustc -vV >/dev/null 2>&1; then
+      export RUSTUP_TOOLCHAIN="stable-${_rt}"
+    else
+      rustup toolchain install stable
+      export RUSTUP_TOOLCHAIN=stable
+    fi
+    rustup target add "$_rt" --toolchain "$RUSTUP_TOOLCHAIN" \
+      || { echo "ERROR: rustup target add ${_rt} failed" >&2; exit 1; }
   fi
   cleaned=""
   old_ifs="$IFS"
