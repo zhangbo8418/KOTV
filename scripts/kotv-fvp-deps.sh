@@ -67,18 +67,38 @@ kotv_export_fvp_deps() {
   echo "==> FVP_DEPS_URL=$FVP_DEPS_URL"
 }
 
+# 是否 Windows ARM64 宿主（打包机 / CI）。
+kotv_mdk_windows_want_arm64() {
+  case "${KOTV_MDK_WINDOWS_ARCH:-}" in
+    arm64|ARM64|aarch64) return 0 ;;
+    x64|amd64|X64) return 1 ;;
+  esac
+  local m pa pa64
+  m="$(uname -m 2>/dev/null || true)"
+  pa="${PROCESSOR_ARCHITECTURE:-}"
+  pa64="${PROCESSOR_ARCHITEW6432:-}"
+  case "$m" in ARM64|arm64|aarch64) return 0 ;; esac
+  [[ "$pa" == "ARM64" || "$pa64" == "ARM64" ]] && return 0
+  return 1
+}
+
 # GitHub mdk-sdk v0.37+ 不再发布 mdk-sdk-windows-x64.7z，改为 *-vsYYYY.7z。
 # fvp cmake 仍拼旧文件名；CMake file(DOWNLOAD) 遇 404 会写成空文件，随后解压失败。
+# arm64：必须用含 lib/arm64 的多架构包（windows-vsYYYY / clang），勿用 *-x64-*.7z。
 kotv_mdk_windows_assets() {
   if [[ -n "${KOTV_MDK_WINDOWS_ASSET:-}" ]]; then
     echo "$KOTV_MDK_WINDOWS_ASSET"
     echo "mdk-sdk-windows-x64.7z"
     return
   fi
-  local names=""
-  names="$(_kotv_python - <<'PY' || true
+  local names="" want_arm64=0
+  if kotv_mdk_windows_want_arm64; then
+    want_arm64=1
+  fi
+  names="$(_kotv_python - "$want_arm64" <<'PY' || true
 import json, os, re, sys, time, urllib.request
 
+want_arm64 = sys.argv[1] == "1"
 base = (os.environ.get("FVP_DEPS_URL") or "").rstrip("/")
 tag = ""
 m = re.search(r"/download/([^/]+)$", base)
@@ -117,13 +137,28 @@ for asset in data.get("assets") or []:
     nl = name.lower()
     if not nl.endswith(".7z") or "windows" not in nl:
         continue
-    if "ltl" in nl or "clang" in nl or "uwp" in nl:
+    if "ltl" in nl or "uwp" in nl:
         continue
-    if "x64" in nl or re.search(r"windows-vs\d", nl):
-        cands.append(name)
+    if want_arm64:
+        # 多架构：windows-vsYYYY / windows-clang；排除纯 x64 包。
+        if "x64" in nl:
+            continue
+        if re.search(r"windows-vs\d", nl) or "clang" in nl:
+            cands.append(name)
+    else:
+        if "clang" in nl:
+            continue
+        if "x64" in nl or re.search(r"windows-vs\d", nl):
+            cands.append(name)
 
 def rank(n):
     nl = n.lower()
+    if want_arm64:
+        if re.search(r"windows-vs\d", nl) and "x64" not in nl:
+            return 0
+        if "clang" in nl:
+            return 1
+        return 2
     if "x64" in nl and "vs" in nl:
         return 0
     if "x64" in nl:
@@ -138,6 +173,9 @@ PY
 )"
   if [[ -n "$names" ]]; then
     echo "$names"
+  elif [[ "$want_arm64" -eq 1 ]]; then
+    echo "mdk-sdk-windows-vs2026.7z"
+    echo "mdk-sdk-windows-clang.7z"
   else
     echo "mdk-sdk-windows-x64-vs2026.7z"
   fi
@@ -222,18 +260,26 @@ _kotv_extract_7z() {
 
 # 把 GitHub 上真实的 Windows SDK 解到 fvp/windows，让 cmake 跳过已失效的旧文件名下载。
 kotv_ensure_mdk_windows_sdk() {
-  local repo ver dest stamp archive_dir archive url fvp_root win_dir name
+  local repo ver dest stamp archive_dir archive url fvp_root win_dir name arch_tag need_lib
   repo="$(_kotv_repo_root)"
   ver="$(kotv_mdk_sdk_ver)"
   fvp_root="$(kotv_fvp_package_root)" || return 1
   fvp_root="$(_kotv_unix_path "$fvp_root")"
   win_dir="$fvp_root/windows"
   dest="$win_dir"
+  if kotv_mdk_windows_want_arm64; then
+    arch_tag="arm64"
+    need_lib="$win_dir/mdk-sdk/lib/arm64/mdk.lib"
+  else
+    arch_tag="x64"
+    need_lib="$win_dir/mdk-sdk/lib/x64/mdk.lib"
+  fi
   stamp="$win_dir/.kotv-mdk-sdk"
   mkdir -p "$win_dir"
 
-  if [[ -f "$stamp" && "$(cat "$stamp" 2>/dev/null)" == "$ver" && -f "$win_dir/mdk-sdk/lib/cmake/FindMDK.cmake" ]]; then
-    echo "==> mdk windows sdk ready ($ver): $win_dir/mdk-sdk"
+  if [[ -f "$stamp" && "$(cat "$stamp" 2>/dev/null)" == "${ver}-${arch_tag}" \
+    && -f "$win_dir/mdk-sdk/lib/cmake/FindMDK.cmake" && -f "$need_lib" ]]; then
+    echo "==> mdk windows sdk ready ($ver $arch_tag): $win_dir/mdk-sdk"
     return 0
   fi
 
@@ -248,7 +294,7 @@ kotv_ensure_mdk_windows_sdk() {
     url="$(kotv_fvp_deps_url)/$name"
     url="${url//$'\r'/}"
     archive="$archive_dir/$name"
-    echo "==> fetch mdk windows sdk $ver: $url"
+    echo "==> fetch mdk windows sdk $ver ($arch_tag): $url"
     if curl -fL --retry 5 --retry-delay 2 -o "$archive" "$url"; then
       if [[ -s "$archive" ]]; then
         break
@@ -268,10 +314,15 @@ kotv_ensure_mdk_windows_sdk() {
     echo "error: extracted archive missing FindMDK.cmake" >&2
     return 1
   }
+  [[ -f "$need_lib" ]] || {
+    echo "error: mdk-sdk missing $need_lib (wrong windows archive for $arch_tag)" >&2
+    ls -la "$win_dir/mdk-sdk/lib" 2>/dev/null || true
+    return 1
+  }
   # fvp cmake 仍查找旧文件名；放一份有效 7z，避免残留空文件被再次解压。
   cp -f "$archive" "$win_dir/mdk-sdk-windows-x64.7z"
-  echo "$ver" > "$stamp"
-  echo "==> mdk windows sdk prepared ($ver): $win_dir/mdk-sdk"
+  echo "${ver}-${arch_tag}" > "$stamp"
+  echo "==> mdk windows sdk prepared ($ver $arch_tag): $win_dir/mdk-sdk"
 }
 
 # macOS：准备本地 mdk pod（KOTV_MDK_POD_PATH），供 Podfile 使用。
