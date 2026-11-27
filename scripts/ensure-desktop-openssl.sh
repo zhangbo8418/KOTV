@@ -395,6 +395,26 @@ if kotv_is_windows_build; then
   export CFLAGS="${WIN7_CFLAGS} ${CFLAGS:-}"
   export CXXFLAGS="${WIN7_CFLAGS} ${CXXFLAGS:-}"
   _ssl_tgt="$(kotv_windows_openssl_target)"
+  # 上游 3.5.x 无 mingwarm64（master/3.6+ 才有）；llvm-mingw aarch64 需本地补目标。
+  if [[ "$_ssl_tgt" == "mingwarm64" ]] && ! grep -Rq 'mingwarm64' Configurations 2>/dev/null; then
+    cat >Configurations/50-kotv-mingwarm64.conf <<'EOF'
+## -*- mode: perl; -*-
+# KOTV: Windows ARM64 + llvm-mingw（对齐 openssl master / MSYS2）
+my %targets = (
+    "mingwarm64" => {
+        inherit_from     => [ "mingw-common" ],
+        sys_id           => "MINGWARM64",
+        bn_ops           => add("SIXTY_FOUR_BIT"),
+        asm_arch         => 'aarch64',
+        uplink_arch      => 'armv8',
+        perlasm_scheme   => "win64",
+        shared_rcflag    => "",
+        multilib         => "-arm64",
+    },
+);
+EOF
+    echo "==> injected Configurations/50-kotv-mingwarm64.conf"
+  fi
   echo "==> OpenSSL Configure ${_ssl_tgt} CC=${CC:-}"
   "$PERL" ./Configure "$_ssl_tgt" "${cfg_args[@]}"
 elif [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
