@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+# 卸载前停服务（DSM 通常已调 stop；此处兜底）
+"/var/packages/kotv/scripts/start-stop-status" stop >/dev/null 2>&1 || true
+exit 0

@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+PACKAGE="kotv"
+PACKAGE_DIR="/var/packages/${PACKAGE}"
+TARGET="${PACKAGE_DIR}/target"
+mkdir -p "${PACKAGE_DIR}/var"
+chmod 755 "${TARGET}/kotv-engine" 2>/dev/null || true
+exit 0

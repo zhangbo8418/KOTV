@@ -3,7 +3,7 @@ name: KOTV Build
 on:
   workflow_dispatch:
   push:
-    branches: [main, master, restore-sidecar]
+    branches: [main, master, restore-sidecar, "release/**"]
     tags: ["v*"]
 
 env:
@@ -671,10 +671,15 @@ jobs:
           if-no-files-found: error
 
   # Web 包 = 引擎 + webapp（同端口放出，不进 PC/安卓/iOS）
+  # 矩阵含 arm64：群晖 armv8 SPK 复用 musl 静态引擎
   build-web:
     runs-on: ubuntu-latest
     needs: [set-tag]
-    timeout-minutes: 120
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        plat: [linux-x64, linux-arm64]
     steps:
       - uses: actions/checkout@v4
 
@@ -697,7 +702,11 @@ jobs:
             libass-dev libarchive-dev libuchardet-dev librubberband-dev libdvbv5-dev \
             libbluray-dev libdvdread-dev libdvdnav-dev \
             liblua5.2-dev libluajit-5.1-dev \
-            p7zip-full unzip curl zip
+            p7zip-full unzip curl zip docker.io
+          if [ "${{ matrix.plat }}" = "linux-arm64" ]; then
+            sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu qemu-user-static binfmt-support
+            docker run --rm --privileged multiarch/qemu-user-static --reset -p yes || true
+          fi
 
       - uses: subosito/flutter-action@v2
         with:
@@ -712,13 +721,13 @@ jobs:
           KOTV_JAVA_TOOLCHAIN: "21"
         run: |
           flutter config --enable-web
-          chmod +x bridge/build.sh scripts/*.sh
-          ./scripts/package-flutter-web.sh linux-x64
-          # 确认引擎摆脱宿主 glibc
-          file dist/KOTV-web-linux-x64/kotv-engine
-          if ldd dist/KOTV-web-linux-x64/kotv-engine >/dev/null 2>&1; then
+          chmod +x bridge/build.sh scripts/*.sh scripts/synology/*.sh
+          ./scripts/package-flutter-web.sh "${{ matrix.plat }}"
+          eng="dist/KOTV-web-${{ matrix.plat }}/kotv-engine"
+          file "$eng"
+          if ldd "$eng" >/dev/null 2>&1; then
             echo "engine still dynamically linked:" >&2
-            ldd dist/KOTV-web-linux-x64/kotv-engine >&2
+            ldd "$eng" >&2
             exit 1
           fi
           ls -lh dist/KO影视-*-web-*.zip
@@ -726,10 +735,151 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           retention-days: 1
-          name: flutter-web
+          name: flutter-web-${{ matrix.plat }}
           path: |
-            dist/KO影视-*-web-linux-x86_64.zip
-            dist/KO影视-*-web-static.zip
+            dist/KOTV-web-${{ matrix.plat }}/**
+            dist/KO影视-*-web-*.zip
+          if-no-files-found: error
+
+  # 群晖 DSM 7.2：Toolkit 编译 Node/Python/JRE/Chromium
+  build-syno-toolkit-runtime:
+    runs-on: ubuntu-latest
+    needs: [set-tag]
+    timeout-minutes: 600
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - toolkit_plat: braswell
+            arch_label: x86_64
+          - toolkit_plat: rtd1296
+            arch_label: armv8
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git python3 python3-pip xz-utils cifs-utils \
+            build-essential clang lld ninja-build pkg-config curl ca-certificates \
+            autoconf automake libtool cmake unzip zip rsync
+
+      - name: Cache Synology toolkit + sources
+        uses: actions/cache@v4
+        with:
+          path: |
+            .toolkit/pkgscripts-ng
+            .toolkit/toolkit_tarballs
+            .toolkit/build_env
+            .syno-src-cache
+          key: syno-toolkit-7.2-${{ matrix.toolkit_plat }}-${{ hashFiles('scripts/synology/versions.env') }}-v1
+          restore-keys: |
+            syno-toolkit-7.2-${{ matrix.toolkit_plat }}-
+            syno-toolkit-7.2-
+
+      - name: Deploy toolkit + build runtimes
+        env:
+          KOTV_TOOLKIT_ROOT: ${{ github.workspace }}/.toolkit
+          KOTV_SYNO_SRC_CACHE: ${{ github.workspace }}/.syno-src-cache
+          KOTV_SYNO_BUILD_ROOT: ${{ github.workspace }}/.syno-build/${{ matrix.toolkit_plat }}
+        run: |
+          chmod +x scripts/synology/*.sh
+          ./scripts/synology/deploy-toolkit.sh "${{ matrix.toolkit_plat }}"
+          ./scripts/synology/build-runtime-in-chroot.sh "${{ matrix.toolkit_plat }}"
+          ls -lah "dist/syno-runtime-${{ matrix.arch_label }}"
+          # 打包 artifact 前清掉巨型中间构建目录，避免 runner 爆盘
+          rm -rf .syno-build/${{ matrix.toolkit_plat }} || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          retention-days: 1
+          name: syno-runtime-${{ matrix.arch_label }}
+          path: dist/syno-runtime-${{ matrix.arch_label }}/**
+          if-no-files-found: error
+
+  # 组装 SPK：musl 引擎/webapp + Toolkit 运行时
+  build-synology-spk:
+    runs-on: ubuntu-latest
+    needs: [set-tag, build-web, build-syno-toolkit-runtime]
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            web_plat: linux-x64
+          - arch: armv8
+            web_plat: linux-arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: flutter-web-${{ matrix.web_plat }}
+          path: _web
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: syno-runtime-${{ matrix.arch }}
+          path: dist/syno-runtime-${{ matrix.arch }}
+
+      - name: Restore web package layout
+        run: |
+          set -euo pipefail
+          mkdir -p "dist/KOTV-web-${{ matrix.web_plat }}"
+          # artifact 可能是目录树或含 zip
+          if [[ -x "_web/dist/KOTV-web-${{ matrix.web_plat }}/kotv-engine" ]]; then
+            cp -a "_web/dist/KOTV-web-${{ matrix.web_plat }}/." "dist/KOTV-web-${{ matrix.web_plat }}/"
+          elif [[ -x "_web/KOTV-web-${{ matrix.web_plat }}/kotv-engine" ]]; then
+            cp -a "_web/KOTV-web-${{ matrix.web_plat }}/." "dist/KOTV-web-${{ matrix.web_plat }}/"
+          elif [[ -x "_web/kotv-engine" ]]; then
+            cp -a "_web/." "dist/KOTV-web-${{ matrix.web_plat }}/"
+          else
+            zip="$(find _web -name 'KO影视-*-web-*.zip' | head -1 || true)"
+            if [[ -z "$zip" ]]; then
+              echo "web artifact layout unknown:" >&2
+              find _web -maxdepth 4 -type f | head -80 >&2
+              exit 1
+            fi
+            tmp="$(mktemp -d)"
+            unzip -q "$zip" -d "$tmp"
+            if [[ -x "$tmp/kotv-engine" ]]; then
+              cp -a "$tmp/." "dist/KOTV-web-${{ matrix.web_plat }}/"
+            else
+              inner="$(find "$tmp" -name kotv-engine -type f | head -1)"
+              cp -a "$(dirname "$inner")/." "dist/KOTV-web-${{ matrix.web_plat }}/"
+            fi
+          fi
+          test -x "dist/KOTV-web-${{ matrix.web_plat }}/kotv-engine"
+          test -f "dist/KOTV-web-${{ matrix.web_plat }}/webapp/index.html"
+
+      - name: Build bridge jar (for SPK runtime)
+        run: |
+          chmod +x bridge/build.sh scripts/synology/*.sh
+          ./bridge/build.sh
+
+      - name: Package SPK
+        env:
+          KOTV_VERSION: ${{ needs.set-tag.outputs.tag }}
+        run: |
+          ./scripts/synology/package-spk.sh "${{ matrix.arch }}"
+          ls -lh dist/KO影视-*-synology-*.spk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          retention-days: 1
+          name: synology-spk-${{ matrix.arch }}
+          path: dist/KO影视-*-synology-${{ matrix.arch }}.spk
           if-no-files-found: error
 
   build-ios:
@@ -773,6 +923,7 @@ jobs:
       - build-mac-amd64
       - build-android
       - build-web
+      - build-synology-spk
       - build-ios
     permissions:
       contents: write
@@ -786,12 +937,13 @@ jobs:
           TAG: ${{ needs.set-tag.outputs.tag }}
         run: |
           mkdir -p ./release-files
-          find . -maxdepth 3 -type f \( \
+          find . -maxdepth 4 -type f \( \
             -name 'KO影视-*.zip' -o \
             -name 'KO影视-*.dmg' -o \
             -name 'KO影视-*-setup.exe' -o \
             -name 'KO影视-*.apk' -o \
-            -name 'KO影视-*.ipa' \
+            -name 'KO影视-*.ipa' -o \
+            -name 'KO影视-*.spk' \
           \) -print -exec cp -f {} ./release-files/ \;
           for spec in \
             "updater-linux-amd64/updater:updater-linux-amd64" \
@@ -833,7 +985,10 @@ jobs:
               "android-arm64": f"{base}/KO影视-{ver}-aarch64.apk",
               "android-armv7": f"{base}/KO影视-{ver}-armv7.apk",
               "web-linux-amd64": f"{base}/KO影视-{ver}-web-linux-x86_64.zip",
+              "web-linux-arm64": f"{base}/KO影视-{ver}-web-linux-aarch64.zip",
               "web-static": f"{base}/KO影视-{ver}-web-static.zip",
+              "synology-x86_64": f"{base}/KO影视-{ver}-synology-x86_64.spk",
+              "synology-armv8": f"{base}/KO影视-{ver}-synology-armv8.spk",
               "ios": f"{base}/KO影视-{ver}-ios.ipa",
             },
           }
@@ -883,7 +1038,8 @@ jobs:
             echo "| macOS x86_64 | [DMG](${base}/KO影视-${ver}-x86_64.dmg) |"
             echo "| Android aarch64 | [APK](${base}/KO影视-${ver}-aarch64.apk) |"
             echo "| Android armv7 | [APK](${base}/KO影视-${ver}-armv7.apk) |"
-            echo "| **Web 包**（引擎同端口） | [引擎+Web](${base}/KO影视-${ver}-web-linux-x86_64.zip) · [仅 webapp](${base}/KO影视-${ver}-web-static.zip) |"
+            echo "| **Web 包**（引擎同端口） | [x86_64](${base}/KO影视-${ver}-web-linux-x86_64.zip) · [aarch64](${base}/KO影视-${ver}-web-linux-aarch64.zip) · [仅 webapp](${base}/KO影视-${ver}-web-static.zip) |"
+            echo "| **群晖 DSM 7.2 SPK** | [x86_64](${base}/KO影视-${ver}-synology-x86_64.spk) · [armv8](${base}/KO影视-${ver}-synology-armv8.spk) |"
             echo "| iOS（未签名） | [IPA](${base}/KO影视-${ver}-ios.ipa) |"
           } > ./RELEASE_NOTES.md
 

@@ -911,22 +911,45 @@ prepare_node() {
   echo "[node] ready: $dest/$bin_name"
 }
 
-prepare_one() {
+# 群晖：禁止下载 Liberica/CFT 等宿主 glibc 预编译包，只消费 Toolkit CI 产物。
+# 环境变量 KOTV_SYNO_RUNTIME_ROOT 指向 dist/syno-runtime-{x86_64|armv8}
+prepare_synology_from_toolkit() {
   local plat="$1"
-  echo "======== prepare runtime: $plat ========"
-  mkdir -p "$CACHE" "$OUT_ROOT"
-  # 不捆绑外部播放器可执行文件；页内 libmpv 与 fvp/mdk 同目录，不进 runtime。
-  rm -rf "$OUT_ROOT/mpv" "$OUT_ROOT/lib" "$OUT_ROOT/vlc" "$OUT_ROOT/libvlc" "$OUT_ROOT/libmpv"
-  prepare_jre "$plat"
-  prepare_python "$plat"
- # PythonVista 解压后可能带 vcruntime；再扫一遍补进 jre/bin
-  if [[ "$plat" == "windows-x64" && -d "$OUT_ROOT/jre" ]]; then
-    patch_jre_win7_crt "$OUT_ROOT/jre"
+  local src="${KOTV_SYNO_RUNTIME_ROOT:-}"
+  case "$plat" in
+    synology-x86_64) src="${src:-$ROOT/dist/syno-runtime-x86_64}" ;;
+    synology-armv8)  src="${src:-$ROOT/dist/syno-runtime-armv8}" ;;
+    *) echo "ERROR: not a synology platform: $plat" >&2; return 1 ;;
+  esac
+  if [[ ! -d "$src" ]]; then
+    echo "ERROR: Synology Toolkit runtime missing: $src" >&2
+    echo "  先在 CI 跑 scripts/synology/build-runtime-in-chroot.sh，或设置 KOTV_SYNO_RUNTIME_ROOT" >&2
+    return 1
   fi
-  prepare_chromium "$plat"
-  prepare_ffmpeg "$plat"
-  prepare_node "$plat"
-  # bridge jar（体积变大也无所谓；缺依赖会导致爬虫全挂）
+  echo "[synology] install Toolkit runtime from $src → $OUT_ROOT"
+  rm -rf "$OUT_ROOT"
+  mkdir -p "$OUT_ROOT"
+  for comp in node python jre chromium; do
+    if [[ ! -e "$src/$comp" ]]; then
+      echo "ERROR: Toolkit runtime missing component: $src/$comp" >&2
+      return 1
+    fi
+    cp -a "$src/$comp" "$OUT_ROOT/$comp"
+  done
+  if [[ -d "$src/ffmpeg" ]]; then
+    cp -a "$src/ffmpeg" "$OUT_ROOT/ffmpeg"
+  fi
+  if [[ -f "$src/.kotv-runtime" ]]; then
+    cp -a "$src/.kotv-runtime" "$OUT_ROOT/.kotv-runtime"
+  fi
+  # 禁止误用预编译路径留下的痕迹
+  if grep -RIl 'Liberica\|chrome-for-testing\|bell-sw' "$OUT_ROOT" 2>/dev/null | head -1 | grep -q .; then
+    echo "ERROR: synology runtime must not contain prebuilt Liberica/CFT markers" >&2
+    return 1
+  fi
+}
+
+prepare_bridge_jar() {
   if [[ ! -f "$ROOT/bridge/spider-bridge.jar" ]] || [[ "$ROOT/bridge/build.sh" -nt "$ROOT/bridge/spider-bridge.jar" ]] || [[ "$ROOT/bridge/build.gradle" -nt "$ROOT/bridge/spider-bridge.jar" ]] || [[ "$ROOT/bridge/settings.gradle" -nt "$ROOT/bridge/spider-bridge.jar" ]] || [[ "$ROOT/bridge/src/main/java/com/bobo/kotv/bridge/SpiderBridge.java" -nt "$ROOT/bridge/spider-bridge.jar" ]] || [[ "$ROOT/bridge/src/main/java/com/github/catvod/utils/UiBridge.java" -nt "$ROOT/bridge/spider-bridge.jar" ]] || [[ "$ROOT/bridge/src/main/java/com/github/catvod/crawler/Spider.java" -nt "$ROOT/bridge/spider-bridge.jar" ]]; then
     echo "[bridge] building fat jar..."
     (cd "$ROOT" && ./bridge/build.sh)
@@ -937,6 +960,41 @@ prepare_one() {
     return 1
   fi
   cp "$ROOT/bridge/spider-bridge.jar" "$OUT_ROOT/bridge/"
+}
+
+prepare_one() {
+  local plat="$1"
+  echo "======== prepare runtime: $plat ========"
+  mkdir -p "$CACHE" "$OUT_ROOT"
+  # 不捆绑外部播放器可执行文件；页内 libmpv 与 fvp/mdk 同目录，不进 runtime。
+  rm -rf "$OUT_ROOT/mpv" "$OUT_ROOT/lib" "$OUT_ROOT/vlc" "$OUT_ROOT/libvlc" "$OUT_ROOT/libmpv"
+
+  case "$plat" in
+    synology-x86_64|synology-armv8)
+      prepare_synology_from_toolkit "$plat"
+      prepare_bridge_jar
+      cat > "$OUT_ROOT/.kotv-runtime" <<EOF
+platform=$plat
+prepared=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+source=${KOTV_SYNO_RUNTIME_ROOT:-dist/syno-runtime}
+EOF
+      echo "======== verifying $OUT_ROOT ========"
+      "$ROOT/scripts/verify-runtime.sh" "$OUT_ROOT" "$plat"
+      echo "======== done: $OUT_ROOT (Synology Toolkit) ========"
+      return 0
+      ;;
+  esac
+
+  prepare_jre "$plat"
+  prepare_python "$plat"
+ # PythonVista 解压后可能带 vcruntime；再扫一遍补进 jre/bin
+  if [[ "$plat" == "windows-x64" && -d "$OUT_ROOT/jre" ]]; then
+    patch_jre_win7_crt "$OUT_ROOT/jre"
+  fi
+  prepare_chromium "$plat"
+  prepare_ffmpeg "$plat"
+  prepare_node "$plat"
+  prepare_bridge_jar
   cat > "$OUT_ROOT/.kotv-runtime" <<EOF
 platform=$plat
 prepared=$(date -u +%Y-%m-%dT%H:%M:%SZ)

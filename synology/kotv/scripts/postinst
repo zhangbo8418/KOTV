@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+PACKAGE="kotv"
+PACKAGE_DIR="/var/packages/${PACKAGE}"
+TARGET="${PACKAGE_DIR}/target"
+mkdir -p "${PACKAGE_DIR}/var"
+chmod 755 "${TARGET}/kotv-engine" 2>/dev/null || true
+# 运行时二进制可执行
+find "${TARGET}/runtime" -type f \( -name 'node' -o -name 'python3' -o -name 'python' -o -name 'java' -o -name 'chrome-headless-shell' -o -name 'chrome' -o -name 'ffmpeg' \) -exec chmod 755 {} \; 2>/dev/null || true
+exit 0

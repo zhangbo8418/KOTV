@@ -65,6 +65,14 @@ case "$PLAT" in
     need_file "$RT/jre/lib/server/libjvm.so"
     need_any_file "$RT/python/bin/python3" "$RT/python/bin/python"
     ;;
+  synology-*)
+    need_file "$RT/jre/bin/java"
+    need_dir "$RT/jre/lib"
+    need_file "$RT/jre/lib/server/libjvm.so"
+    need_any_file "$RT/python/bin/python3" "$RT/python/bin/python" "$RT/python/python3"
+    need_file "$RT/node/node"
+    need_any_file "$RT/chromium/chrome-headless-shell" "$RT/chromium/chrome"
+    ;;
   *)
     die "unknown platform: $PLAT"
     ;;

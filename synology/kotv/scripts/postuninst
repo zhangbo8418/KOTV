@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+# 保留用户数据目录时不删 var；完整卸载由 DSM 处理 package 目录
+exit 0

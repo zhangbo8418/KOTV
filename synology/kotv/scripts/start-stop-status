@@ -1,0 +1,86 @@
+#!/bin/sh
+# KO影视套件启停（DSM 7 package service）
+set -eu
+
+PACKAGE="kotv"
+PACKAGE_DIR="/var/packages/${PACKAGE}"
+TARGET="${PACKAGE_DIR}/target"
+ENGINE="${TARGET}/kotv-engine"
+PID_FILE="${PACKAGE_DIR}/var/kotv-engine.pid"
+LOG_FILE="${PACKAGE_DIR}/var/kotv-engine.log"
+PORT="${KOTV_PORT:-9978}"
+
+ensure_var() {
+  mkdir -p "${PACKAGE_DIR}/var"
+}
+
+is_running() {
+  if [ -f "${PID_FILE}" ]; then
+    pid="$(cat "${PID_FILE}" 2>/dev/null || true)"
+    if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
+      return 0
+    fi
+  fi
+  return 1
+}
+
+do_start() {
+  ensure_var
+  if is_running; then
+    echo "${PACKAGE} already running"
+    exit 0
+  fi
+  if [ ! -x "${ENGINE}" ]; then
+    echo "missing engine: ${ENGINE}" >&2
+    exit 1
+  fi
+  cd "${TARGET}"
+  export KOTV_RUNTIME="${TARGET}/runtime"
+  export KOTV_WEBAPP="${TARGET}/webapp"
+  export KOTV_PORT="${PORT}"
+  # 引擎默认监听 :9978；无额外参数
+  nohup "${ENGINE}" >>"${LOG_FILE}" 2>&1 &
+  echo $! >"${PID_FILE}"
+  sleep 1
+  if ! is_running; then
+    echo "failed to start ${PACKAGE}" >&2
+    exit 1
+  fi
+  echo "started ${PACKAGE} pid=$(cat "${PID_FILE}")"
+}
+
+do_stop() {
+  if [ -f "${PID_FILE}" ]; then
+    pid="$(cat "${PID_FILE}" 2>/dev/null || true)"
+    if [ -n "${pid}" ]; then
+      kill "${pid}" 2>/dev/null || true
+      i=0
+      while [ "$i" -lt 20 ] && kill -0 "${pid}" 2>/dev/null; do
+        sleep 1
+        i=$((i + 1))
+      done
+      kill -9 "${pid}" 2>/dev/null || true
+    fi
+    rm -f "${PID_FILE}"
+  fi
+  echo "stopped ${PACKAGE}"
+}
+
+do_status() {
+  if is_running; then
+    echo "running"
+    exit 0
+  fi
+  echo "stopped"
+  exit 3
+}
+
+case "${1:-}" in
+  start) do_start ;;
+  stop) do_stop ;;
+  status) do_status ;;
+  *)
+    echo "usage: $0 {start|stop|status}" >&2
+    exit 1
+    ;;
+esac

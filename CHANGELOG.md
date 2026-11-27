@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.3.6
+
+- 新增群晖 DSM 7.2 SPK（x86_64 / armv8）：Web 引擎 + webapp，运行时 Node/Python/JRE/Chromium 由官方 Toolkit 在 CI 内编译。
+- 版本号同源升至 `0.3.6`（pubspec `0.3.6+46`）。
+
 ## v0.3.5
 
 - 桌面原生 MPV（`kotv_mpv`）：macOS underlay（vo=avfoundation）、Windows 子 HWND（vo=gpu-next）、Linux X11 wid；hwdec 由 Dart `KotvMpvOpts.hwdecValue()` 单点下发。桌面为薄宿主（轨表/排队/碟片等尚未齐；碟片导航仅 Android）。

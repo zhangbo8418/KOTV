@@ -34,6 +34,10 @@ bridge/.gradle-bootstrap/
 /runtime/
 /dist/
 .build/
+# Synology Toolkit / 运行时源码与中间构建（仅 CI）
+.toolkit/
+.syno-src-cache/
+.syno-build/
 
 # Windows resource embedding
 rsrc_windows_*.syso

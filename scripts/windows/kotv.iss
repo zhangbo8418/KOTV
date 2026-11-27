@@ -3,7 +3,7 @@
 ;   MyAppVersion, MySourceDir, MyOutputDir, MyOutputBase, MyArch (x64|arm64)
 
 #ifndef MyAppVersion
-  #define MyAppVersion "0.3.5"
+  #define MyAppVersion "0.3.6"
 #endif
 #ifndef MySourceDir
   #define MySourceDir "..\..\dist\KOTV-windows-x64"
