@@ -6,20 +6,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=kotv-release-name.sh
 source "$ROOT/scripts/kotv-release-name.sh"
-detect_platform() {
-  local os arch
-  os="$(uname -s | tr '[:upper:]' '[:lower:]')"
-  arch="$(uname -m)"
-  case "$os" in
-    darwin) [[ "$arch" == "arm64" ]] && echo "macos-arm64" || echo "macos-x64" ;;
-    linux)  [[ "$arch" == "aarch64" || "$arch" == "arm64" ]] && echo "linux-arm64" || echo "linux-x64" ;;
-    mingw*|msys*|cygwin*)
-      [[ "$arch" == "aarch64" || "$arch" == "arm64" ]] && echo "windows-arm64" || echo "windows-x64"
-      ;;
-  esac
-}
+# shellcheck source=kotv-win-build-env.sh
+source "$ROOT/scripts/kotv-win-build-env.sh"
 
-PLAT="${1:-$(detect_platform)}"
+PLAT="${1:-$(kotv_detect_host_plat)}"
 DIST="$ROOT/dist/KOTV-$PLAT"
 RUNTIME_SRC="$ROOT/runtime"
 # 版本号：KOTV_VERSION / VERSION 优先，否则读 pubspec。
@@ -90,29 +80,8 @@ if [[ "$PLAT" == "windows-x64" ]]; then
   fi
 fi
 
-# Windows ARM64：必须用 aarch64 工具链（llvm-mingw）。x86_64 gcc 会在 runtime/cgo 的 gcc_arm64.S 报错。
 if [[ "$PLAT" == "windows-arm64" ]]; then
-  if [[ -z "${CC:-}" ]]; then
-    if command -v aarch64-w64-mingw32-clang >/dev/null 2>&1; then
-      export CC=aarch64-w64-mingw32-clang
-      export CXX="${CXX:-aarch64-w64-mingw32-clang++}"
-    elif command -v clang >/dev/null 2>&1; then
-      export CC=clang
-      export CXX="${CXX:-clang++}"
-    fi
-  fi
-  export CGO_CFLAGS="${CGO_CFLAGS:--O2}"
-  export CGO_CXXFLAGS="${CGO_CXXFLAGS:--O2}"
-  echo "[cgo] Windows ARM64 flags: CC=${CC:-} CXX=${CXX:-}"
-  if [[ -z "${CC:-}" ]] || ! command -v "$CC" >/dev/null 2>&1; then
-    echo "ERROR: windows-arm64 需要 aarch64-w64-mingw32-clang（llvm-mingw），不能用 x86_64 gcc" >&2
-    exit 1
-  fi
-  # 粗检：若 CC 是 gcc 且 --version 像 x86_64，基本会炸
-  if "$CC" --version 2>&1 | head -5 | grep -qiE 'x86_64-w64-mingw32|Target: x86_64'; then
-    echo "ERROR: CC=$CC 看起来是 x86_64 工具链，无法编译 windows/arm64 CGO" >&2
-    exit 1
-  fi
+  kotv_windows_export_cgo_arm64 || exit 1
 fi
 
 # Windows：嵌入 .ico 到 exe（Explorer / 任务栏）

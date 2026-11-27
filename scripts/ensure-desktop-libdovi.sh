@@ -206,11 +206,7 @@ ensure_cargo_c() {
 
 rust_target() {
   if kotv_is_windows_build; then
-    if kotv_windows_is_arm64; then
-      echo "aarch64-pc-windows-gnu"
-    else
-      echo "x86_64-pc-windows-gnu"
-    fi
+    kotv_windows_rust_gnu_target
     return
   fi
   if [[ "$(uname -s)" == "Darwin" ]]; then
@@ -280,13 +276,15 @@ if kotv_is_windows_build; then
     rustup target add x86_64-pc-windows-gnu --toolchain "$local_tc" >/dev/null 2>&1 || true
     export RUSTUP_TOOLCHAIN="$local_tc"
   elif kotv_windows_is_arm64; then
-    rustup toolchain install stable-aarch64-pc-windows-gnu >/dev/null 2>&1 \
+    _rt="$(kotv_windows_rust_gnu_target)"
+    rustup toolchain install "stable-${_rt}" >/dev/null 2>&1 \
       || rustup toolchain install stable >/dev/null 2>&1 || true
-    rustup target add aarch64-pc-windows-gnu >/dev/null 2>&1 || true
-    export RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-stable-aarch64-pc-windows-gnu}"
+    rustup target add "$_rt" >/dev/null 2>&1 || true
+    export RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-stable-${_rt}}"
   else
-    rustup toolchain install stable-x86_64-pc-windows-gnu >/dev/null 2>&1 || true
-    export RUSTUP_TOOLCHAIN=stable-x86_64-pc-windows-gnu
+    _rt="$(kotv_windows_rust_gnu_target)"
+    rustup toolchain install "stable-${_rt}" >/dev/null 2>&1 || true
+    export RUSTUP_TOOLCHAIN="stable-${_rt}"
   fi
   cleaned=""
   old_ifs="$IFS"
@@ -300,41 +298,8 @@ if kotv_is_windows_build; then
   done
   IFS="$old_ifs"
   export PATH="$cleaned"
-  if kotv_windows_is_arm64; then
-    if command -v aarch64-w64-mingw32-gcc >/dev/null 2>&1; then
-      export CC=aarch64-w64-mingw32-gcc
-      export CXX=aarch64-w64-mingw32-g++
-      export AR=aarch64-w64-mingw32-ar
-    elif command -v aarch64-w64-mingw32-clang >/dev/null 2>&1; then
-      export CC=aarch64-w64-mingw32-clang
-      export CXX=aarch64-w64-mingw32-clang++
-      export AR=aarch64-w64-mingw32-ar
-    elif command -v gcc >/dev/null 2>&1; then
-      export CC=gcc
-      export CXX=g++
-      export AR=ar
-    fi
-    export CC_aarch64_pc_windows_gnu="${CC}"
-    export CXX_aarch64_pc_windows_gnu="${CXX}"
-    export AR_aarch64_pc_windows_gnu="${AR}"
-    export CARGO_TARGET_AARCH64_PC_WINDOWS_GNU_LINKER="${CC}"
-    export CARGO_BUILD_TARGET=aarch64-pc-windows-gnu
-  else
-    if command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1; then
-      export CC=x86_64-w64-mingw32-gcc
-      export CXX=x86_64-w64-mingw32-g++
-      export AR=x86_64-w64-mingw32-ar
-    elif command -v gcc >/dev/null 2>&1; then
-      export CC=gcc
-      export CXX=g++
-      export AR=ar
-    fi
-    export CC_x86_64_pc_windows_gnu="${CC}"
-    export CXX_x86_64_pc_windows_gnu="${CXX}"
-    export AR_x86_64_pc_windows_gnu="${AR}"
-    export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER="${CC}"
-    export CARGO_BUILD_TARGET=x86_64-pc-windows-gnu
-  fi
+  kotv_windows_prefer_msvcrt_mingw
+  kotv_windows_export_cargo_gnu
 elif [[ "$(uname -s)" == "Darwin" ]]; then
   rustup target add "$TARGET" >/dev/null 2>&1 || true
   local_arch="$(uname -m)"

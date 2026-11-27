@@ -10,10 +10,11 @@ kotv_is_windows_build() {
   [[ "${OS:-}" == "Windows_NT" ]]
 }
 
-# Windows ARM64：MINGW64 下 uname -m 常谎报 x86_64，需看 OS 串 / PROCESSOR / CC dumpmachine。
+# Windows ARM64：MINGW64 下 uname -m 常谎报 x86_64；以 OS 串 / PROCESSOR_* 为准。
+# 不用 CC -dumpmachine：PATH 上的 gcc 可能仍是 x86_64，会误判宿主架构。
 kotv_windows_is_arm64() {
   kotv_is_windows_build || return 1
-  local os m pa pa64 dump
+  local os m pa pa64
   os="$(uname -s 2>/dev/null || true)"
   m="$(uname -m 2>/dev/null || true)"
   pa="${PROCESSOR_ARCHITECTURE:-}"
@@ -21,9 +22,136 @@ kotv_windows_is_arm64() {
   case "$m" in ARM64|arm64|aarch64) return 0 ;; esac
   [[ "$os" == *ARM64* || "$os" == *aarch64* ]] && return 0
   [[ "$pa" == "ARM64" || "$pa64" == "ARM64" ]] && return 0
-  dump="$("${CC:-gcc}" -dumpmachine 2>/dev/null || true)"
-  [[ "$dump" == aarch64* || "$dump" == arm64* ]] && return 0
   return 1
+}
+
+# windows-arm64 | windows-x64
+kotv_windows_plat() {
+  if kotv_windows_is_arm64; then echo windows-arm64; else echo windows-x64; fi
+}
+
+# 本机发行平台标签（darwin/linux/windows）。Windows 走 kotv_windows_plat。
+kotv_detect_host_plat() {
+  local os m
+  os="$(uname -s 2>/dev/null | tr '[:upper:]' '[:lower:]')"
+  m="$(uname -m 2>/dev/null || true)"
+  case "$os" in
+    darwin)
+      [[ "$m" == "arm64" ]] && echo macos-arm64 || echo macos-x64
+      ;;
+    linux)
+      [[ "$m" == "aarch64" || "$m" == "arm64" ]] && echo linux-arm64 || echo linux-x64
+      ;;
+    mingw*|msys*|cygwin*)
+      kotv_windows_plat
+      ;;
+    *)
+      echo "unsupported OS: $os" >&2
+      return 1
+      ;;
+  esac
+}
+
+# MinGW 三元组：aarch64-w64-mingw32 | x86_64-w64-mingw32
+kotv_windows_triplet() {
+  if kotv_windows_is_arm64; then echo aarch64-w64-mingw32; else echo x86_64-w64-mingw32; fi
+}
+
+# Rust gnu target：aarch64-pc-windows-gnu | x86_64-pc-windows-gnu
+kotv_windows_rust_gnu_target() {
+  if kotv_windows_is_arm64; then echo aarch64-pc-windows-gnu; else echo x86_64-pc-windows-gnu; fi
+}
+
+# OpenSSL Configure 目标：mingwarm64 | mingw64
+kotv_windows_openssl_target() {
+  if kotv_windows_is_arm64; then echo mingwarm64; else echo mingw64; fi
+}
+
+# LunarG Vulkan SDK 安装器架构段：ARM64 | X64
+kotv_windows_vulkan_arch() {
+  if kotv_windows_is_arm64; then echo ARM64; else echo X64; fi
+}
+
+# x86_64 才把 mingw-msvcrt 前置；arm64 保留 PATH 上的 llvm-mingw，避免抢成 x86_64 gcc。
+kotv_windows_prefer_msvcrt_mingw() {
+  kotv_is_windows_build || return 0
+  kotv_windows_is_arm64 && return 0
+  [[ -d "/c/mingw-msvcrt/mingw64/bin" ]] || return 0
+  export PATH="/c/mingw-msvcrt/mingw64/bin:$PATH"
+}
+
+# 导出 Windows 本机 C/C++ 工具链（ffmpeg / mpv / codecs 等）。
+# arm64 优先 llvm-mingw 前缀；x86_64 优先 x86_64-w64-mingw32-* 或裸 gcc。
+kotv_windows_export_cc() {
+  kotv_is_windows_build || return 0
+  local t
+  t="$(kotv_windows_triplet)"
+  if kotv_windows_is_arm64; then
+    if command -v "${t}-clang" >/dev/null 2>&1; then
+      export CC="${CC:-${t}-clang}"
+      export CXX="${CXX:-${t}-clang++}"
+    elif command -v "${t}-gcc" >/dev/null 2>&1; then
+      export CC="${CC:-${t}-gcc}"
+      export CXX="${CXX:-${t}-g++}"
+    else
+      export CC="${CC:-gcc}"
+      export CXX="${CXX:-g++}"
+    fi
+    command -v "${t}-ar" >/dev/null 2>&1 && export AR="${AR:-${t}-ar}"
+  else
+    if command -v "${t}-gcc" >/dev/null 2>&1; then
+      export CC="${CC:-${t}-gcc}"
+      export CXX="${CXX:-${t}-g++}"
+      command -v "${t}-ar" >/dev/null 2>&1 && export AR="${AR:-${t}-ar}"
+    else
+      export CC="${CC:-gcc}"
+      export CXX="${CXX:-g++}"
+    fi
+  fi
+}
+
+# Go CGO（windows/arm64）：必须用 aarch64-w64-mingw32-clang；x86_64 gcc 会在 gcc_arm64.S 失败。
+kotv_windows_export_cgo_arm64() {
+  if command -v aarch64-w64-mingw32-clang >/dev/null 2>&1; then
+    export CC=aarch64-w64-mingw32-clang
+    export CXX="${CXX:-aarch64-w64-mingw32-clang++}"
+  fi
+  if [[ -z "${CC:-}" ]] || ! command -v "${CC}" >/dev/null 2>&1; then
+    echo "ERROR: windows-arm64 CGO 需要 aarch64-w64-mingw32-clang（llvm-mingw）" >&2
+    return 1
+  fi
+  if "$CC" --version 2>&1 | head -5 | grep -qiE 'x86_64-w64-mingw32|Target: x86_64'; then
+    echo "ERROR: CC=$CC 是 x86_64 工具链，无法编 windows/arm64 CGO" >&2
+    return 1
+  fi
+  export CGO_CFLAGS="${CGO_CFLAGS:--O2}"
+  export CGO_CXXFLAGS="${CGO_CXXFLAGS:--O2}"
+  echo "[cgo] windows-arm64 CC=$CC CXX=${CXX:-}"
+}
+
+# Cargo/cargo-c：为当前 Windows arch 设置 gnu target 与 linker 环境变量。
+kotv_windows_export_cargo_gnu() {
+  kotv_is_windows_build || return 0
+  local target key upper
+  target="$(kotv_windows_rust_gnu_target)"
+  kotv_windows_export_cc
+  key="${target//-/_}"
+  export "CC_${key}=${CC}"
+  export "CXX_${key}=${CXX}"
+  export "AR_${key}=${AR:-ar}"
+  upper="$(printf '%s' "$target" | tr '[:lower:]-' '[:upper:]_')"
+  export "CARGO_TARGET_${upper}_LINKER=${CC}"
+  export CARGO_BUILD_TARGET="$target"
+}
+
+# FFmpeg configure 的 Windows --target-os / --arch（逐行输出，供 mapfile / while read）。
+kotv_windows_ffmpeg_arch_args() {
+  if kotv_windows_is_arm64; then
+    # 显式 aarch64：否则 MINGW64 谎报时会开 x86 emms/nasm。
+    printf '%s\n' --target-os=mingw32 --arch=aarch64 --disable-x86asm
+  else
+    printf '%s\n' --target-os=mingw64 --arch=x86_64
+  fi
 }
 
 # macOS 应用的最低系统版本：取 Xcode 工程里的 MACOSX_DEPLOYMENT_TARGET（随包 dylib 须不高于它）。
@@ -159,7 +287,12 @@ kotv_clean_win_path() {
   if [[ -n "$root_bin" ]]; then
     kotv_ensure_win_cmake_wrappers "$root_bin"
   fi
-  export PATH="/c/mingw-msvcrt/mingw64/bin:/usr/bin:/bin:${PATH:-}"
+  # arm64：勿前置 x86_64 mingw-msvcrt，保留 llvm-mingw。
+  if kotv_windows_is_arm64; then
+    export PATH="/usr/bin:/bin:${PATH:-}"
+  else
+    export PATH="/c/mingw-msvcrt/mingw64/bin:/usr/bin:/bin:${PATH:-}"
+  fi
   if [[ -n "$root_bin" ]]; then
     export PATH="$root_bin:$PATH"
   fi
@@ -172,12 +305,12 @@ kotv_clean_win_path() {
     [[ -z "$cleaned" ]] && cleaned="$part" || cleaned="$cleaned:$part"
   done
   export PATH="$cleaned"
-  export CC="${CC:-gcc}" CXX="${CXX:-g++}"
+  kotv_windows_export_cc
   export CFLAGS="${CFLAGS:-} $(kotv_win7_cflags)"
   export CXXFLAGS="${CXXFLAGS:-} $(kotv_win7_cflags)"
   if ! command -v cmake >/dev/null 2>&1; then
     echo "ERROR: cmake not found after PATH clean (need Program Files CMake wrapper)" >&2
     exit 1
   fi
-  echo "ok win PATH cleaned; cmake=$(command -v cmake)"
+  echo "ok win PATH cleaned; cmake=$(command -v cmake) CC=${CC:-}"
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 校验桌面 libmpv 含 Vulkan + AV3A（源码编 FongMi）。
+# 校验桌面 libmpv 含 Vulkan + AV3A（源码自编）。
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ASSET="$ROOT/flutter/assets/mpv-libs"

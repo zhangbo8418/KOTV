@@ -1144,7 +1144,7 @@ ensure_windows_lua() {
     return
   fi
   need curl
-  # 钉 5.2.4：FongMi/mpv meson 只认 LuaJIT / Lua 5.1–5.2（lua.pc <5.3）；
+  # 钉 5.2.4：所用 mpv meson 只认 LuaJIT / Lua 5.1–5.2（lua.pc <5.3）；
   # player/lua.c 亦拒绝其它主版本。5.2 系列止于 5.2.4，无更新的 5.2.x。
   local ver="${KOTV_LUA_VERSION:-5.2.4}"
   local src="lua-${ver}"
@@ -1674,22 +1674,10 @@ build_mpv_windows() {
   need meson
   need ninja
   need git
-  # arm64：沿用 PATH 上的 llvm-mingw；勿把 x86_64 mingw-msvcrt 抢到前面。
-  if ! kotv_windows_is_arm64 && [[ -d "/c/mingw-msvcrt/mingw64/bin" ]]; then
-    export PATH="/c/mingw-msvcrt/mingw64/bin:$PATH"
-  fi
+  kotv_windows_prefer_msvcrt_mingw
+  kotv_windows_export_cc
   if kotv_windows_is_arm64; then
-    if command -v aarch64-w64-mingw32-clang >/dev/null 2>&1; then
-      export CC="${CC:-aarch64-w64-mingw32-clang}"
-      export CXX="${CXX:-aarch64-w64-mingw32-clang++}"
-    else
-      export CC="${CC:-gcc}"
-      export CXX="${CXX:-g++}"
-    fi
     echo "==> mpv Windows aarch64 CC=$CC"
-  else
-    export CC="${CC:-gcc}"
-    export CXX="${CXX:-g++}"
   fi
   if [[ "$AV3A" == "1" ]]; then
     "$ROOT/scripts/build-desktop-ffmpeg-av3a-prefix.sh"

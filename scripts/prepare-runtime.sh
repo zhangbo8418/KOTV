@@ -6,6 +6,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=kotv-win-build-env.sh
+source "$ROOT/scripts/kotv-win-build-env.sh"
 CACHE="$ROOT/.runtime-cache"
 OUT_ROOT="$ROOT/runtime"
 
@@ -21,24 +23,7 @@ NODE_WIN7_VER="v18.20.2"
 NODE_WIN7_REPO="Alex313031/node18-win7"
 
 detect_platform() {
-  local os arch
-  os="$(uname -s | tr '[:upper:]' '[:lower:]')"
-  arch="$(uname -m)"
-  case "$os" in
-    darwin)
-      [[ "$arch" == "arm64" ]] && echo "macos-arm64" || echo "macos-x64"
-      ;;
-    linux)
-      [[ "$arch" == "aarch64" || "$arch" == "arm64" ]] && echo "linux-arm64" || echo "linux-x64"
-      ;;
-    mingw*|msys*|cygwin*)
-      [[ "$arch" == "aarch64" || "$arch" == "arm64" ]] && echo "windows-arm64" || echo "windows-x64"
-      ;;
- *)
-      echo "unsupported OS: $os" >&2
-      exit 1
-      ;;
-  esac
+  kotv_detect_host_plat || exit 1
 }
 
 # Actions / 本机 gh 登录后可用；带 token 可避开 GitHub API 匿名 60/h 限流。

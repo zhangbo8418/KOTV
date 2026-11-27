@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 桌面 FFmpeg 前缀：FongMi FFmpeg 9 + dependency/avs3a（libarcdav3a / AV3A）。
+# 桌面 FFmpeg 前缀：release-9.1-fongmi + dependency/avs3a（libarcdav3a / AV3A）。
 # 支持 Linux / macOS / Windows(GitHub Actions MinGW)。
 set -euo pipefail
 
@@ -24,10 +24,8 @@ echo "ok FFmpeg ${FFMPEG_COMMIT:0:12} (ref=${FFMPEG_REF})"
 # gcc / FFmpeg 在 Windows 上更吃 D:/ 路径；MSYS 绝对路径 /d/ 偶发链接探测失败。
 
 if kotv_is_windows_build; then
-  # x86_64 Win7 线才优先 mingw-msvcrt；arm64 用 PATH 上的 llvm-mingw，勿抢成 x86_64 gcc。
-  if ! kotv_windows_is_arm64 && [[ -d "/c/mingw-msvcrt/mingw64/bin" ]]; then
-    export PATH="/c/mingw-msvcrt/mingw64/bin:$PATH"
-  fi
+  kotv_windows_prefer_msvcrt_mingw
+  kotv_windows_export_cc
   export PATH="/c/Program Files/NASM:/c/ProgramData/chocolatey/bin:$PATH"
   # 避开坏掉的 Strawberry Perl pkg-config，优先 Git/MSYS 与我们的包装器
   export PATH="/usr/bin:$PATH"
@@ -247,9 +245,9 @@ KOTV_MPV_BUILD_DIR="$BUILD_DIR" KOTV_DESKTOP_FFMPEG_PREFIX="$PREFIX" \
 export PKG_CONFIG_PATH="$(kotv_native_path "$PREFIX/lib/pkgconfig")${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 
 [[ -f ffmpeg/dependency/avs3a/CMakeLists.txt ]] \
-  || { echo "ERROR: missing ffmpeg/dependency/avs3a (wrong FongMi/FFmpeg commit?)" >&2; exit 1; }
+  || { echo "ERROR: missing ffmpeg/dependency/avs3a (wrong FFmpeg commit/ref?)" >&2; exit 1; }
 grep -q -- '--enable-libarcdav3a' ffmpeg/configure \
-  || { echo "ERROR: FongMi FFmpeg lacks --enable-libarcdav3a" >&2; exit 1; }
+  || { echo "ERROR: FFmpeg tree lacks --enable-libarcdav3a" >&2; exit 1; }
 
 echo "==> cmake arcdav3a (libarcdav3a, PIC) generator=$CMAKE_GENERATOR"
 rm -rf arcdav3a-build
@@ -333,7 +331,7 @@ PROBE
   if command -v perl >/dev/null 2>&1; then
     perl -i.bak -pe "s#enabled libarcdav3a\\s+&& require_pkg_config libarcdav3a .*#${cfg_line}#" configure
     # dav1d / libxml2 / libaribcaption：Windows pkg-config 探测不稳（Requires.private / 头路径）。
-    # libxml：FongMi 探测头 libxml2/libxml/... + 源码 libxml/...，两个 -I 都要。
+    # libxml：上游探测头 libxml2/libxml/... + 源码 libxml/...，两个 -I 都要。
     perl -i -pe "s#enabled libdav1d\\s+&& require_pkg_config libdav1d .*#enabled libdav1d \&\& enable libdav1d \&\& add_cflags -I${PREF_NATIVE}/include \&\& add_extralibs -L${PREF_NATIVE}/lib -ldav1d#" configure
     perl -i -pe "s#enabled libxml2\\s+&& require_pkg_config libxml2 .*#enabled libxml2 \&\& enable libxml2 \&\& add_cflags -I${PREF_NATIVE}/include -I${PREF_NATIVE}/include/libxml2 -DLIBXML_STATIC \&\& add_extralibs -L${PREF_NATIVE}/lib -lxml2 -lz -llzma#" configure
     perl -i -pe "s#enabled libaribcaption\\s+&& require_pkg_config libaribcaption .*#enabled libaribcaption \&\& enable libaribcaption \&\& add_cflags -I${PREF_NATIVE}/include \&\& add_extralibs -L${PREF_NATIVE}/lib -laribcaption -lstdc++ -ld2d1 -ldwrite -lole32 -luuid#" configure
@@ -344,7 +342,7 @@ PROBE
 fi
 
 # HTTPS/302：Win=Schannel；Linux=OpenSSL；macOS=SecureTransport。
-# RTSP/RTMP：FFmpeg 内置。HTTP/2·HTTP/3：FongMi FFmpeg 无 --enable-libnghttp2，由 mpv libcurl 栈提供。
+# RTSP/RTMP：FFmpeg 内置。HTTP/2·HTTP/3：此树无 --enable-libnghttp2，由 mpv libcurl 栈提供。
 setup_pkg_config
 
 # FFmpeg configure 会把 --extra-ldflags/--extra-libs 用在最早的 cc 探测上；
@@ -362,13 +360,11 @@ FFMPEG_EXTRA+=(--enable-libdav1d)
 FFMPEG_EXTRA+=(--enable-libxml2)
 FFMPEG_EXTRA+=(--enable-libaribcaption)
 if kotv_is_windows_build; then
+  while IFS= read -r _ff_arg; do
+    [[ -n "$_ff_arg" ]] && FFMPEG_EXTRA+=("$_ff_arg")
+  done < <(kotv_windows_ffmpeg_arch_args)
   if kotv_windows_is_arm64; then
-    # MINGW64 谎报 x86_64 时，若不显式 --arch=aarch64，会开 x86 emms/nasm 却用 aarch64 clang。
-    echo "==> FFmpeg Windows aarch64 (llvm-mingw)"
-    FFMPEG_EXTRA+=(--target-os=mingw32 --arch=aarch64)
-    FFMPEG_EXTRA+=(--disable-x86asm --disable-inline-asm)
-  else
-    FFMPEG_EXTRA+=(--target-os=mingw64 --arch=x86_64)
+    echo "==> FFmpeg Windows aarch64 CC=${CC:-}"
   fi
   FFMPEG_EXTRA+=(--pkg-config="$PKG_BIN/pkg-config")
   # 勿对 FFmpeg 全局 -D_WIN32_WINNT=0x0601：mf_utils 会缺 Win8+ 符号而编不过。

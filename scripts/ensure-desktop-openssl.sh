@@ -359,7 +359,8 @@ need tar
 need make
 if kotv_is_windows_build; then
   kotv_clean_win_path "$BUILD_DIR/bin"
-  need gcc
+  # arm64 常为 llvm-mingw clang；x86_64 为 gcc。以 CC 为准。
+  command -v "${CC:-gcc}" >/dev/null || { echo "need ${CC:-gcc}" >&2; exit 1; }
   MAKE="${KOTV_MAKE:-mingw32-make}"
   command -v "$MAKE" >/dev/null || MAKE=make
   ensure_openssl_perl
@@ -393,12 +394,9 @@ cfg_args=(--prefix="$pref" --libdir=lib shared no-docs no-tests enable-quic)
 if kotv_is_windows_build; then
   export CFLAGS="${WIN7_CFLAGS} ${CFLAGS:-}"
   export CXXFLAGS="${WIN7_CFLAGS} ${CXXFLAGS:-}"
-  if kotv_windows_is_arm64; then
-    echo "==> OpenSSL Configure mingwarm64"
-    "$PERL" ./Configure mingwarm64 "${cfg_args[@]}"
-  else
-    "$PERL" ./Configure mingw64 "${cfg_args[@]}"
-  fi
+  _ssl_tgt="$(kotv_windows_openssl_target)"
+  echo "==> OpenSSL Configure ${_ssl_tgt} CC=${CC:-}"
+  "$PERL" ./Configure "$_ssl_tgt" "${cfg_args[@]}"
 elif [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
   local_arch="$(kotv_macos_target_arch)"
   export CFLAGS="-arch ${local_arch} ${CFLAGS:-}"

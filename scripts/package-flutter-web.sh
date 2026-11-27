@@ -6,21 +6,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=kotv-release-name.sh
 source "$ROOT/scripts/kotv-release-name.sh"
+# shellcheck source=kotv-win-build-env.sh
+source "$ROOT/scripts/kotv-win-build-env.sh"
 
-detect_platform() {
-  local os arch
-  os="$(uname -s | tr '[:upper:]' '[:lower:]')"
-  arch="$(uname -m)"
-  case "$os" in
-    darwin) [[ "$arch" == "arm64" ]] && echo "macos-arm64" || echo "macos-x64" ;;
-    linux)  [[ "$arch" == "aarch64" || "$arch" == "arm64" ]] && echo "linux-arm64" || echo "linux-x64" ;;
-    mingw*|msys*|cygwin*)
-      [[ "$arch" == "aarch64" || "$arch" == "arm64" ]] && echo "windows-arm64" || echo "windows-x64"
-      ;;
-  esac
-}
-
-PLAT="${1:-$(detect_platform)}"
+PLAT="${1:-$(kotv_detect_host_plat)}"
 VERSION="$(kotv_release_version "$ROOT/flutter/pubspec.yaml")"
 kotv_check_version_literals "$VERSION"
 DIST="$ROOT/dist/KOTV-web-$PLAT"
@@ -69,6 +58,9 @@ if [[ "$GOOS" == "linux" ]]; then
   "$ROOT/scripts/build-engine-static-linux.sh" "$DIST/$BIN" "$GOARCH"
   ENGINE_NOTE="musl 全静态（不依赖宿主 glibc）"
 elif [[ "$GOOS" == "windows" ]]; then
+  if [[ "$PLAT" == "windows-arm64" ]]; then
+    kotv_windows_export_cgo_arm64 || exit 1
+  fi
   (cd "$ROOT" && CGO_ENABLED=1 go build -ldflags "-s -w ${VER_LD}" -o "$DIST/$BIN" ./cmd/engine)
 else
   # macOS：无法真正全静态，接受系统库

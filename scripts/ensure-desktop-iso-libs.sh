@@ -134,8 +134,8 @@ EOF
 ensure_pkg_config
 
 iso_fongmi_apis_ok() {
-  # FongMi/mpv meson requires these symbols; stock VideoLAN tarballs lack them
-  # until we inject kotv-iso-fongmi-compat into the static archives + headers.
+  # 本仓库所用 mpv tip 需要这些符号；VideoLAN 正式包尚未提供，
+  # 由 kotv-iso-fongmi-compat 注入静态库与头文件。
   local hdr_dvd="$PREFIX/include/dvdnav/dvdnav.h"
   local hdr_layout="$PREFIX/include/dvdnav/title_layout.h"
   local hdr_bd="$PREFIX/include/libbluray/bluray.h"
@@ -163,7 +163,7 @@ iso_fongmi_apis_ok() {
 
 if [[ -f "$STAMP" && -f "$PREFIX/lib/pkgconfig/libbluray.pc" && -f "$PREFIX/lib/pkgconfig/dvdnav.pc" && -f "$PREFIX/lib/pkgconfig/dvdread.pc" ]] \
   && iso_fongmi_apis_ok; then
-  echo "ok cached ISO libs (libbluray $BLURAY_VER, dvdnav $DVDNAV_VER + FongMi/mpv API compat)"
+  echo "ok cached ISO libs (libbluray $BLURAY_VER, dvdnav $DVDNAV_VER + mpv tip API compat)"
   exit 0
 fi
 
@@ -279,8 +279,7 @@ pc() {
   fi
 }
 
-# FongMi/mpv tip calls APIs that VideoLAN has not released yet. Keep DVD/Blu-ray
-# enabled by grafting thin wrappers onto our static prefix libraries + headers.
+# 所用 mpv tip 调用了 VideoLAN 尚未发布的 API；往静态前缀库/头文件嫁接薄封装以保留 DVD/蓝光。
 install_fongmi_iso_compat() {
   local cc="${CC:-cc}"
   local cflags=()
@@ -309,10 +308,10 @@ p = Path(sys.argv[1])
 t = p.read_text(encoding="utf-8")
 marker = "KOTV_FONGMI_DVDNAV_COMPAT"
 if marker in t:
-    print("ok dvdnav.h already has FongMi/mpv compat decls")
+    print("ok dvdnav.h already has mpv tip compat decls")
     raise SystemExit(0)
 block = f"""
-/* {marker}: FongMi/mpv requires these before VideoLAN ships them. */
+/* {marker}: symbols required by our mpv tip before VideoLAN ships them. */
 #ifndef DVDNAV_HAVE_TIME_SEARCH_FLOOR
 #define DVDNAV_HAVE_TIME_SEARCH_FLOOR 1
 #endif
@@ -326,7 +325,7 @@ if needle in t:
 else:
     t = t.rstrip() + "\n" + block
 p.write_text(t, encoding="utf-8")
-print("ok patched dvdnav.h for FongMi/mpv APIs")
+print("ok patched dvdnav.h for mpv tip APIs")
 PY
 
   python3 - "$PREFIX/include/libbluray/bluray.h" <<'PY'
@@ -336,10 +335,10 @@ p = Path(sys.argv[1])
 t = p.read_text(encoding="utf-8")
 marker = "KOTV_FONGMI_BLURAY_COMPAT"
 if marker in t:
-    print("ok bluray.h already has FongMi/mpv compat decls")
+    print("ok bluray.h already has mpv tip compat decls")
     raise SystemExit(0)
 block = f"""
-/* {marker}: FongMi/mpv requires these before VideoLAN ships them. */
+/* {marker}: symbols required by our mpv tip before VideoLAN ships them. */
 BD_PUBLIC int bd_seek_time_checked(BLURAY *bd, uint64_t tick);
 BD_PUBLIC uint32_t bd_get_titles_with_menu_info(BLURAY *bd, uint8_t flags,
                                                  uint32_t min_title_length,
@@ -351,15 +350,15 @@ if needle in t:
 else:
     t = t.rstrip() + "\n" + block
 p.write_text(t, encoding="utf-8")
-print("ok patched bluray.h for FongMi/mpv APIs")
+print("ok patched bluray.h for mpv tip APIs")
 PY
 }
 
 install_fongmi_iso_compat
-iso_fongmi_apis_ok || { echo "ERROR: FongMi/mpv ISO API compat missing after install" >&2; exit 1; }
+iso_fongmi_apis_ok || { echo "ERROR: mpv tip ISO API compat missing after install" >&2; exit 1; }
 
 pc --exists dvdread
 pc --exists dvdnav
 pc --exists libbluray
-echo "iso-libs ${DVDREAD_VER}/${DVDNAV_VER}/${BLURAY_VER} + fongmi-compat" >"$STAMP"
-echo "ok ISO libs: dvdread $(pc --modversion dvdread) dvdnav $(pc --modversion dvdnav) libbluray $(pc --modversion libbluray) (FongMi/mpv API compat)"
+echo "iso-libs ${DVDREAD_VER}/${DVDNAV_VER}/${BLURAY_VER} + mpv-tip-compat" >"$STAMP"
+echo "ok ISO libs: dvdread $(pc --modversion dvdread) dvdnav $(pc --modversion dvdnav) libbluray $(pc --modversion libbluray) (mpv tip API compat)"

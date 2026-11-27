@@ -3,6 +3,10 @@
 # choco community feed 偶发 504；失败后直下 LunarG 安装器静默安装。
 set -euo pipefail
 
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=kotv-win-build-env.sh
+source "$ROOT/scripts/kotv-win-build-env.sh"
+
 SDK_VER="${KOTV_VULKAN_SDK_VERSION:-1.4.363.1}"
 SDK_ROOT="/c/VulkanSDK/${SDK_VER}"
 SDK_ROOT_WIN="C:\\VulkanSDK\\${SDK_VER}"
@@ -62,13 +66,6 @@ kotv_choco_install_vulkan_sdk() {
     sleep $((i * 5))
   done
   return 1
-}
-
-kotv_windows_vulkan_arch() {
-  case "$(uname -m 2>/dev/null || true)" in
-    ARM64|arm64|aarch64) echo "ARM64" ;;
-    *) echo "X64" ;;
-  esac
 }
 
 kotv_lunarg_install_vulkan_sdk() {
