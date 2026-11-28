@@ -158,7 +158,7 @@ kotv_syno_assert_static_engine() {
       echo "engine static OK: $info"
       ;;
     *)
-      # 部分 file 版本对 musl 静态只报 ELF，再用 ldd / readelf 兜底
+      # 部分 file 版本对静态 ELF 只报通用类型，再用 ldd / readelf 兜底
       if command -v ldd >/dev/null 2>&1 && ldd "$eng" >/dev/null 2>&1; then
         echo "ERROR: ldd resolved deps; not fully static: $info" >&2
         ldd "$eng" >&2 || true
