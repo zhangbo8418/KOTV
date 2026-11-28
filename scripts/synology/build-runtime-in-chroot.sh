@@ -4,7 +4,7 @@
 # 产出: dist/syno-runtime-{x86_64|armv8}/
 #
 # Node/Python/JRE/ffmpeg：Toolkit GCC + .syno-deps overlay（禁止宿主 /usr）
-# Chromium：Clang 仅作编译器；目标 ABI = Toolkit sysroot（自编补齐 dri/xkbcommon/libdrm）+ headless.gn
+# Chromium：Clang + 官方 hermetic Debian sysroot（glibc 2.31 ≤ DSM 2.36）+ headless.gn
 # CI：KOTV_SYNO_COMPONENTS=<一个组件>
 set -euo pipefail
 
@@ -135,7 +135,7 @@ build_node() {
   mkdir -p "$BUILD_ROOT"
   tar -xzf "$tarball" -C "$BUILD_ROOT"
   cd "$src"
-  # --shared-* 显式指向 Toolkit overlay，不走宿主 /usr
+  # --shared-* 指向 Toolkit overlay；brotli 用树内（1.1.0 缺 Node 22 所需 BLOCK_SWITCH 常量）
   local cfg=(
     --prefix=/opt/kotv-node
     --without-npm
@@ -147,9 +147,6 @@ build_node() {
     --shared-zlib
     --shared-zlib-includes="$deps/include"
     --shared-zlib-libpath="$deps/lib"
-    --shared-brotli
-    --shared-brotli-includes="$deps/include"
-    --shared-brotli-libpath="$deps/lib"
     --shared-cares
     --shared-cares-includes="$deps/include"
     --shared-cares-libpath="$deps/lib"
@@ -157,9 +154,13 @@ build_node() {
     --shared-nghttp2-includes="$deps/include"
     --shared-nghttp2-libpath="$deps/lib"
   )
-  local host_cc host_cxx
+  local host_cc host_cxx target_ldflags target_cppflags
   host_cc="${CC_host:-gcc}"
   host_cxx="${CXX_host:-g++}"
+  target_ldflags="${LDFLAGS:-}"
+  target_cppflags="${CPPFLAGS:-}"
+  # 交叉：host 工具绝不能吃到目标 --sysroot / -L.syno-deps（否则链上 aarch64 .so）
+  local host_cflags="-O2 -pipe" host_ldflags="-Wl,-O1"
   if [[ "$CROSS" -eq 1 ]]; then
     cfg+=(--cross-compiling)
     if ! command -v "$host_cc" >/dev/null 2>&1; then
@@ -170,17 +171,22 @@ build_node() {
   fi
   CC="$CC" CXX="$CXX" CC_host="$host_cc" CXX_host="$host_cxx" \
     AR_host="${AR_host:-ar}" \
+    CFLAGS_host="$host_cflags" CXXFLAGS_host="$host_cflags" \
+    LDFLAGS_host="$host_ldflags" \
     PKG_CONFIG_PATH="${PKG_CONFIG_PATH:-}" \
     PKG_CONFIG_LIBDIR="${PKG_CONFIG_LIBDIR:-}" \
     PKG_CONFIG_SYSROOT_DIR="" \
-    CPPFLAGS="${CPPFLAGS:-}" LDFLAGS="${LDFLAGS:-}" \
+    CPPFLAGS="$target_cppflags" LDFLAGS="$target_ldflags" \
     ./configure "${cfg[@]}"
-  make -j"$jobs"
+  make -j"$jobs" \
+    CFLAGS_host="$host_cflags" CXXFLAGS_host="$host_cflags" \
+    LDFLAGS_host="$host_ldflags" \
+    LIBRARY_PATH=
   rm -rf "$dest"
   mkdir -p "$dest/lib"
   cp -a "$src/out/Release/node" "$dest/node"
   chmod +x "$dest/node"
-  kotv_syno_deps_ship_shared "$dest/lib" ssl crypto z brotli brotlidec brotlienc brotlicommon cares nghttp2
+  kotv_syno_deps_ship_shared "$dest/lib" ssl crypto z cares nghttp2
   if [[ -f "$src/LICENSE" ]]; then cp "$src/LICENSE" "$dest/LICENSE"; fi
   write_stamp node "$ver"
   rm -rf "$src"
@@ -228,8 +234,19 @@ build_python() {
   fi
   py_cfg+=(--with-ensurepip="$ensurepip")
 
+  # 交叉：跳过 getaddrinfo 运行时探测
+  local py_ac=(
+    ac_cv_file__dev_ptmx=yes
+    ac_cv_file__dev_ptc=no
+  )
+  if [[ "$CROSS" -eq 1 ]]; then
+    py_ac+=(
+      ac_cv_func_getaddrinfo=yes
+      ac_cv_buggy_getaddrinfo=no
+    )
+  fi
   CC="$CC" CXX="$CXX" \
-    ac_cv_file__dev_ptmx=yes ac_cv_file__dev_ptc=no \
+    "${py_ac[@]}" \
     ./configure "${py_cfg[@]}"
   make -j"$jobs"
   make DESTDIR="$BUILD_ROOT/python-dest" install
@@ -397,27 +414,14 @@ build_chromium() {
     echo "[chromium] skip (cached $tag)"
     return 0
   fi
-  echo "[chromium] build headless_shell $tag for $ARCH_LABEL (Clang + Toolkit sysroot ABI, -j$jobs)"
+  echo "[chromium] build headless_shell $tag for $ARCH_LABEL (Clang + hermetic Debian sysroot, -j$jobs)"
 
   if ! command -v clang >/dev/null 2>&1; then
     echo "[chromium] installing clang on host (compiler only)..."
     sudo apt-get update -qq
-    sudo apt-get install -y -qq clang lld ninja-build pkg-config meson
+    sudo apt-get install -y -qq clang lld ninja-build pkg-config
   fi
   command -v ninja >/dev/null 2>&1 || sudo apt-get install -y -qq ninja-build
-  if ! command -v meson >/dev/null 2>&1; then
-    sudo apt-get install -y -qq meson || sudo pip3 install -q meson
-  fi
-
-  # configure 前：Toolkit sysroot 副本 + libdrm/xkbcommon/mesa(dri)
-  kotv_syno_ensure_deps chromium
-  local chrome_sysroot
-  chrome_sysroot="$(kotv_syno_chromium_sysroot)"
-  if [[ ! -d "$chrome_sysroot" ]] \
-    || { [[ ! -f "$chrome_sysroot/usr/lib/pkgconfig/dri.pc" ]] && [[ ! -f "$chrome_sysroot/usr/share/pkgconfig/dri.pc" ]]; }; then
-    echo "ERROR: chromium Toolkit sysroot incomplete: $chrome_sysroot" >&2
-    exit 1
-  fi
 
   local depot="$SRC_CACHE/depot_tools"
   if [[ ! -d "$depot/.git" ]]; then
@@ -476,6 +480,8 @@ EOF
   fi
 
   cd "$chrome_src"
+  # 官方 hermetic Debian sysroot（含完整包集合；不用 Toolkit sysroot）
+  kotv_syno_ensure_deps chromium "$chrome_src"
 
   if [[ ! -f build/args/headless.gn ]]; then
     echo "ERROR: missing build/args/headless.gn in Chromium tree" >&2
@@ -488,7 +494,7 @@ EOF
   fi
   local out_dir="out/HeadlessSyno"
   mkdir -p "$out_dir"
-  # target_sysroot = Toolkit 副本（已补 dri/xkbcommon/libdrm）；Clang 只当编译器
+  # 不设 target_sysroot：用 install-sysroot.py 装好的 //build/linux/debian_*_sysroot
   cat >"$out_dir/args.gn" <<EOF
 import("//build/args/headless.gn")
 is_debug = false
@@ -504,17 +510,15 @@ v8_enable_i18n_support = false
 target_os = "linux"
 target_cpu = "${GN_CPU}"
 use_sysroot = true
-target_sysroot = "${chrome_sysroot}"
 use_custom_libcxx = true
 is_clang = true
 clang_base_path = "${clang_base}"
 clang_use_chrome_plugins = false
 use_xkbcommon = false
-use_system_minigbm = false
 EOF
   gn gen "$out_dir"
-  ninja -C "$out_dir" -j"$jobs" headless_shell chrome-headless-shell \
-    || ninja -C "$out_dir" -j"$jobs" headless_shell
+  # 只编 headless_shell（chrome-headless-shell 不是稳定 ninja 目标名）
+  ninja -C "$out_dir" -j"$jobs" headless_shell
 
   rm -rf "$dest"
   mkdir -p "$dest"
@@ -557,6 +561,7 @@ build_ffmpeg() {
   tar -xJf "$tarball" -C "$BUILD_ROOT"
   cd "$src"
   # OpenSSL ≥3 + GPL 需要 --enable-version3；-I deps 必须压过 Toolkit sysroot 旧 openssl 1.1
+  # 勿 --pkg-config-flags=--static：shared openssl 下会失败并回落到 sysroot 1.1
   export OPENSSL_CFLAGS="-I${deps}/include"
   export OPENSSL_LIBS="-L${deps}/lib -lssl -lcrypto"
   local ff_cfg=(
@@ -571,7 +576,6 @@ build_ffmpeg() {
     --cxx="$CXX"
     --extra-cflags="-I${deps}/include ${CFLAGS} ${CPPFLAGS:-}"
     --extra-ldflags="-L${deps}/lib -L${deps}/lib64 ${LDFLAGS}"
-    --pkg-config-flags=--static
   )
   # Toolkit 交叉/CI 环境常无 nasm；禁用 x86asm 仍可出 ffmpeg 二进制
   if ! command -v nasm >/dev/null 2>&1 && ! command -v yasm >/dev/null 2>&1; then

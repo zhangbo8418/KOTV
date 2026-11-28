@@ -190,7 +190,7 @@ kotv_syno_dep_bzip2() {
 kotv_syno_dep_zstd() {
   kotv_syno_load_versions
   local ver="$SYNO_ZSTD_VER" deps jobs tarball src
-  if kotv_syno_dep_ok zstd "$ver" "include/zdict.h"; then
+  if kotv_syno_dep_ok zstd "${ver}-pic" "include/zdict.h"; then
     echo "[deps] zstd $ver cache hit"; return 0
   fi
   deps="$(kotv_syno_deps_prefix)"; jobs="$(kotv_syno_njobs)"
@@ -199,7 +199,9 @@ kotv_syno_dep_zstd() {
   mkdir -p "$deps/lib" "$deps/include" "$deps/lib/pkgconfig"
   (
     cd "$src"
-    make -j"$jobs" -C lib CC="$CC" AR="$AR" CFLAGS="$CFLAGS" LDFLAGS="$LDFLAGS" libzstd.a
+    # CPython 把 libzstd.a 链进 _zstd.so，必须 -fPIC
+    make -j"$jobs" -C lib CC="$CC" AR="$AR" \
+      CFLAGS="$CFLAGS -fPIC" LDFLAGS="$LDFLAGS" libzstd.a
     cp -a lib/libzstd.a "$deps/lib/"
     # CPython _zstd 还要 zdict.h
     cp -a lib/zstd.h lib/zstd_errors.h lib/zdict.h "$deps/include/" 2>/dev/null \
@@ -215,7 +217,8 @@ Libs: -L\${libdir} -lzstd
 Cflags: -I\${includedir}
 EOF
   )
-  kotv_syno_dep_mark zstd "$ver"
+  # stamp 带 -pic：逼旧 cache（无 -fPIC 的 .a）失效
+  kotv_syno_dep_mark zstd "${ver}-pic"
 }
 
 kotv_syno_dep_openssl() {
@@ -312,10 +315,9 @@ kotv_syno_dep_cups() {
 
 kotv_syno_ensure_deps_node() {
   kotv_syno_load_versions
-  echo "[deps] profile=node (zlib brotli c-ares nghttp2 openssl)"
+  # brotli 用 Node 树内（与源码常量对齐）；其余 Toolkit overlay
+  echo "[deps] profile=node (zlib c-ares nghttp2 openssl)"
   kotv_syno_dep_zlib
-  kotv_syno_export_deps_env
-  kotv_syno_dep_brotli
   kotv_syno_export_deps_env
   kotv_syno_dep_autotools cares "$SYNO_CARES_VER" \
     "https://github.com/c-ares/c-ares/releases/download/v${SYNO_CARES_VER}/c-ares-${SYNO_CARES_VER}.tar.gz" \
@@ -414,154 +416,36 @@ kotv_syno_ensure_deps_ffmpeg() {
   kotv_syno_export_deps_env
 }
 
-# Chromium：可写 Toolkit sysroot 副本（DSM glibc ABI）+ 自编补齐 pkg-config 包
-kotv_syno_chromium_sysroot() {
-  echo "${KOTV_SYNO_CHROMIUM_SYSROOT:-${ROOT:?}/.syno-deps/${PLATFORM:?}-chromium-sysroot}"
-}
-
-kotv_syno_chromium_meson_tc() {
-  # $1=outfile：强制 Toolkit CC + sysroot（原生 --native-file，交叉 --cross-file）
-  local out="$1" cpu_family cpu syno_sys
-  syno_sys="$(kotv_syno_chromium_sysroot)"
+# Chromium：官方 hermetic Debian sysroot（glibc 2.31 ≤ DSM 7.2 的 2.36，可跑）
+# Toolkit sysroot 缺 Clang/lld 的 crt/libgcc，且头文件无 HWCAP2_*，不硬接
+kotv_syno_ensure_deps_chromium() {
+  local chrome_src="${1:-}" arch_arg
   case "$PLATFORM" in
-    geminilake) cpu_family=x86_64; cpu=x86_64 ;;
-    rtd1296)    cpu_family=aarch64; cpu=aarch64 ;;
+    geminilake) arch_arg=amd64 ;;
+    rtd1296)    arch_arg=arm64 ;;
     *) echo "ERROR: unknown PLATFORM=$PLATFORM" >&2; return 1 ;;
   esac
-  {
-    cat <<EOF
-[binaries]
-c = '${CC}'
-cpp = '${CXX}'
-ar = '${AR}'
-strip = '${STRIP}'
-pkg-config = 'pkg-config'
-
-[built-in options]
-c_args = ['--sysroot=${syno_sys}']
-cpp_args = ['--sysroot=${syno_sys}']
-c_link_args = ['--sysroot=${syno_sys}']
-cpp_link_args = ['--sysroot=${syno_sys}']
-EOF
-    if kotv_syno_is_cross "$PLATFORM"; then
-      cat <<EOF
-
-[host_machine]
-system = 'linux'
-cpu_family = '${cpu_family}'
-cpu = '${cpu}'
-endian = 'little'
-EOF
-    fi
-  } >"$out"
-}
-
-kotv_syno_chromium_meson_install() {
-  # $1=name $2=ver $3=url $4=dirname $5=probe_under_sysroot $6...=meson -Dopts
-  local name="$1" ver="$2" url="$3" dirname="$4" probe="$5"
-  shift 5
-  local sysroot jobs tarball src builddir tcf=()
-  sysroot="$(kotv_syno_chromium_sysroot)"
-  if [[ -e "$sysroot/$probe" ]] && [[ -f "$sysroot/.kotv-dep-${name}" ]] \
-    && [[ "$(cat "$sysroot/.kotv-dep-${name}" 2>/dev/null || true)" == "$ver" ]]; then
-    echo "[deps] chromium/$name $ver cache hit"
+  if [[ -z "$chrome_src" || ! -d "$chrome_src" ]]; then
+    echo "[deps] profile=chromium — src not ready yet (install-sysroot later)"
     return 0
   fi
-  if ! command -v meson >/dev/null 2>&1; then
-    echo "ERROR: meson required to build chromium sysroot dep $name" >&2
+  echo "[deps] profile=chromium — hermetic Debian sysroot ($arch_arg)"
+  if [[ ! -f "$chrome_src/build/linux/sysroot_scripts/install-sysroot.py" ]]; then
+    echo "ERROR: missing install-sysroot.py under $chrome_src" >&2
     return 1
   fi
-  jobs="$(kotv_syno_njobs)"
-  tarball="$(kotv_syno_dep_fetch "$url")"
-  src="$(kotv_syno_dep_extract "$tarball" "$dirname")"
-  builddir="$src/out-syno"
-  rm -rf "$builddir"
-  mkdir -p "$builddir" "$sysroot"
-  kotv_syno_chromium_meson_tc "$builddir/tc.ini"
-  if kotv_syno_is_cross "$PLATFORM"; then
-    tcf=(--cross-file "$builddir/tc.ini")
-  else
-    tcf=(--native-file "$builddir/tc.ini")
-  fi
-  # pkg-config 只看见本 sysroot（已装的 libdrm 等），禁止宿主 /usr
-  export PKG_CONFIG_SYSROOT_DIR="$sysroot"
-  export PKG_CONFIG_LIBDIR="$sysroot/usr/lib/pkgconfig:$sysroot/usr/share/pkgconfig:$sysroot/usr/lib64/pkgconfig"
-  export PKG_CONFIG_PATH="$PKG_CONFIG_LIBDIR"
-  (
-    cd "$src"
-    meson setup "$builddir" \
-      --prefix=/usr \
-      --libdir=lib \
-      --buildtype=release \
-      "${tcf[@]}" \
-      "$@"
-    meson compile -C "$builddir" -j "$jobs"
-    DESTDIR="$sysroot" meson install -C "$builddir" --no-rebuild
-  )
-  echo "$ver" >"$sysroot/.kotv-dep-${name}"
-  echo "[deps] chromium/$name $ver → $sysroot"
-}
-
-kotv_syno_ensure_deps_chromium() {
-  # 参数 chrome_src 可忽略：Chromium 依赖是 Toolkit sysroot 闭包，不依赖 src 树
-  kotv_syno_load_versions
-  local sysroot stamp want
-  sysroot="$(kotv_syno_chromium_sysroot)"
-  export KOTV_SYNO_CHROMIUM_SYSROOT="$sysroot"
-  want="toolkit:${SYNO_LIBDRM_VER}:${SYNO_LIBXKBCOMMON_VER}:dri-pc1"
-  stamp="$sysroot/.kotv-chromium-sysroot"
-  if [[ -f "$stamp" && "$(cat "$stamp" 2>/dev/null || true)" == "$want" ]] \
-    && [[ -f "$sysroot/usr/lib/pkgconfig/dri.pc" ]] \
-    && [[ -f "$sysroot/usr/lib/pkgconfig/xkbcommon.pc" || -f "$sysroot/usr/share/pkgconfig/xkbcommon.pc" ]]; then
-    echo "[deps] profile=chromium — Toolkit sysroot cache hit ($sysroot)"
-    return 0
-  fi
-  if [[ -z "${SYSROOT:-}" || ! -d "$SYSROOT" ]]; then
-    echo "ERROR: Toolkit SYSROOT required for chromium deps" >&2
-    return 1
-  fi
-  echo "[deps] profile=chromium — seed Toolkit sysroot → $sysroot"
-  mkdir -p "$sysroot"
-  # 以 Toolkit sysroot 为底（glibc 2.36 ABI），再装自编包；不 --delete，以免清掉已装 overlay
-  rsync -a "${SYSROOT}/" "$sysroot/"
-
-  kotv_syno_chromium_meson_install libdrm "$SYNO_LIBDRM_VER" \
-    "https://dri.freedesktop.org/libdrm/libdrm-${SYNO_LIBDRM_VER}.tar.xz" \
-    "libdrm-${SYNO_LIBDRM_VER}" "usr/include/xf86drm.h" \
-    -Dintel=disabled -Dradeon=disabled -Damdgpu=disabled -Dnouveau=disabled \
-    -Dvmwgfx=disabled -Dfreedreno=disabled -Detnaviv=disabled \
-    -Dvc4=disabled -Dfreedreno-kgsl=false -Dvalgrind=disabled \
-    -Dman-pages=disabled -Dtests=false
-
-  kotv_syno_chromium_meson_install xkbcommon "$SYNO_LIBXKBCOMMON_VER" \
-    "https://xkbcommon.org/download/libxkbcommon-${SYNO_LIBXKBCOMMON_VER}.tar.xz" \
-    "libxkbcommon-${SYNO_LIBXKBCOMMON_VER}" "usr/include/xkbcommon/xkbcommon.h" \
-    -Denable-x11=false -Denable-wayland=false -Denable-docs=false \
-    -Denable-tools=false -Denable-xkbregistry=false
-
-  # use_sysroot=true 时 Chromium 必查 dri.pc（仅 dridriverdir）；headless + bundled minigbm 不链系统 Mesa
-  mkdir -p "$sysroot/usr/lib/dri" "$sysroot/usr/lib/pkgconfig"
-  cat >"$sysroot/usr/lib/pkgconfig/dri.pc" <<'EOF'
-prefix=/usr
-libdir=${prefix}/lib
-includedir=${prefix}/include
-dridriverdir=${libdir}/dri
-Name: dri
-Description: Direct Rendering Infrastructure (pkg-config for Chromium sysroot)
-Version: 24.2.8
-Cflags:
-Libs:
-EOF
-  echo "$want" >"$stamp"
-  echo "[deps] profile=chromium ready: $sysroot"
+  (cd "$chrome_src" && python3 build/linux/sysroot_scripts/install-sysroot.py --arch="$arch_arg")
 }
 
 # X11：始终编进 deps（完整闭包，避免 sysroot 半套头文件）
+# glibc：malloc(0) 非 NULL → 交叉时必须显式 --disable-malloc0returnsnull
 kotv_syno_ensure_x11() {
   kotv_syno_load_versions
   local deps x="https://www.x.org/archive/individual"
+  local xstack_ver="${SYNO_LIBX11_VER}+xfixes${SYNO_LIBXFIXES_VER}"
   deps="$(kotv_syno_deps_prefix)"
-  if kotv_syno_dep_ok x11-stack "${SYNO_LIBX11_VER}+xtrans" "include/X11/Xlib.h" \
+  if kotv_syno_dep_ok x11-stack "$xstack_ver" "include/X11/Xlib.h" \
+    && [[ -f "$deps/include/X11/extensions/Xfixes.h" ]] \
     && [[ -f "$deps/include/X11/Intrinsic.h" ]] \
     && [[ -f "$deps/share/pkgconfig/xtrans.pc" || -f "$deps/lib/pkgconfig/xtrans.pc" ]]; then
     echo "[deps] X11 stack cache hit"
@@ -598,27 +482,33 @@ kotv_syno_ensure_x11() {
   kotv_syno_dep_autotools libX11 "$SYNO_LIBX11_VER" \
     "${x}/lib/libX11-${SYNO_LIBX11_VER}.tar.xz" \
     "libX11-${SYNO_LIBX11_VER}" "include/X11/Xlib.h" \
-    --enable-static --disable-shared --disable-specs
+    --enable-static --disable-shared --disable-specs \
+    --disable-malloc0returnsnull
   kotv_syno_dep_autotools libXext "$SYNO_LIBXEXT_VER" \
     "${x}/lib/libXext-${SYNO_LIBXEXT_VER}.tar.xz" \
     "libXext-${SYNO_LIBXEXT_VER}" "include/X11/extensions/Xext.h" \
-    --enable-static --disable-shared
+    --enable-static --disable-shared --disable-malloc0returnsnull
   kotv_syno_dep_autotools libXrender "$SYNO_LIBXRENDER_VER" \
     "${x}/lib/libXrender-${SYNO_LIBXRENDER_VER}.tar.xz" \
     "libXrender-${SYNO_LIBXRENDER_VER}" "include/X11/extensions/Xrender.h" \
+    --enable-static --disable-shared --disable-malloc0returnsnull
+  # libXi / libXrandr 依赖 Xfixes
+  kotv_syno_dep_autotools libXfixes "$SYNO_LIBXFIXES_VER" \
+    "${x}/lib/libXfixes-${SYNO_LIBXFIXES_VER}.tar.xz" \
+    "libXfixes-${SYNO_LIBXFIXES_VER}" "include/X11/extensions/Xfixes.h" \
     --enable-static --disable-shared
   kotv_syno_dep_autotools libXrandr "$SYNO_LIBXRANDR_VER" \
     "${x}/lib/libXrandr-${SYNO_LIBXRANDR_VER}.tar.xz" \
     "libXrandr-${SYNO_LIBXRANDR_VER}" "include/X11/extensions/Xrandr.h" \
-    --enable-static --disable-shared
+    --enable-static --disable-shared --disable-malloc0returnsnull
   kotv_syno_dep_autotools libXi "$SYNO_LIBXI_VER" \
     "${x}/lib/libXi-${SYNO_LIBXI_VER}.tar.xz" \
     "libXi-${SYNO_LIBXI_VER}" "include/X11/extensions/XInput.h" \
-    --enable-static --disable-shared
+    --enable-static --disable-shared --disable-malloc0returnsnull
   kotv_syno_dep_autotools libXtst "$SYNO_LIBXTST_VER" \
     "${x}/lib/libXtst-${SYNO_LIBXTST_VER}.tar.xz" \
     "libXtst-${SYNO_LIBXTST_VER}" "include/X11/extensions/XTest.h" \
-    --enable-static --disable-shared
+    --enable-static --disable-shared --disable-malloc0returnsnull
   kotv_syno_dep_autotools libICE "$SYNO_LIBICE_VER" \
     "${x}/lib/libICE-${SYNO_LIBICE_VER}.tar.xz" \
     "libICE-${SYNO_LIBICE_VER}" "include/X11/ICE/ICE.h" \
@@ -630,8 +520,8 @@ kotv_syno_ensure_x11() {
   kotv_syno_dep_autotools libXt "$SYNO_LIBXT_VER" \
     "${x}/lib/libXt-${SYNO_LIBXT_VER}.tar.xz" \
     "libXt-${SYNO_LIBXT_VER}" "include/X11/Intrinsic.h" \
-    --enable-static --disable-shared
-  kotv_syno_dep_mark x11-stack "${SYNO_LIBX11_VER}+xtrans"
+    --enable-static --disable-shared --disable-malloc0returnsnull
+  kotv_syno_dep_mark x11-stack "$xstack_ver"
   export KOTV_SYNO_X11_PREFIX="$deps"
 }
 

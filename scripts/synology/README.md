@@ -7,13 +7,13 @@
 | 组件 | 目标链接 | 依赖闭包（configure 前一次编齐） |
 |------|----------|----------------------------------|
 | **engine** | Toolkit GCC+sysroot **全静态** | 无外部 .so |
-| **Node** | Toolkit + `.syno-deps` | zlib、brotli、c-ares、nghttp2、openssl（`--shared-*`）；ICU 用树内 full-icu |
-| **Python** | Toolkit + `.syno-deps` | CPython optional：zlib/bzip2/xz/zstd(static)/libffi/openssl/sqlite/ncurses/readline/libuuid |
-| **JRE** | Toolkit + `.syno-deps` | OpenJDK 必选：alsa、cups、fontconfig(+expat/freetype)、X11 栈（始终自编） |
-| **ffmpeg** | Toolkit + `.syno-deps` | zlib、openssl（`--enable-openssl --enable-version3`） |
-| **Chromium** | Clang + **Toolkit sysroot ABI** | 可写 Toolkit sysroot 副本；Toolkit 编 libdrm/xkbcommon，并提供 `dri.pc`；`headless.gn` + `use_system_minigbm=false` |
+| **Node** | Toolkit + `.syno-deps` | zlib、c-ares、nghttp2、openssl（`--shared-*`）；brotli/ICU 用树内（与源码对齐） |
+| **Python** | Toolkit + `.syno-deps` | CPython optional：zlib/bzip2/xz/zstd(static+PIC)/libffi/openssl/sqlite/ncurses/readline/libuuid |
+| **JRE** | Toolkit + `.syno-deps` | OpenJDK 必选：alsa、cups、fontconfig(+expat/freetype)、X11 栈（含 libXfixes；交叉 `--disable-malloc0returnsnull`） |
+| **ffmpeg** | Toolkit + `.syno-deps` | zlib、openssl≥3（`--enable-openssl --enable-version3`；pkg-config 不走 `--static`） |
+| **Chromium** | Clang + **hermetic Debian sysroot** | `install-sysroot.py`（glibc 2.31 ≤ DSM 2.36）；`headless.gn`；只编 `headless_shell` |
 
-目标链接 **禁止宿主 `/usr`**。宿主只允许构建工具：Clang、meson/ninja、boot JDK、交叉 build-python、Node 的 `CC_host`。
+目标链接 **禁止宿主 `/usr`**（Chromium 除外：官方 Debian sysroot）。宿主只允许构建工具：Clang、ninja、boot JDK、交叉 build-python、Node 的 `CC_host`。
 
 共用：`common.sh`、`toolkit-deps.sh`（`kotv_syno_ensure_deps <profile>`）。
 
