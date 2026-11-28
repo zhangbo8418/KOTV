@@ -27,7 +27,7 @@ mkdir -p "$(dirname "$TMP_ABS")"
 
 VER_LD="$(kotv_engine_version_ldflags "$VERSION")"
 LDFLAGS="-s -w ${VER_LD} -linkmode external -extldflags '-static'"
-IMAGE="${KOTV_STATIC_GO_IMAGE:-golang:1.27.2-alpine}"
+IMAGE="${KOTV_STATIC_GO_IMAGE:-golang:1.27.4-alpine}"
 # Docker/CI 挂载仓库时 git 常不可用或 safe.directory 失败，关掉 VCS stamping
 BUILD_VCS="-buildvcs=false"
 

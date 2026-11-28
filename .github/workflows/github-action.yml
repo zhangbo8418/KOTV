@@ -8,8 +8,9 @@ on:
 
 env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  # 非 Win7：与 DComp 引擎制品对齐 3.47.1；其它平台可用同版。Win7 钉 3.19.6
-  FLUTTER_VERSION: "3.47.1"
+  # 主线 Flutter 跟 stable 最新；Win8+ x64 钉 3.47.1（DComp 制品上限）；Win7 钉 3.19.6
+  FLUTTER_VERSION: "3.50.1"
+  FLUTTER_WINDOWS_X64_VERSION: "3.47.1"
   FLUTTER_WIN7_VERSION: "3.19.6"
   KOTV_DCOMP_ENGINE_TAG: "windows-v3.47.1+2"
   KOTV_DCOMP_ENGINE_VER: "3.47.1"
@@ -35,7 +36,7 @@ jobs:
       - name: Install go-legacy-win7
         shell: pwsh
         run: |
-          $ver = "1.27.2-1"
+          $ver = "1.27.4-1"
           $zip = "go-legacy-win7-$ver.windows_amd64.zip"
           $url = "https://github.com/thongtech/go-legacy-win7/releases/download/v$ver/$zip"
           curl.exe -sSL -o "$env:RUNNER_TEMP\$zip" $url
@@ -62,7 +63,7 @@ jobs:
 
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
+          flutter-version: ${{ env.FLUTTER_WINDOWS_X64_VERSION }}
           channel: stable
           cache: true
 
@@ -169,7 +170,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.27.2'
+          go-version: '1.27.4'
           check-latest: true
           cache: true
 
@@ -284,7 +285,7 @@ jobs:
       - name: Install go-legacy-win7
         shell: pwsh
         run: |
-          $ver = "1.27.2-1"
+          $ver = "1.27.4-1"
           $zip = "go-legacy-win7-$ver.windows_amd64.zip"
           $url = "https://github.com/thongtech/go-legacy-win7/releases/download/v$ver/$zip"
           curl.exe -sSL -o "$env:RUNNER_TEMP\$zip" $url
@@ -401,7 +402,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.27.2'
+          go-version: '1.27.4'
           check-latest: true
           cache: true
 
@@ -472,7 +473,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.27.2'
+          go-version: '1.27.4'
           check-latest: true
           cache: true
 
@@ -543,7 +544,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.27.2'
+          go-version: '1.27.4'
           check-latest: true
           cache: true
 
@@ -616,7 +617,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.27.2'
+          go-version: '1.27.4'
           check-latest: true
           cache: true
 
@@ -727,7 +728,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.27.2'
+          go-version: '1.27.4'
           check-latest: true
           cache: true
 
@@ -866,7 +867,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.27.2'
+          go-version: '1.27.4'
           check-latest: true
           cache: true
 
@@ -935,7 +936,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.27.2'
+          go-version: '1.27.4'
           check-latest: true
           cache: true
 

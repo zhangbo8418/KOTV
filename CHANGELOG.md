@@ -4,6 +4,7 @@
 
 - 新增群晖 DSM 7.2 SPK（x86_64 / armv8）：Web 服务形态（engine + webapp）；**引擎与** Node/Python/JRE/Chromium 均由官方 Toolkit 在 CI 编译（x86_64 用 `geminilake`，armv8 用 `rtd1296`；非 musl / 非 Liberica 预编译）。Chromium 解析 CFT Stable 最新版编 headless_shell。
 - CI 新增 Windows aarch64、Linux aarch64 桌面包；Linux x64 job 更名为 `build-linux-amd64`。
+- 依赖：Go `1.27.4`（含 go-legacy-win7）；chromedp `0.24.0` / cdproto `0.160.12`；quickjs-go `0.7.8`；anacrolix/torrent `1.63.0`；golang.org/x/* 与 modernc.org/sqlite 跟最新。Flutter 主线 `3.50.1`（mac/linux/android/web/win-arm64）；Win8+ x64 仍钉 `3.47.1`（DComp 制品上限）；Win7 仍钉 `3.19.6`（不可升）。
 - 版本号同源升至 `0.3.6`（pubspec `0.3.6+46`）。
 
 ## v0.3.5

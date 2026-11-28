@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # CI：确保 PATH 上有可用的 Flutter（arm64 runner 常无预编译 SDK 包，改 git clone）。
-# 用法: FLUTTER_VERSION=3.47.1 ./scripts/ci-ensure-flutter.sh
+# 用法: FLUTTER_VERSION=3.50.1 ./scripts/ci-ensure-flutter.sh
 # 成功后把 flutter/bin 追加到 $GITHUB_PATH（若在 Actions 中）。
 set -euo pipefail
 
