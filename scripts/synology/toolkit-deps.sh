@@ -981,11 +981,76 @@ kotv_syno_dep_rkrga() {
   kotv_syno_dep_mark rkrga "$ver"
 }
 
+# librtmp（rtmpdump 2.6，OPENSSL+shared）；推/拉 RTMP[E/S]
+kotv_syno_dep_librtmp() {
+  kotv_syno_load_versions
+  local ver="$SYNO_LIBRTMP_VER" deps jobs tarball src cross
+  if kotv_syno_dep_ok librtmp "$ver" "lib/pkgconfig/librtmp.pc"; then
+    echo "[deps] librtmp $ver cache hit"; return 0
+  fi
+  deps="$(kotv_syno_deps_prefix)"; jobs="$(kotv_syno_njobs)"
+  kotv_syno_export_deps_env
+  tarball="$(kotv_syno_dep_fetch "https://deb.debian.org/debian/pool/main/r/rtmpdump/rtmpdump_${ver}.orig.tar.xz")"
+  src="$(kotv_syno_dep_extract "$tarball" "rtmpdump-${ver}")"
+  cross="$(basename "$CC" | sed 's/gcc$//')"
+  mkdir -p "$deps"
+  (
+    cd "$src/librtmp"
+    make -j"$jobs" \
+      prefix="$deps" libdir="$deps/lib" incdir="$deps/include/librtmp" \
+      SYS=posix CRYPTO=OPENSSL SHARED=yes \
+      CROSS_COMPILE="$cross" \
+      CC="$CC" AR="${AR:-ar}" LD="$CC" \
+      XCFLAGS="-I${deps}/include --sysroot=${SYSROOT} -fPIC -O2" \
+      XLDFLAGS="-L${deps}/lib --sysroot=${SYSROOT}" \
+      install
+  )
+  [[ -f "$deps/lib/pkgconfig/librtmp.pc" ]] || {
+    echo "ERROR: librtmp.pc missing after rtmpdump build" >&2
+    return 1
+  }
+  kotv_syno_dep_mark librtmp "$ver"
+}
+
+# libsrt（Haivision SRT，OPENSSL 加密 + shared）
+kotv_syno_dep_libsrt() {
+  kotv_syno_load_versions
+  local ver="$SYNO_LIBSRT_VER" deps tarball src
+  if kotv_syno_dep_ok libsrt "$ver" "lib/pkgconfig/srt.pc"; then
+    echo "[deps] libsrt $ver cache hit"; return 0
+  fi
+  deps="$(kotv_syno_deps_prefix)"
+  kotv_syno_export_deps_env
+  tarball="$(kotv_syno_dep_fetch "https://github.com/Haivision/srt/archive/refs/tags/v${ver}.tar.gz")"
+  src="$(kotv_syno_dep_extract "$tarball" "srt-${ver}")"
+  kotv_syno_cmake_build "$src" "$src/build" \
+    -DENABLE_SHARED=ON -DENABLE_STATIC=OFF \
+    -DENABLE_APPS=OFF -DENABLE_ENCRYPTION=ON \
+    -DENABLE_CXX11=ON \
+    -DOPENSSL_ROOT_DIR="$deps" \
+    -DOPENSSL_INCLUDE_DIR="$deps/include" \
+    -DOPENSSL_CRYPTO_LIBRARY="$deps/lib/libcrypto.so" \
+    -DOPENSSL_SSL_LIBRARY="$deps/lib/libssl.so"
+  if [[ -f "$deps/lib/pkgconfig/srt.pc" ]]; then
+    grep -q 'lstdc++' "$deps/lib/pkgconfig/srt.pc" \
+      || echo "Libs.private: -lstdc++" >>"$deps/lib/pkgconfig/srt.pc"
+  else
+    echo "ERROR: srt.pc missing after libsrt build" >&2
+    return 1
+  fi
+  kotv_syno_dep_mark libsrt "$ver"
+}
+
 kotv_syno_ensure_deps_ffmpeg() {
   kotv_syno_load_versions
-  echo "[deps] profile=ffmpeg (VAAPI/media-driver + CUDA/ffnvcodec + QSV/libvpl + rkmpp/rkrga)"
+  echo "[deps] profile=ffmpeg (VAAPI/media-driver + CUDA/ffnvcodec + QSV/libvpl + rkmpp/rkrga + librtmp/libsrt)"
   kotv_syno_dep_zlib
   kotv_syno_dep_openssl
+  kotv_syno_export_deps_env
+  # 推拉流：RTMP / SRT（链 deps OpenSSL）
+  kotv_syno_dep_librtmp
+  kotv_syno_export_deps_env
+  kotv_syno_dep_libsrt
   kotv_syno_export_deps_env
   kotv_syno_dep_libpciaccess
   kotv_syno_export_deps_env

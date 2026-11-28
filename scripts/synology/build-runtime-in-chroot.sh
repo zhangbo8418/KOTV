@@ -598,7 +598,7 @@ build_ffmpeg() {
   local dest="$OUT/ffmpeg"
   local jobs
   jobs="$(comp_jobs)"
-  local stamp_ver="jellyfin-${ver}-hwa7"
+  local stamp_ver="jellyfin-${ver}-hwa8"
   if stamp_ok ffmpeg "$stamp_ver" && [[ -x "$dest/ffmpeg" ]]; then
     echo "[ffmpeg] skip (cached $stamp_ver)"
     return 0
@@ -640,8 +640,8 @@ build_ffmpeg() {
     exit 1
   fi
   echo "[ffmpeg] openssl via pkg-config: $ossl_ver"
-  pkg-config --exists libva libdrm ffnvcodec || {
-    echo "ERROR: libva/libdrm/ffnvcodec.pc missing under deps" >&2
+  pkg-config --exists libva libdrm ffnvcodec librtmp "srt >= 1.3.0" || {
+    echo "ERROR: libva/libdrm/ffnvcodec/librtmp/srt.pc missing under deps" >&2
     ls -la "${deps}/lib/pkgconfig" | head -60 >&2 || true
     exit 1
   }
@@ -672,6 +672,9 @@ build_ffmpeg() {
     --enable-openssl
     --enable-libdrm
     --enable-vaapi
+    # 推拉流：librtmp（RTMP[E/S]）+ libsrt（SRT）
+    --enable-librtmp
+    --enable-libsrt
     # CUDA/NVENC/NVDEC：头文件编进，运行时 dlopen 群晖 NVIDIA 驱动
     --enable-ffnvcodec
     --enable-cuda
@@ -728,7 +731,7 @@ build_ffmpeg() {
   # 验收 configure 真正打开了 HWA（勿只看命令行）
   local cfgh="ffbuild/config.h"
   [[ -f "$cfgh" ]] || cfgh="config.h"
-  for macro in CONFIG_VAAPI CONFIG_CUDA CONFIG_OPENSSL; do
+  for macro in CONFIG_VAAPI CONFIG_CUDA CONFIG_OPENSSL CONFIG_LIBRTMP CONFIG_LIBSRT; do
     if ! grep -qE "^#define ${macro} 1$" "$cfgh" 2>/dev/null; then
       echo "ERROR: ffmpeg $macro not enabled (see $cfgh)" >&2
       grep -E "$macro" "$cfgh" 2>/dev/null | head -5 >&2 || true
@@ -749,7 +752,7 @@ build_ffmpeg() {
     grep -qE '^#define CONFIG_RKRGA 1$' "$cfgh" \
       || { echo "ERROR: CONFIG_RKRGA not enabled" >&2; exit 1; }
   fi
-  echo "[ffmpeg] config.h HWA OK"
+  echo "[ffmpeg] config.h HWA + librtmp/libsrt OK"
 
   make -j"$jobs"
   make DESTDIR="$BUILD_ROOT/ffmpeg-dest" install
@@ -764,7 +767,7 @@ build_ffmpeg() {
   kotv_syno_bundle_component "$dest"
   # 验收：HWA Toolkit .so / dri 进包（CUDA 专有运行时不随包）
   local miss=0
-  for f in libssl libdrm libva; do
+  for f in libssl libdrm libva librtmp libsrt; do
     if ! ls "$dest/lib/${f}.so"* >/dev/null 2>&1; then
       echo "ERROR: ffmpeg package missing Toolkit ${f}.so*" >&2
       miss=1
@@ -796,7 +799,8 @@ build_ffmpeg() {
   fi
   cat >"$dest/README-hwa.txt" <<'EOF'
 KOTV ffmpeg (Synology Toolkit-built)
-Build-time: VAAPI/DRM, CUDA/NVENC/NVDEC (ffnvcodec headers), QSV (libvpl, x86), rkmpp/rkrga (arm).
+Build-time: VAAPI/DRM, CUDA/NVENC/NVDEC (ffnvcodec), QSV (libvpl, x86), rkmpp/rkrga (arm),
+  librtmp (RTMP), libsrt (SRT).
 Shipped under lib/: Toolkit .so + lib/dri/iHD_drv_video.so (x86); rpath=$ORIGIN/lib.
 Runtime on DSM (not shipped):
   - CUDA: NVIDIA libcuda / libnvidia-encode
