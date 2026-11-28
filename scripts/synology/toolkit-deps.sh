@@ -507,9 +507,178 @@ kotv_syno_dep_libva() {
     -Ddriverdir="${deps}/lib/dri"
 }
 
+# CUDA/NVENC：nv-codec-headers（纯头文件 + ffnvcodec.pc）；运行时 dlopen libcuda/libnvidia-encode
+kotv_syno_dep_ffnvcodec() {
+  kotv_syno_load_versions
+  local ver="$SYNO_FFNVCODEC_VER" deps jobs tarball src
+  if kotv_syno_dep_ok ffnvcodec "$ver" "lib/pkgconfig/ffnvcodec.pc"; then
+    echo "[deps] ffnvcodec $ver cache hit"; return 0
+  fi
+  deps="$(kotv_syno_deps_prefix)"; jobs="$(kotv_syno_njobs)"
+  tarball="$(kotv_syno_dep_fetch "https://github.com/FFmpeg/nv-codec-headers/archive/refs/tags/${ver}.tar.gz")"
+  src="$(kotv_syno_dep_extract "$tarball" "nv-codec-headers-${ver}")"
+  mkdir -p "$deps"
+  (
+    cd "$src"
+    make PREFIX="$deps" install
+  )
+  kotv_syno_dep_mark ffnvcodec "$ver"
+}
+
+# QSV：Intel oneVPL（仅 geminilake）；运行时需 DSM 上的 VPL/MediaSDK GPU runtime
+kotv_syno_dep_libvpl() {
+  kotv_syno_load_versions
+  local ver="$SYNO_LIBVPL_VER" deps jobs tarball src
+  if [[ "$PLATFORM" != geminilake ]]; then
+    echo "[deps] libvpl skip (QSV x86 only, PLATFORM=$PLATFORM)"
+    return 0
+  fi
+  if kotv_syno_dep_ok libvpl "$ver" "lib/pkgconfig/vpl.pc"; then
+    echo "[deps] libvpl $ver cache hit"; return 0
+  fi
+  if ! command -v cmake >/dev/null 2>&1 || ! command -v ninja >/dev/null 2>&1; then
+    echo "ERROR: cmake+ninja required for libvpl" >&2
+    return 1
+  fi
+  deps="$(kotv_syno_deps_prefix)"; jobs="$(kotv_syno_njobs)"
+  tarball="$(kotv_syno_dep_fetch "https://github.com/intel/libvpl/archive/refs/tags/v${ver}.tar.gz")"
+  src="$(kotv_syno_dep_extract "$tarball" "libvpl-${ver}")"
+  mkdir -p "$deps"
+  (
+    cd "$src"
+    cmake -GNinja -S . -B build \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_INSTALL_PREFIX="$deps" \
+      -DCMAKE_C_COMPILER="$CC" \
+      -DCMAKE_CXX_COMPILER="$CXX" \
+      -DCMAKE_SYSROOT="$SYSROOT" \
+      -DCMAKE_C_FLAGS="$CFLAGS" \
+      -DCMAKE_CXX_FLAGS="$CXXFLAGS" \
+      -DCMAKE_EXE_LINKER_FLAGS="$LDFLAGS" \
+      -DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS" \
+      -DINSTALL_DEV=ON -DINSTALL_LIB=ON -DINSTALL_EXAMPLES=OFF \
+      -DBUILD_EXAMPLES=OFF -DBUILD_EXPERIMENTAL=OFF \
+      -DBUILD_SHARED_LIBS=ON -DBUILD_TESTS=OFF
+    ninja -C build -j"$jobs"
+    ninja -C build install
+    # ffmpeg pkg-config 名是 vpl
+    if [[ -f "$deps/lib/pkgconfig/vpl.pc" ]]; then
+      grep -q 'lstdc++' "$deps/lib/pkgconfig/vpl.pc" \
+        || echo "Libs.private: -lstdc++" >>"$deps/lib/pkgconfig/vpl.pc"
+    fi
+  )
+  kotv_syno_dep_mark libvpl "$ver"
+}
+
+# rkmpp：Rockchip MPP（rtd1296 备用；nyanmisaka jellyfin-mpp-next）
+kotv_syno_dep_rkmpp() {
+  kotv_syno_load_versions
+  local ver="$SYNO_RKMPP_COMMIT" deps jobs tarball src
+  if [[ "$PLATFORM" != rtd1296 ]]; then
+    echo "[deps] rkmpp skip (arm only, PLATFORM=$PLATFORM)"
+    return 0
+  fi
+  if kotv_syno_dep_ok rkmpp "$ver" "lib/pkgconfig/rockchip_mpp.pc"; then
+    echo "[deps] rkmpp $ver cache hit"; return 0
+  fi
+  if ! command -v cmake >/dev/null 2>&1 || ! command -v ninja >/dev/null 2>&1; then
+    echo "ERROR: cmake+ninja required for rkmpp" >&2
+    return 1
+  fi
+  deps="$(kotv_syno_deps_prefix)"; jobs="$(kotv_syno_njobs)"
+  tarball="$(kotv_syno_dep_fetch "https://github.com/nyanmisaka/rk-mirrors/archive/${ver}.tar.gz")"
+  # github：rk-mirrors-<commit>
+  src="$(kotv_syno_dep_extract "$tarball" "rk-mirrors-${ver}")"
+  mkdir -p "$deps"
+  (
+    cd "$src"
+    cmake -GNinja -S . -B build \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_INSTALL_PREFIX="$deps" \
+      -DCMAKE_SYSTEM_NAME=Linux \
+      -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
+      -DCMAKE_C_COMPILER="$CC" \
+      -DCMAKE_CXX_COMPILER="$CXX" \
+      -DCMAKE_SYSROOT="$SYSROOT" \
+      -DCMAKE_C_FLAGS="$CFLAGS" \
+      -DCMAKE_CXX_FLAGS="$CXXFLAGS" \
+      -DCMAKE_EXE_LINKER_FLAGS="$LDFLAGS" \
+      -DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS" \
+      -DBUILD_TEST=OFF \
+      -DBUILD_SHARED_LIBS=ON
+    ninja -C build -j"$jobs"
+    ninja -C build install
+    if [[ -f "$deps/lib/pkgconfig/rockchip_mpp.pc" ]]; then
+      grep -q 'lstdc++' "$deps/lib/pkgconfig/rockchip_mpp.pc" \
+        || echo "Libs.private: -lstdc++" >>"$deps/lib/pkgconfig/rockchip_mpp.pc"
+    fi
+  )
+  kotv_syno_dep_mark rkmpp "$ver"
+}
+
+# rkrga：Rockchip RGA（与 rkmpp 配对）
+kotv_syno_dep_rkrga() {
+  kotv_syno_load_versions
+  local ver="$SYNO_RKRGA_COMMIT" deps jobs tarball src
+  if [[ "$PLATFORM" != rtd1296 ]]; then
+    echo "[deps] rkrga skip (arm only, PLATFORM=$PLATFORM)"
+    return 0
+  fi
+  if kotv_syno_dep_ok rkrga "$ver" "lib/pkgconfig/librga.pc"; then
+    echo "[deps] rkrga $ver cache hit"; return 0
+  fi
+  deps="$(kotv_syno_deps_prefix)"; jobs="$(kotv_syno_njobs)"
+  tarball="$(kotv_syno_dep_fetch "https://github.com/nyanmisaka/rk-mirrors/archive/${ver}.tar.gz")"
+  src="$(kotv_syno_dep_extract "$tarball" "rk-mirrors-${ver}")"
+  kotv_syno_export_deps_env
+  # 与 jellyfin 相同：shared_library→library 以便可控；我们改编 shared 便于随包
+  (
+    cd "$src"
+    # 保持 meson 默认 shared
+    local mextra=()
+    # 复用 meson_lib 的交叉文件逻辑：直接调 meson
+    if [[ "$PLATFORM" == rtd1296 ]]; then
+      local xf="$BUILD_ROOT/meson-cross-${PLATFORM}-rga.txt"
+      cat >"$xf" <<EOF
+[binaries]
+c = '$CC'
+cpp = '$CXX'
+ar = '${AR:-ar}'
+strip = '${STRIP:-strip}'
+pkg-config = '$(command -v pkg-config)'
+
+[host_machine]
+system = 'linux'
+cpu_family = 'aarch64'
+cpu = 'aarch64'
+endian = 'little'
+
+[built-in options]
+c_args = ['--sysroot=${SYSROOT}', '-I${deps}/include', '-fpermissive']
+c_link_args = ['--sysroot=${SYSROOT}', '-L${deps}/lib']
+cpp_args = ['--sysroot=${SYSROOT}', '-I${deps}/include', '-fpermissive']
+cpp_link_args = ['--sysroot=${SYSROOT}', '-L${deps}/lib']
+EOF
+      mextra+=(--cross-file="$xf")
+    fi
+    meson setup build \
+      --prefix="$deps" --libdir=lib --buildtype=release \
+      --default-library=shared \
+      -Dlibdrm=false -Dlibrga_demo=false \
+      "${mextra[@]}"
+    ninja -C build -j"$jobs"
+    ninja -C build install
+    if [[ -f "$deps/lib/pkgconfig/librga.pc" ]]; then
+      grep -q 'lstdc++' "$deps/lib/pkgconfig/librga.pc" \
+        || echo "Libs.private: -lstdc++" >>"$deps/lib/pkgconfig/librga.pc"
+    fi
+  )
+  kotv_syno_dep_mark rkrga "$ver"
+}
+
 kotv_syno_ensure_deps_ffmpeg() {
   kotv_syno_load_versions
-  echo "[deps] profile=ffmpeg (zlib openssl libpciaccess libdrm libva → jellyfin-ffmpeg VAAPI)"
+  echo "[deps] profile=ffmpeg (VAAPI + CUDA/ffnvcodec + QSV/libvpl + rkmpp/rkrga)"
   kotv_syno_dep_zlib
   kotv_syno_dep_openssl
   kotv_syno_export_deps_env
@@ -518,6 +687,17 @@ kotv_syno_ensure_deps_ffmpeg() {
   kotv_syno_dep_libdrm
   kotv_syno_export_deps_env
   kotv_syno_dep_libva
+  kotv_syno_export_deps_env
+  # 全架构：CUDA 头（群晖 NVIDIA 机型运行时加载）
+  kotv_syno_dep_ffnvcodec
+  kotv_syno_export_deps_env
+  # x86：QSV
+  kotv_syno_dep_libvpl
+  kotv_syno_export_deps_env
+  # arm：rkmpp/rkrga 备用
+  kotv_syno_dep_rkmpp
+  kotv_syno_export_deps_env
+  kotv_syno_dep_rkrga
   kotv_syno_export_deps_env
 }
 

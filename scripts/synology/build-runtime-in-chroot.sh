@@ -591,11 +591,12 @@ build_ffmpeg() {
   local dest="$OUT/ffmpeg"
   local jobs
   jobs="$(comp_jobs)"
-  if stamp_ok ffmpeg "jellyfin-${ver}" && [[ -x "$dest/ffmpeg" ]]; then
-    echo "[ffmpeg] skip (cached jellyfin-$ver)"
+  local stamp_ver="jellyfin-${ver}-hwa3"
+  if stamp_ok ffmpeg "$stamp_ver" && [[ -x "$dest/ffmpeg" ]]; then
+    echo "[ffmpeg] skip (cached $stamp_ver)"
     return 0
   fi
-  echo "[ffmpeg] build jellyfin-ffmpeg $ver for $ARCH_LABEL (Toolkit + VAAPI, -j$jobs)"
+  echo "[ffmpeg] build jellyfin-ffmpeg $ver for $ARCH_LABEL (Toolkit + VAAPI/CUDA/QSV/rkmpp, -j$jobs)"
   kotv_syno_ensure_deps ffmpeg
   kotv_syno_export_deps_env
   local deps
@@ -606,7 +607,6 @@ build_ffmpeg() {
   local src="$BUILD_ROOT/jellyfin-ffmpeg-${ver}"
   rm -rf "$src"
   tar -xzf "$tarball" -C "$BUILD_ROOT"
-  # github archive 目录名 jellyfin-ffmpeg-<tag without v>
   if [[ ! -d "$src" ]]; then
     echo "ERROR: extract missing $src" >&2
     ls -la "$BUILD_ROOT" | head -20 >&2 || true
@@ -620,7 +620,7 @@ build_ffmpeg() {
   export PKG_CONFIG_PATH="$PKG_CONFIG_LIBDIR"
   unset PKG_CONFIG_PATH_FOR_TARGET || true
   if ! command -v pkg-config >/dev/null 2>&1; then
-    echo "ERROR: pkg-config required for jellyfin-ffmpeg (openssl/libva/libdrm)" >&2
+    echo "ERROR: pkg-config required for jellyfin-ffmpeg" >&2
     exit 1
   fi
   local ossl_ver
@@ -628,17 +628,15 @@ build_ffmpeg() {
   if [[ -z "$ossl_ver" ]] || ! pkg-config --exists "openssl >= 3.0.0"; then
     echo "ERROR: pkg-config openssl>=3 failed (got '${ossl_ver:-none}'); PKG_CONFIG_LIBDIR=$PKG_CONFIG_LIBDIR" >&2
     ls -la "${deps}/lib/pkgconfig"/openssl*.pc 2>/dev/null || true
-    cat "${deps}/lib/pkgconfig/openssl.pc" 2>/dev/null || true
     exit 1
   fi
   echo "[ffmpeg] openssl via pkg-config: $ossl_ver"
-  pkg-config --exists libva libdrm || {
-    echo "ERROR: libva/libdrm.pc missing under deps (VAAPI)" >&2
-    ls -la "${deps}/lib/pkgconfig" | head -40 >&2 || true
+  pkg-config --exists libva libdrm ffnvcodec || {
+    echo "ERROR: libva/libdrm/ffnvcodec.pc missing under deps" >&2
+    ls -la "${deps}/lib/pkgconfig" | head -60 >&2 || true
     exit 1
   }
 
-  # 交叉：openssl 的 check_pkg_config 还要能链过（-ldl -lpthread -lz）
   local ff_cflags="-I${deps}/include --sysroot=${SYSROOT} -O2 -pipe"
   local ff_ldflags="-L${deps}/lib -L${deps}/lib64 --sysroot=${SYSROOT} -Wl,-O1 -Wl,-rpath-link,${deps}/lib"
   local ff_cfg=(
@@ -661,12 +659,22 @@ build_ffmpeg() {
     --enable-openssl
     --enable-libdrm
     --enable-vaapi
+    # CUDA/NVENC/NVDEC：头文件编进，运行时 dlopen 群晖 NVIDIA 驱动
+    --enable-ffnvcodec
+    --enable-cuda
+    --enable-cuvid
+    --enable-nvdec
+    --enable-nvenc
     --cc="$CC"
     --cxx="$CXX"
     --extra-cflags="$ff_cflags"
     --extra-ldflags="$ff_ldflags"
     --extra-libs="-ldl -lpthread -lz"
   )
+  # cuda-llvm：宿主 clang 编 CUDA bitcode（ffmpeg 默认 nvcc=clang）；无 clang 则仅保留 ffnvcodec 动态加载路径
+  if command -v clang >/dev/null 2>&1; then
+    ff_cfg+=(--enable-cuda-llvm)
+  fi
   if ! command -v nasm >/dev/null 2>&1 && ! command -v yasm >/dev/null 2>&1; then
     ff_cfg+=(--disable-x86asm)
   fi
@@ -676,10 +684,41 @@ build_ffmpeg() {
       --arch=aarch64
       --cross-prefix="$(dirname "$CC")/$(basename "$CC" | sed 's/gcc$//')"
     )
+    # arm 备用：rkmpp；rkrga 由 jellyfin debian patch 注入 configure
+    pkg-config --exists rockchip_mpp || {
+      echo "ERROR: rockchip_mpp.pc missing (rkmpp)" >&2
+      exit 1
+    }
+    ff_cfg+=(--enable-rkmpp)
+    local rga_patch=""
+    rga_patch="$(ls debian/patches/*rkrga* debian/patches/*rockchip*rga* 2>/dev/null | head -1 || true)"
+    [[ -z "$rga_patch" ]] && rga_patch="$(ls debian/patches/0042-*rockchip* 2>/dev/null | head -1 || true)"
+    if [[ -n "$rga_patch" && -f "$rga_patch" ]]; then
+      echo "[ffmpeg] apply $rga_patch (rkrga)"
+      # debian 补丁路径前缀 FFmpeg/ → 源码根用 -p1
+      if patch -p1 --forward --dry-run <"$rga_patch" >/dev/null 2>&1 \
+        || patch -p1 --forward --dry-run <"$rga_patch" 2>&1 | grep -q 'previously applied'; then
+        patch -p1 --forward <"$rga_patch" || true
+      else
+        echo "[ffmpeg] WARN: rkrga patch dry-run failed; skip" >&2
+        rga_patch=""
+      fi
+    fi
+    if [[ -n "$rga_patch" ]] && grep -q 'enable-rkrga' configure && pkg-config --exists librga; then
+      ff_cfg+=(--enable-rkrga)
+    else
+      echo "[ffmpeg] rkrga not enabled (patch/pc missing); rkmpp only" >&2
+    fi
   else
     ff_cfg+=(--arch=x86_64)
+    # x86：QSV via oneVPL
+    pkg-config --exists vpl || {
+      echo "ERROR: vpl.pc missing (libvpl/QSV)" >&2
+      exit 1
+    }
+    ff_cfg+=(--enable-libvpl)
   fi
-  # 探针：与 configure 相同的交叉 CC + flags 必须看见 OpenSSL≥3 且能链 libssl
+
   if ! printf '%s\n' '#include <openssl/ssl.h>' 'int main(void){OPENSSL_init_ssl(0,0);return 0;}' \
     | $CC $ff_cflags -x c - -o /tmp/kotv-ossl-link $ff_ldflags -lssl -lcrypto -ldl -lpthread -lz 2>/tmp/kotv-ossl-link.err; then
     echo "ERROR: openssl link probe failed (cross/native)" >&2
@@ -695,20 +734,22 @@ build_ffmpeg() {
   mkdir -p "$dest/lib"
   cp -a "$BUILD_ROOT/ffmpeg-dest/opt/kotv-ffmpeg/bin/ffmpeg" "$dest/ffmpeg"
   chmod +x "$dest/ffmpeg"
-  # ffprobe 可选
   [[ -x "$BUILD_ROOT/ffmpeg-dest/opt/kotv-ffmpeg/bin/ffprobe" ]] \
     && cp -a "$BUILD_ROOT/ffmpeg-dest/opt/kotv-ffmpeg/bin/ffprobe" "$dest/ffprobe" || true
   cp -a "$BUILD_ROOT/ffmpeg-dest/opt/kotv-ffmpeg/lib/"*.so* "$dest/lib/" 2>/dev/null || true
-  kotv_syno_deps_ship_shared "$dest/lib" ssl crypto z drm va va-drm pciaccess
-  # 运行时提示：Intel 群晖用 DSM 的 iHD/i965；可设 LIBVA_DRIVERS_PATH
+  kotv_syno_deps_ship_shared "$dest/lib" ssl crypto z drm va va-drm pciaccess vpl rockchip_mpp rga
   cat >"$dest/README-hwa.txt" <<'EOF'
-KOTV jellyfin-ffmpeg (Toolkit-built) with VAAPI/DRM.
-On Synology Intel NAS: ensure /dev/dri exists; set LIBVA_DRIVERS_PATH to DSM dri
-(e.g. /usr/lib/dri) if drivers are not beside this lib/.
+KOTV jellyfin-ffmpeg (Synology Toolkit-built)
+Enabled: VAAPI/DRM, CUDA/NVENC/NVDEC (ffnvcodec), QSV (libvpl, x86), rkmpp/rkrga (arm backup).
+Runtime:
+  - VAAPI: /dev/dri; LIBVA_DRIVERS_PATH may point at DSM dri (e.g. /usr/lib/dri)
+  - CUDA: Synology NVIDIA driver (libcuda / libnvidia-encode) must be present
+  - QSV: Intel oneVPL/MediaSDK GPU runtime on DSM
+  - rkmpp: Rockchip MPP devices (backup on arm)
 EOF
-  write_stamp ffmpeg "jellyfin-${ver}"
+  write_stamp ffmpeg "$stamp_ver"
   rm -rf "$src" "$BUILD_ROOT/ffmpeg-dest"
-  echo "[ffmpeg] ready: $dest/ffmpeg (jellyfin-$ver + vaapi)"
+  echo "[ffmpeg] ready: $dest/ffmpeg ($stamp_ver)"
 }
 
 run_component() {
