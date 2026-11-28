@@ -126,6 +126,11 @@ kotv_syno_dep_autotools() {
   mkdir -p "$deps"
   (
     cd "$src"
+    if [[ ! -x ./configure ]]; then
+      echo "ERROR: $name: no ./configure in $src (meson-only? use kotv_syno_dep_meson_lib)" >&2
+      ls -la >&2 || true
+      exit 1
+    fi
     ./configure \
       --prefix="$deps" \
       --host="$host" \
@@ -411,12 +416,13 @@ kotv_syno_ensure_deps_jre() {
 
 # ---------- jellyfin-ffmpeg HWA：libpciaccess → libdrm → libva(drm) ----------
 kotv_syno_dep_libpciaccess() {
+  # 0.18+ 仅 meson（无 ./configure）
   kotv_syno_load_versions
-  # shared：供 libdrm.so / 运行时 VAAPI 链路
-  kotv_syno_dep_autotools libpciaccess "$SYNO_LIBPCIACCESS_VER" \
+  kotv_syno_export_deps_env
+  kotv_syno_dep_meson_lib libpciaccess "$SYNO_LIBPCIACCESS_VER" \
     "https://xorg.freedesktop.org/archive/individual/lib/libpciaccess-${SYNO_LIBPCIACCESS_VER}.tar.xz" \
     "libpciaccess-${SYNO_LIBPCIACCESS_VER}" "include/pciaccess.h" \
-    --enable-shared --disable-static
+    -Dzlib=disabled
 }
 
 kotv_syno_dep_meson_lib() {
