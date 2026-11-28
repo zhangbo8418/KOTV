@@ -11,7 +11,7 @@
 | **Python** | Toolkit + `.syno-deps` | CPython optional：zlib/bzip2/xz/zstd(static+PIC)/libffi/openssl/sqlite/ncurses/readline/libuuid |
 | **JRE** | Toolkit + `.syno-deps` | OpenJDK 必选：alsa、cups、fontconfig(+expat/freetype)、X11 栈（含 libXfixes；交叉 `--disable-malloc0returnsnull`） |
 | **ffmpeg** | Toolkit + `.syno-deps` | zlib、openssl≥3（`--enable-openssl --enable-version3`；pkg-config 不走 `--static`） |
-| **Chromium** | Clang + **Toolkit sysroot ABI** | 可写 Toolkit sysroot 副本；工具链补 GCC crt/libgcc、HWCAP2 头、libdrm/xkbcommon、`dri.pc`；`headless.gn`；只编 `headless_shell` |
+| **Chromium** | Clang + **Toolkit sysroot ABI** | `headless.gn`（关 gtk/alsa/…）；清单补齐：GCC `crtbeginS`/`libgcc`、`dri.pc`（`use_sysroot` 强制）、arm `HWCAP2_*`；不编系统 libdrm/xkbcommon；只编 `headless_shell` |
 
 目标链接 **禁止宿主 `/usr`**。宿主只允许构建工具：Clang、meson/ninja、boot JDK、交叉 build-python、Node 的 `CC_host`。
 

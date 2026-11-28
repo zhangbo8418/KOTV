@@ -419,14 +419,11 @@ build_chromium() {
   if ! command -v clang >/dev/null 2>&1; then
     echo "[chromium] installing clang on host (compiler only)..."
     sudo apt-get update -qq
-    sudo apt-get install -y -qq clang lld ninja-build pkg-config meson
+    sudo apt-get install -y -qq clang lld ninja-build pkg-config
   fi
   command -v ninja >/dev/null 2>&1 || sudo apt-get install -y -qq ninja-build
-  if ! command -v meson >/dev/null 2>&1; then
-    sudo apt-get install -y -qq meson || sudo pip3 install -q meson
-  fi
 
-  # configure 前：Toolkit sysroot 副本 + GCC crt/libgcc + HWCAP2 + libdrm/xkbcommon/dri.pc
+  # configure 前：Toolkit sysroot + 清单补齐（GCC crt/libgcc、dri.pc、HWCAP2）并验收
   kotv_syno_ensure_deps chromium
   local chrome_sysroot gcc_libdir
   chrome_sysroot="$(kotv_syno_chromium_sysroot)"
@@ -434,12 +431,7 @@ build_chromium() {
   if [[ -z "$gcc_libdir" && -f "$chrome_sysroot/.kotv-gcc-libdir" ]]; then
     gcc_libdir="$(cat "$chrome_sysroot/.kotv-gcc-libdir")"
   fi
-  if [[ ! -d "$chrome_sysroot" ]] \
-    || [[ ! -f "$chrome_sysroot/usr/lib/crtbeginS.o" ]] \
-    || { [[ ! -f "$chrome_sysroot/usr/lib/pkgconfig/dri.pc" ]] && [[ ! -f "$chrome_sysroot/usr/share/pkgconfig/dri.pc" ]]; }; then
-    echo "ERROR: chromium Toolkit sysroot incomplete: $chrome_sysroot" >&2
-    exit 1
-  fi
+  kotv_syno_chromium_verify_sysroot "$chrome_sysroot" || exit 1
 
   local depot="$SRC_CACHE/depot_tools"
   if [[ ! -d "$depot/.git" ]]; then
@@ -535,8 +527,12 @@ use_custom_libcxx = true
 is_clang = true
 clang_base_path = "${clang_base}"
 clang_use_chrome_plugins = false
+# headless 不碰系统输入/GBM；libdrm 走 third_party；vaapi 因无 x11/wayland 本为 false
 use_xkbcommon = false
 use_system_minigbm = false
+ozone_platform_x11 = false
+ozone_platform_wayland = false
+ozone_platform_drm = false
 extra_ldflags = "${extra_ld}"
 EOF
   gn gen "$out_dir"
