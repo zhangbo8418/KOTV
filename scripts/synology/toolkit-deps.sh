@@ -254,6 +254,8 @@ EOF
 }
 
 # 用法：kotv_syno_cmake_build <src> <builddir> [额外 -D…]
+# 必须清空环境 CFLAGS/LDFLAGS：其中的 --sysroot=…-gnu/… 会被 CMake 拆成
+# --sysroot=…/aarch64-unknown-linux 与 -gnu/…，后一个错误 sysroot 覆盖 toolchain。
 kotv_syno_cmake_build() {
   local src="${1:?}" bdir="${2:?}" deps jobs tf
   shift 2
@@ -262,11 +264,14 @@ kotv_syno_cmake_build() {
   tf="$BUILD_ROOT/cmake-toolchain-${PLATFORM}.cmake"
   kotv_syno_cmake_toolchain_file "$tf"
   mkdir -p "$deps" "$bdir"
-  cmake -GNinja -S "$src" -B "$bdir" \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_INSTALL_PREFIX="$deps" \
-    -DCMAKE_TOOLCHAIN_FILE="$tf" \
-    "$@"
+  # CMAKE_POLICY_VERSION_MINIMUM：新 CMake 拒绝旧工程 cmake_minimum_required < 3.5（gmmlib）
+  env -u CFLAGS -u CXXFLAGS -u LDFLAGS -u CPPFLAGS \
+    cmake -GNinja -S "$src" -B "$bdir" \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_INSTALL_PREFIX="$deps" \
+      -DCMAKE_TOOLCHAIN_FILE="$tf" \
+      -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+      "$@"
   ninja -C "$bdir" -j"$jobs"
   ninja -C "$bdir" install
 }
@@ -821,7 +826,7 @@ kotv_syno_dep_media_driver() {
 kotv_syno_dep_rkmpp() {
   kotv_syno_load_versions
   # stamp 后缀：强制失效旧的错误 --sysroot 缓存
-  local ver="${SYNO_RKMPP_COMMIT}-tc3" deps tarball src
+  local ver="${SYNO_RKMPP_COMMIT}-tc4" deps tarball src
   if [[ "$PLATFORM" != rtd1296 ]]; then
     echo "[deps] rkmpp skip (arm only, PLATFORM=$PLATFORM)"
     return 0
@@ -1055,25 +1060,61 @@ EOF
   echo "[deps] chromium: wrote compat header $compat"
 }
 
-# checkout 后：仅补 aarch64_support.h（compat -include 覆盖其余）
+# GN extra_cflags=-include… 不可靠（整串/未注入）；直接改源码 + sysroot 头。
+kotv_syno_chromium_patch_prepend() {
+  local f="${1:?}" mark="${2:?}"
+  shift 2
+  [[ -f "$f" ]] || return 0
+  grep -q "$mark" "$f" && return 0
+  local tmp; tmp="$(mktemp)"
+  {
+    printf '%s\n' "$@"
+    cat "$f"
+  } >"$tmp"
+  mv "$tmp" "$f"
+  echo "[chromium] patched $(basename "$f") ($mark)"
+}
+
 kotv_syno_chromium_patch_src() {
-  local src="${1:?}" f tmp
-  f="$src/base/allocator/partition_allocator/src/partition_alloc/aarch64_support.h"
-  if [[ -f "$f" ]] && ! grep -q 'KOTV_HWCAP2' "$f"; then
-    tmp="$(mktemp)"
-    {
-      echo '/* KOTV_HWCAP2 */'
-      echo '#ifndef HWCAP2_BTI'
-      echo '#define HWCAP2_BTI (1 << 17)'
-      echo '#endif'
-      echo '#ifndef HWCAP2_MTE'
-      echo '#define HWCAP2_MTE (1 << 18)'
-      echo '#endif'
-      cat "$f"
-    } >"$tmp"
-    mv "$tmp" "$f"
-    echo "[chromium] patched aarch64_support.h (HWCAP2)"
-  fi
+  local src="${1:?}"
+  kotv_syno_chromium_patch_prepend \
+    "$src/base/allocator/partition_allocator/src/partition_alloc/aarch64_support.h" \
+    KOTV_HWCAP2 \
+    '/* KOTV_HWCAP2 */' \
+    '#ifndef HWCAP2_BTI' '#define HWCAP2_BTI (1 << 17)' '#endif' \
+    '#ifndef HWCAP2_MTE' '#define HWCAP2_MTE (1 << 18)' '#endif'
+
+  # 必须先 pragma 再写可能未使用的宏
+  kotv_syno_chromium_patch_prepend \
+    "$src/base/allocator/partition_allocator/src/partition_alloc/tagging.cc" \
+    KOTV_Wunused_macros \
+    '/* KOTV_Wunused_macros */' \
+    '#pragma clang diagnostic ignored "-Wunused-macros"'
+
+  kotv_syno_chromium_patch_prepend \
+    "$src/base/allocator/partition_allocator/src/partition_alloc/thread_isolation/pkey.cc" \
+    KOTV_SYS_PKEY \
+    '/* KOTV_SYS_PKEY */' \
+    '#pragma clang diagnostic ignored "-Wunused-macros"' \
+    '#ifndef SYS_pkey_mprotect' \
+    '# if defined(__x86_64__)' \
+    '#  define SYS_pkey_mprotect 329' \
+    '#  define SYS_pkey_alloc 330' \
+    '#  define SYS_pkey_free 331' \
+    '# elif defined(__aarch64__)' \
+    '#  define SYS_pkey_mprotect 288' \
+    '#  define SYS_pkey_alloc 289' \
+    '#  define SYS_pkey_free 290' \
+    '# endif' \
+    '#endif'
+
+  kotv_syno_chromium_patch_prepend \
+    "$src/base/process/process_posix.cc" \
+    KOTV_PIDFD \
+    '/* KOTV_PIDFD */' \
+    '#ifndef __NR_pidfd_open' \
+    '# define __NR_pidfd_open 434' \
+    '#endif'
 }
 
 kotv_syno_chromium_fill_dri_pc() {

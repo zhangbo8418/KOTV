@@ -593,7 +593,7 @@ build_ffmpeg() {
   local dest="$OUT/ffmpeg"
   local jobs
   jobs="$(comp_jobs)"
-  local stamp_ver="jellyfin-${ver}-hwa5"
+  local stamp_ver="jellyfin-${ver}-hwa6"
   if stamp_ok ffmpeg "$stamp_ver" && [[ -x "$dest/ffmpeg" ]]; then
     echo "[ffmpeg] skip (cached $stamp_ver)"
     return 0
