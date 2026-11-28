@@ -416,25 +416,226 @@ kotv_syno_ensure_deps_ffmpeg() {
   kotv_syno_export_deps_env
 }
 
-# Chromium：官方 hermetic Debian sysroot（glibc 2.31 ≤ DSM 7.2 的 2.36，可跑）
-# Toolkit sysroot 缺 Clang/lld 的 crt/libgcc，且头文件无 HWCAP2_*，不硬接
-kotv_syno_ensure_deps_chromium() {
-  local chrome_src="${1:-}" arch_arg
-  case "$PLATFORM" in
-    geminilake) arch_arg=amd64 ;;
-    rtd1296)    arch_arg=arm64 ;;
-    *) echo "ERROR: unknown PLATFORM=$PLATFORM" >&2; return 1 ;;
-  esac
-  if [[ -z "$chrome_src" || ! -d "$chrome_src" ]]; then
-    echo "[deps] profile=chromium — src not ready yet (install-sysroot later)"
+# Chromium：可写 Toolkit sysroot 副本（DSM glibc ABI）+ 工具链自编/拷贝补齐缺口
+kotv_syno_chromium_sysroot() {
+  echo "${KOTV_SYNO_CHROMIUM_SYSROOT:-${ROOT:?}/.syno-deps/${PLATFORM:?}-chromium-sysroot}"
+}
+
+kotv_syno_chromium_gcc_libdir() {
+  # Toolkit GCC 的 crt/libgcc 目录（Clang --sysroot 默认找不到）
+  local f
+  f="$("${CC:?}" -print-file-name=crtbeginS.o 2>/dev/null || true)"
+  if [[ -n "$f" && -f "$f" ]]; then
+    dirname "$f"
     return 0
   fi
-  echo "[deps] profile=chromium — hermetic Debian sysroot ($arch_arg)"
-  if [[ ! -f "$chrome_src/build/linux/sysroot_scripts/install-sysroot.py" ]]; then
-    echo "ERROR: missing install-sysroot.py under $chrome_src" >&2
+  f="$("$CC" -print-file-name=libgcc.a 2>/dev/null || true)"
+  if [[ -n "$f" && -f "$f" ]]; then
+    dirname "$f"
+    return 0
+  fi
+  echo "ERROR: cannot locate Toolkit gcc crt/libgcc via $CC" >&2
+  return 1
+}
+
+kotv_syno_chromium_fill_gcc_rt() {
+  # 把 Toolkit GCC 的 crt*.o / libgcc* 铺进 sysroot，供 Chromium 的 Clang+lld 链接
+  local sysroot="$1" gccdir dest
+  gccdir="$(kotv_syno_chromium_gcc_libdir)" || return 1
+  dest="$sysroot/usr/lib"
+  mkdir -p "$dest" "$sysroot/lib"
+  echo "[deps] chromium: seed GCC runtime from $gccdir → $dest"
+  # shellcheck disable=SC2086
+  cp -a "$gccdir"/crt*.o "$dest/" 2>/dev/null || true
+  cp -a "$gccdir"/libgcc* "$dest/" 2>/dev/null || true
+  # 部分链接器只扫 /lib
+  cp -a "$gccdir"/crt*.o "$sysroot/lib/" 2>/dev/null || true
+  cp -a "$gccdir"/libgcc* "$sysroot/lib/" 2>/dev/null || true
+  if [[ ! -f "$dest/crtbeginS.o" ]]; then
+    echo "ERROR: crtbeginS.o missing after GCC runtime fill ($gccdir)" >&2
+    ls -la "$gccdir" | head -40 >&2 || true
     return 1
   fi
-  (cd "$chrome_src" && python3 build/linux/sysroot_scripts/install-sysroot.py --arch="$arch_arg")
+  if [[ ! -e "$dest/libgcc.a" && ! -e "$dest/libgcc_s.so" && ! -e "$dest/libgcc_s.so.1" ]]; then
+    echo "ERROR: libgcc missing after GCC runtime fill ($gccdir)" >&2
+    return 1
+  fi
+  # 供 GN extra_ldflags / -B 使用
+  export KOTV_SYNO_CHROMIUM_GCC_LIBDIR="$gccdir"
+  echo "$gccdir" >"$sysroot/.kotv-gcc-libdir"
+}
+
+kotv_syno_chromium_fill_hwcap2() {
+  # Toolkit 旧 asm/hwcap.h 无 HWCAP2_BTI/MTE；Chromium partition_alloc 硬依赖
+  local sysroot="$1" h patched=0
+  local needle=$'#ifndef HWCAP2_BTI\n#define HWCAP2_BTI (1 << 17)\n#endif\n#ifndef HWCAP2_MTE\n#define HWCAP2_MTE (1 << 18)\n#endif\n'
+  while IFS= read -r -d '' h; do
+    if grep -q 'HWCAP2_BTI' "$h" 2>/dev/null && grep -q 'HWCAP2_MTE' "$h" 2>/dev/null; then
+      continue
+    fi
+    printf '%s' "$needle" >>"$h"
+    patched=1
+    echo "[deps] chromium: patched HWCAP2_* → $h"
+  done < <(find "$sysroot" \( -path '*/asm/hwcap.h' -o -path '*/bits/hwcap.h' \) -print0 2>/dev/null)
+  # 若 sysroot 根本没有 hwcap.h，落一份到 usr/include/asm
+  if [[ "$patched" -eq 0 ]]; then
+    local any
+    any="$(find "$sysroot" \( -path '*/asm/hwcap.h' -o -path '*/bits/hwcap.h' \) 2>/dev/null | head -1 || true)"
+    if [[ -z "$any" ]]; then
+      mkdir -p "$sysroot/usr/include/asm"
+      printf '%s' "$needle" >"$sysroot/usr/include/asm/hwcap.h"
+      echo "[deps] chromium: wrote $sysroot/usr/include/asm/hwcap.h"
+    fi
+  fi
+}
+
+kotv_syno_chromium_meson_tc() {
+  # $1=outfile：强制 Toolkit CC + sysroot（原生 --native-file，交叉 --cross-file）
+  local out="$1" cpu_family cpu syno_sys
+  syno_sys="$(kotv_syno_chromium_sysroot)"
+  case "$PLATFORM" in
+    geminilake) cpu_family=x86_64; cpu=x86_64 ;;
+    rtd1296)    cpu_family=aarch64; cpu=aarch64 ;;
+    *) echo "ERROR: unknown PLATFORM=$PLATFORM" >&2; return 1 ;;
+  esac
+  {
+    cat <<EOF
+[binaries]
+c = '${CC}'
+cpp = '${CXX}'
+ar = '${AR}'
+strip = '${STRIP}'
+pkg-config = 'pkg-config'
+
+[built-in options]
+c_args = ['--sysroot=${syno_sys}']
+cpp_args = ['--sysroot=${syno_sys}']
+c_link_args = ['--sysroot=${syno_sys}']
+cpp_link_args = ['--sysroot=${syno_sys}']
+EOF
+    if kotv_syno_is_cross "$PLATFORM"; then
+      cat <<EOF
+
+[host_machine]
+system = 'linux'
+cpu_family = '${cpu_family}'
+cpu = '${cpu}'
+endian = 'little'
+EOF
+    fi
+  } >"$out"
+}
+
+kotv_syno_chromium_meson_install() {
+  # $1=name $2=ver $3=url $4=dirname $5=probe_under_sysroot $6...=meson -Dopts
+  local name="$1" ver="$2" url="$3" dirname="$4" probe="$5"
+  shift 5
+  local sysroot jobs tarball src builddir tcf=()
+  sysroot="$(kotv_syno_chromium_sysroot)"
+  if [[ -e "$sysroot/$probe" ]] && [[ -f "$sysroot/.kotv-dep-${name}" ]] \
+    && [[ "$(cat "$sysroot/.kotv-dep-${name}" 2>/dev/null || true)" == "$ver" ]]; then
+    echo "[deps] chromium/$name $ver cache hit"
+    return 0
+  fi
+  if ! command -v meson >/dev/null 2>&1; then
+    echo "ERROR: meson required to build chromium sysroot dep $name" >&2
+    return 1
+  fi
+  jobs="$(kotv_syno_njobs)"
+  tarball="$(kotv_syno_dep_fetch "$url")"
+  src="$(kotv_syno_dep_extract "$tarball" "$dirname")"
+  builddir="$src/out-syno"
+  rm -rf "$builddir"
+  mkdir -p "$builddir" "$sysroot"
+  kotv_syno_chromium_meson_tc "$builddir/tc.ini"
+  if kotv_syno_is_cross "$PLATFORM"; then
+    tcf=(--cross-file "$builddir/tc.ini")
+  else
+    tcf=(--native-file "$builddir/tc.ini")
+  fi
+  # pkg-config 只看见本 sysroot（已装的 libdrm 等），禁止宿主 /usr
+  export PKG_CONFIG_SYSROOT_DIR="$sysroot"
+  export PKG_CONFIG_LIBDIR="$sysroot/usr/lib/pkgconfig:$sysroot/usr/share/pkgconfig:$sysroot/usr/lib64/pkgconfig"
+  export PKG_CONFIG_PATH="$PKG_CONFIG_LIBDIR"
+  (
+    cd "$src"
+    meson setup "$builddir" \
+      --prefix=/usr \
+      --libdir=lib \
+      --buildtype=release \
+      "${tcf[@]}" \
+      "$@"
+    meson compile -C "$builddir" -j "$jobs"
+    DESTDIR="$sysroot" meson install -C "$builddir" --no-rebuild
+  )
+  echo "$ver" >"$sysroot/.kotv-dep-${name}"
+  echo "[deps] chromium/$name $ver → $sysroot"
+}
+
+kotv_syno_ensure_deps_chromium() {
+  # Chromium 目标 ABI = Toolkit sysroot；缺包用 Toolkit GCC 编进 overlay
+  kotv_syno_load_versions
+  local sysroot stamp want gccdir
+  sysroot="$(kotv_syno_chromium_sysroot)"
+  export KOTV_SYNO_CHROMIUM_SYSROOT="$sysroot"
+  want="toolkit:${SYNO_LIBDRM_VER}:${SYNO_LIBXKBCOMMON_VER}:dri-pc1:gcc-rt2:hwcap2"
+  stamp="$sysroot/.kotv-chromium-sysroot"
+  if [[ -f "$stamp" && "$(cat "$stamp" 2>/dev/null || true)" == "$want" ]] \
+    && [[ -f "$sysroot/usr/lib/pkgconfig/dri.pc" ]] \
+    && [[ -f "$sysroot/usr/lib/crtbeginS.o" ]] \
+    && [[ -f "$sysroot/usr/lib/pkgconfig/xkbcommon.pc" || -f "$sysroot/usr/share/pkgconfig/xkbcommon.pc" ]]; then
+    echo "[deps] profile=chromium — Toolkit sysroot cache hit ($sysroot)"
+    if [[ -f "$sysroot/.kotv-gcc-libdir" ]]; then
+      export KOTV_SYNO_CHROMIUM_GCC_LIBDIR
+      KOTV_SYNO_CHROMIUM_GCC_LIBDIR="$(cat "$sysroot/.kotv-gcc-libdir")"
+    fi
+    return 0
+  fi
+  if [[ -z "${SYSROOT:-}" || ! -d "$SYSROOT" ]]; then
+    echo "ERROR: Toolkit SYSROOT required for chromium deps" >&2
+    return 1
+  fi
+  if [[ -z "${CC:-}" || ! -x "${CC:-}" ]]; then
+    echo "ERROR: Toolkit CC required for chromium deps" >&2
+    return 1
+  fi
+  echo "[deps] profile=chromium — seed Toolkit sysroot → $sysroot"
+  mkdir -p "$sysroot"
+  # 以 Toolkit sysroot 为底（glibc 2.36 ABI），再装自编包；不 --delete，以免清掉已装 overlay
+  rsync -a "${SYSROOT}/" "$sysroot/"
+
+  kotv_syno_chromium_fill_gcc_rt "$sysroot"
+  kotv_syno_chromium_fill_hwcap2 "$sysroot"
+
+  kotv_syno_chromium_meson_install libdrm "$SYNO_LIBDRM_VER" \
+    "https://dri.freedesktop.org/libdrm/libdrm-${SYNO_LIBDRM_VER}.tar.xz" \
+    "libdrm-${SYNO_LIBDRM_VER}" "usr/include/xf86drm.h" \
+    -Dintel=disabled -Dradeon=disabled -Damdgpu=disabled -Dnouveau=disabled \
+    -Dvmwgfx=disabled -Dfreedreno=disabled -Detnaviv=disabled \
+    -Dvc4=disabled -Dfreedreno-kgsl=false -Dvalgrind=disabled \
+    -Dman-pages=disabled -Dtests=false
+
+  kotv_syno_chromium_meson_install xkbcommon "$SYNO_LIBXKBCOMMON_VER" \
+    "https://xkbcommon.org/download/libxkbcommon-${SYNO_LIBXKBCOMMON_VER}.tar.xz" \
+    "libxkbcommon-${SYNO_LIBXKBCOMMON_VER}" "usr/include/xkbcommon/xkbcommon.h" \
+    -Denable-x11=false -Denable-wayland=false -Denable-docs=false \
+    -Denable-tools=false -Denable-xkbregistry=false
+
+  # use_sysroot=true 时 Chromium 必查 dri.pc；headless + bundled minigbm 不链系统 Mesa
+  mkdir -p "$sysroot/usr/lib/dri" "$sysroot/usr/lib/pkgconfig"
+  cat >"$sysroot/usr/lib/pkgconfig/dri.pc" <<'EOF'
+prefix=/usr
+libdir=${prefix}/lib
+includedir=${prefix}/include
+dridriverdir=${libdir}/dri
+Name: dri
+Description: Direct Rendering Infrastructure (pkg-config for Chromium sysroot)
+Version: 24.2.8
+Cflags:
+Libs:
+EOF
+  echo "$want" >"$stamp"
+  echo "[deps] profile=chromium ready: $sysroot (gcc_libdir=${KOTV_SYNO_CHROMIUM_GCC_LIBDIR:-})"
 }
 
 # X11：始终编进 deps（完整闭包，避免 sysroot 半套头文件）
