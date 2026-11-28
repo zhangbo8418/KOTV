@@ -2,7 +2,7 @@
 
 ## v0.3.6
 
-- 新增群晖 DSM 7.2 SPK（x86_64 / armv8）：Web 服务形态。引擎用 **Toolkit GCC+sysroot 全静态**；运行时与外部库一律 Toolkit 编（`toolkit-deps.sh` 按 CPython/OpenJDK 上游清单一次备齐，不用宿主 `/usr`）。Python 钉 3.14。CI 按「组件×架构」拆 `synology-piece`，再合并打 SPK。
+- 新增群晖 DSM 7.2 SPK（x86_64 / armv8）：Web 服务形态。引擎 Toolkit 全静态；Node/Python/JRE/ffmpeg 在 configure 前用 Toolkit 按依赖 DAG 编齐 `.syno-deps`；Chromium 走官方 hermetic Debian sysroot + headless.gn。CI 按「组件×架构」拆 job 再合并打 SPK。
 - CI 新增 Windows aarch64、Linux aarch64 桌面包；Linux x64 job 更名为 `build-linux-amd64`。
 - 依赖：Go `1.27.4`（含 go-legacy-win7）；chromedp `0.24.0` / cdproto `0.160.12`；quickjs-go `0.7.8`；anacrolix/torrent `1.63.0`；golang.org/x/* 与 modernc.org/sqlite 跟最新；torrent 传递依赖可升则升（roaring/bitset/pion webrtc 等），`anacrolix/stm` 停在 `0.5.0`（`0.6` 与 dht/v2 不兼容）。Flutter 钉死收拢到 `scripts/kotv-flutter-pins.sh`：主线 `3.50.1`；Win8+ x64/arm64 `3.47.1` + DComp；Win7 `3.19.6`。Flutter 包与 `pubspec.lock` 同步到 Dart 3.13 上限；`html`/`riverpod`/`fvp`/`path_provider_android` 等钉死项不动。Android Media3 源改为钉 commit（上游 `release-1.11.0-fongmi` 分支已删）。CI Windows 工具链收拢为专用脚本。
 - 版本号同源升至 `0.3.6`（pubspec `0.3.6+46`）。

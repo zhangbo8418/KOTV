@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# 在 Synology DSM 7.2 Toolkit sysroot 下编译 Node / Python / JRE / Chromium / ffmpeg
+# 在 Synology DSM 7.2 Toolkit 下编译 Node / Python / JRE / Chromium / ffmpeg
 # 用法: ./scripts/synology/build-runtime-in-chroot.sh <geminilake|rtd1296>
 # 产出: dist/syno-runtime-{x86_64|armv8}/
 #
-# Node/Python/OpenJDK/ffmpeg：Toolkit GCC + sysroot（armv8 在 x86 runner 上交叉）
-# Chromium：主机 Clang + Toolkit sysroot（现代 Chromium 不支持 GCC）
-# CI 按组件拆 job：KOTV_SYNO_COMPONENTS=<一个组件>；本地可一次编多个（串行）。
+# Node/Python/JRE/ffmpeg：Toolkit GCC + .syno-deps overlay（禁止宿主 /usr）
+# Chromium：Clang + 官方 hermetic Debian sysroot（install-sysroot.py）+ headless.gn
+# CI：KOTV_SYNO_COMPONENTS=<一个组件>
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -45,8 +45,13 @@ download() {
   local url="$1" dest="$2"
   mkdir -p "$(dirname "$dest")"
   if [[ -f "$dest" && -s "$dest" ]]; then
-    echo "  cache hit: $(basename "$dest")"
-    return 0
+    if [[ "$dest" == *.gz || "$dest" == *.tgz ]] && ! gzip -t "$dest" 2>/dev/null; then
+      echo "  corrupt cache, re-download: $(basename "$dest")"
+      rm -f "$dest"
+    else
+      echo "  cache hit: $(basename "$dest")"
+      return 0
+    fi
   fi
   echo "  download: $url"
   local i partial="${dest}.partial.$$"
@@ -54,6 +59,11 @@ download() {
     rm -f "$partial"
     if curl -fL --http1.1 --retry 3 --retry-delay 2 --connect-timeout 30 \
       -o "$partial" "$url" && [[ -s "$partial" ]]; then
+      if [[ "$dest" == *.gz || "$dest" == *.tgz ]] && ! gzip -t "$partial" 2>/dev/null; then
+        rm -f "$partial"
+        sleep $((i * 2))
+        continue
+      fi
       mv -f "$partial" "$dest"
       return 0
     fi
@@ -114,6 +124,9 @@ build_node() {
   fi
   echo "[node] build $ver for $ARCH_LABEL (-j$jobs)"
   kotv_syno_ensure_deps node
+  local deps
+  deps="$(kotv_syno_deps_prefix)"
+  kotv_syno_export_deps_env
   local tarball="$SRC_CACHE/node-${ver}.tar.gz"
   download "https://nodejs.org/dist/${ver}/node-${ver}.tar.gz" "$tarball"
   local src="$BUILD_ROOT/node-${ver}"
@@ -121,10 +134,27 @@ build_node() {
   mkdir -p "$BUILD_ROOT"
   tar -xzf "$tarball" -C "$BUILD_ROOT"
   cd "$src"
+  # --shared-* 显式指向 Toolkit overlay，不走宿主 /usr
   local cfg=(
     --prefix=/opt/kotv-node
     --without-npm
     --dest-cpu="${TARGET_CPU}"
+    --with-intl=full-icu
+    --shared-openssl
+    --shared-openssl-includes="$deps/include"
+    --shared-openssl-libpath="$deps/lib"
+    --shared-zlib
+    --shared-zlib-includes="$deps/include"
+    --shared-zlib-libpath="$deps/lib"
+    --shared-brotli
+    --shared-brotli-includes="$deps/include"
+    --shared-brotli-libpath="$deps/lib"
+    --shared-cares
+    --shared-cares-includes="$deps/include"
+    --shared-cares-libpath="$deps/lib"
+    --shared-nghttp2
+    --shared-nghttp2-includes="$deps/include"
+    --shared-nghttp2-libpath="$deps/lib"
   )
   local host_cc host_cxx
   host_cc="${CC_host:-gcc}"
@@ -138,12 +168,18 @@ build_node() {
     echo "[node] cross-compile: CC=$CC CC_host=$host_cc dest-cpu=${TARGET_CPU}"
   fi
   CC="$CC" CXX="$CXX" CC_host="$host_cc" CXX_host="$host_cxx" \
-    AR_host="${AR_host:-ar}" ./configure "${cfg[@]}"
+    AR_host="${AR_host:-ar}" \
+    PKG_CONFIG_PATH="${PKG_CONFIG_PATH:-}" \
+    PKG_CONFIG_LIBDIR="${PKG_CONFIG_LIBDIR:-}" \
+    PKG_CONFIG_SYSROOT_DIR="" \
+    CPPFLAGS="${CPPFLAGS:-}" LDFLAGS="${LDFLAGS:-}" \
+    ./configure "${cfg[@]}"
   make -j"$jobs"
   rm -rf "$dest"
-  mkdir -p "$dest"
+  mkdir -p "$dest/lib"
   cp -a "$src/out/Release/node" "$dest/node"
   chmod +x "$dest/node"
+  kotv_syno_deps_ship_shared "$dest/lib" ssl crypto z brotli brotlidec brotlienc brotlicommon cares nghttp2
   if [[ -f "$src/LICENSE" ]]; then cp "$src/LICENSE" "$dest/LICENSE"; fi
   write_stamp node "$ver"
   rm -rf "$src"
@@ -163,6 +199,7 @@ build_python() {
   echo "[python] build $ver for $ARCH_LABEL (-j$jobs)"
   kotv_syno_ensure_deps python
   local deps; deps="$(kotv_syno_deps_prefix)"
+  kotv_syno_export_deps_env
 
   local tarball="$SRC_CACHE/Python-${ver}.tgz"
   download "https://www.python.org/ftp/python/${ver}/Python-${ver}.tgz" "$tarball"
@@ -198,9 +235,9 @@ build_python() {
   rm -rf "$dest"
   mkdir -p "$dest"
   cp -a "$BUILD_ROOT/python-dest/opt/kotv-python/." "$dest/"
-  # 共享库：libpython 已在 prefix；openssl 等若为 .so 一并打进 lib/
   mkdir -p "$dest/lib"
-  kotv_syno_deps_ship_shared "$dest/lib" ssl crypto z bz2 lzma zstd sqlite3 ncursesw readline uuid
+  # 静态库不会被拷；openssl/zlib/sqlite/ncurses 等 shared 才进包
+  kotv_syno_deps_ship_shared "$dest/lib" ssl crypto z bz2 sqlite3 ncursesw
   if [[ -x "$dest/bin/python3" ]]; then
     if "$dest/bin/python3" -c 'import sys; print(sys.version)' >/dev/null 2>&1; then
       "$dest/bin/python3" -m pip install --upgrade pip wheel || true
@@ -232,6 +269,7 @@ build_jre() {
   kotv_syno_ensure_deps jre
   local deps x11
   deps="$(kotv_syno_deps_prefix)"
+  kotv_syno_export_deps_env
   x11="${KOTV_SYNO_X11_PREFIX:-$deps}"
 
   local gitdir="$SRC_CACHE/jdk${ver}u"
@@ -358,11 +396,10 @@ build_chromium() {
     echo "[chromium] skip (cached $tag)"
     return 0
   fi
-  echo "[chromium] build headless_shell $tag for $ARCH_LABEL (Clang + Toolkit sysroot, -j$jobs)"
-  kotv_syno_ensure_deps chromium
+  echo "[chromium] build headless_shell $tag for $ARCH_LABEL (Clang + hermetic Debian sysroot, -j$jobs)"
 
   if ! command -v clang >/dev/null 2>&1; then
-    echo "[chromium] installing clang on host..."
+    echo "[chromium] installing clang on host (compiler only)..."
     sudo apt-get update -qq
     sudo apt-get install -y -qq clang lld ninja-build pkg-config
   fi
@@ -421,16 +458,25 @@ EOF
       || git -C "$chrome_src" checkout FETCH_HEAD 2>/dev/null \
       || true
     (cd "$chrome_src" && gclient sync --nohooks --no-history -D -j"$jobs" || true)
+    (cd "$chrome_src" && gclient runhooks || true)
   fi
 
   cd "$chrome_src"
-  # 官方 headless.gn：Ozone headless，关掉 xkbcommon/gtk/alsa 等系统库探测
+  # 官方 hermetic Debian sysroot（含 dri 等完整包集合；不用 Toolkit sysroot）
+  kotv_syno_ensure_deps chromium "$chrome_src"
+
   if [[ ! -f build/args/headless.gn ]]; then
     echo "ERROR: missing build/args/headless.gn in Chromium tree" >&2
     exit 1
   fi
+  local clang_base="/usr"
+  if [[ -x third_party/llvm-build/Release+Asserts/bin/clang ]]; then
+    clang_base="$(cd third_party/llvm-build/Release+Asserts && pwd)"
+    echo "[chromium] bundled clang → $clang_base"
+  fi
   local out_dir="out/HeadlessSyno"
   mkdir -p "$out_dir"
+  # 不设 target_sysroot：使用 install-sysroot.py 装好的 //build/linux/debian_*_sysroot
   cat >"$out_dir/args.gn" <<EOF
 import("//build/args/headless.gn")
 is_debug = false
@@ -446,10 +492,9 @@ v8_enable_i18n_support = false
 target_os = "linux"
 target_cpu = "${GN_CPU}"
 use_sysroot = true
-target_sysroot = "${SYSROOT}"
 use_custom_libcxx = true
 is_clang = true
-clang_base_path = "/usr"
+clang_base_path = "${clang_base}"
 clang_use_chrome_plugins = false
 use_xkbcommon = false
 EOF
@@ -488,15 +533,18 @@ build_ffmpeg() {
   fi
   echo "[ffmpeg] build $ver for $ARCH_LABEL (-j$jobs)"
   kotv_syno_ensure_deps ffmpeg
+  kotv_syno_export_deps_env
   local tarball="$SRC_CACHE/ffmpeg-${ver}.tar.xz"
   download "https://ffmpeg.org/releases/ffmpeg-${ver}.tar.xz" "$tarball"
   local src="$BUILD_ROOT/ffmpeg-${ver}"
   rm -rf "$src"
   tar -xJf "$tarball" -C "$BUILD_ROOT"
   cd "$src"
+  # OpenSSL ≥3 + GPL 需要 --enable-version3；只看见 Toolkit deps
   local ff_cfg=(
     --prefix=/opt/kotv-ffmpeg
     --enable-gpl
+    --enable-version3
     --enable-shared
     --enable-openssl
     --disable-doc

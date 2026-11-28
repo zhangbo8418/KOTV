@@ -2,19 +2,22 @@
 
 形态与 Web 包相同（`kotv-engine` + `webapp/` + `runtime/`），因 NAS 只能跑服务端 Web。
 
-- **引擎**：DSM Toolkit GCC + sysroot **全静态**（`-trimpath`，`-ldflags="-s -w … -linkmode external -extldflags '-static --sysroot=…'"`）。CGO 走同一工具链，不用宿主 libc。
-- **运行时**（Node / Python / JRE / Chromium / ffmpeg）：同一 Toolkit 交叉或本地编。
-- **deps**（`toolkit-deps.sh`）：按上游文档一次备齐外部库，全部用 Toolkit 编进 `.syno-deps/<platform>/`，**不用宿主 `/usr`**。sysroot 仅作工具链环境（含已有 X11 头文件时）。
+## 工具链与依赖闭包
 
-| 组件 | 外部依赖策略 |
-|------|----------------|
-| Node | 上游把 openssl/zlib/icu 等编进二进制，无 overlay |
-| Python | CPython optional modules：zlib/bzip2/xz/zstd/libffi/openssl/sqlite/ncurses/readline/libuuid |
-| JRE | OpenJDK 必选：alsa、cups、fontconfig（+expat/freetype）、X11（优先 sysroot，否则自编） |
-| Chromium | 官方 `build/args/headless.gn` + third_party；宿主 Clang 仅作编译器 |
-| ffmpeg | zlib + openssl（Toolkit 自编） |
+| 组件 | 目标链接 | 依赖闭包（configure 前一次编齐） |
+|------|----------|----------------------------------|
+| **engine** | Toolkit GCC+sysroot **全静态** | 无外部 .so |
+| **Node** | Toolkit + `.syno-deps` | zlib、brotli、c-ares、nghttp2、openssl（`--shared-*`）；ICU 用树内 full-icu |
+| **Python** | Toolkit + `.syno-deps` | CPython optional：zlib/bzip2/xz/zstd(static)/libffi/openssl/sqlite/ncurses/readline/libuuid |
+| **JRE** | Toolkit + `.syno-deps` | OpenJDK 必选：alsa、cups、fontconfig(+expat/freetype)、X11 栈（始终自编） |
+| **ffmpeg** | Toolkit + `.syno-deps` | zlib、openssl（`--enable-openssl --enable-version3`） |
+| **Chromium** | **官方 hermetic Debian sysroot** | `install-sysroot.py` + `headless.gn` + third_party；Clang 仅作编译器，**不用** Toolkit sysroot（避免 dri/xkbcommon 缺啥补啥） |
 
-Web 便携包的 musl 静态引擎仍用仓库根目录 `scripts/build-engine-static-linux.sh`，与群晖路径分离。
+目标链接 **禁止宿主 `/usr`**。宿主只允许构建工具：Clang、boot JDK、交叉 build-python、Node 的 `CC_host`。
+
+共用：`common.sh`、`toolkit-deps.sh`（`kotv_syno_ensure_deps <profile>`）。
+
+Web 便携包 musl 静态引擎仍用仓库根目录 `scripts/build-engine-static-linux.sh`，与群晖路径分离。
 
 仅在 GitHub Actions 构建。
 
@@ -25,15 +28,13 @@ Web 便携包的 musl 静态引擎仍用仓库根目录 `scripts/build-engine-st
 | `synology-piece`（矩阵） | runtime × `{x86_64,armv8}`；`engine`×2；`webapp`、`bridge` |
 | `synology-package` | 下载全部 `syno-*.tar` → `ci-assemble-spks.sh` → 两个 `.spk` |
 
-平台：`geminilake`→x86_64，`rtd1296`→armv8。Python 钉 `3.14.x`（交叉编时宿主 build-python 的 major.minor 须一致）。
+平台：`geminilake`→x86_64，`rtd1296`→armv8。
 
 ```bash
 ./scripts/synology/ci-build-piece.sh engine geminilake
 ./scripts/synology/ci-build-piece.sh runtime geminilake node
 ./scripts/synology/ci-assemble-spks.sh
 ```
-
-共用：`common.sh`（工具链 / 引擎校验）、`toolkit-deps.sh`（`kotv_syno_ensure_deps <profile>`）。
 
 ## 本地一站（慢，仅调试）
 
@@ -48,5 +49,5 @@ Web 便携包的 musl 静态引擎仍用仓库根目录 `scripts/build-engine-st
 |------|------|
 | `KOTV_SYNO_JOBS` | make/ninja `-j` |
 | `KOTV_SYNO_COMPONENTS` | 限制 runtime 组件（CI piece 设为单个） |
-| `KOTV_SYNO_DEPS_PREFIX` | Toolkit 自编 deps 安装前缀（默认 `.syno-deps/<platform>`） |
+| `KOTV_SYNO_DEPS_PREFIX` | Toolkit 自编 deps 前缀（默认 `.syno-deps/<platform>`） |
 | `KOTV_SYNO_CHROMIUM_TARBALL` | 预打包 chromium src |
