@@ -137,8 +137,8 @@ kotv_syno_artifact_name() {
   echo "syno-${piece}-${arch}"
 }
 
-# 断言引擎为 Toolkit 动态链 glibc（交叉产物勿用宿主 ldd 判定）
-kotv_syno_assert_dynamic_engine() {
+# 断言引擎为全静态（群晖 SPK 与 Web 包共用 musl 静态引擎）
+kotv_syno_assert_static_engine() {
   local eng="$1"
   local info
   if [[ ! -x "$eng" ]]; then
@@ -146,28 +146,30 @@ kotv_syno_assert_dynamic_engine() {
     return 1
   fi
   info="$(file -b "$eng" 2>/dev/null || true)"
+  if [[ "$info" == *"dynamically linked"* ]]; then
+    echo "ERROR: expected statically linked engine, got: $info" >&2
+    if command -v ldd >/dev/null 2>&1; then
+      ldd "$eng" 2>&1 | head -20 >&2 || true
+    fi
+    return 1
+  fi
   case "$info" in
-    *statically\ linked*)
-      echo "ERROR: engine is statically linked; Synology SPK needs Toolkit dynamic engine" >&2
-      echo "$info" >&2
-      return 1
+    *statically\ linked*|*static*)
+      echo "engine static OK: $info"
+      ;;
+    *)
+      # 部分 file 版本对 musl 静态只报 ELF，再用 ldd / readelf 兜底
+      if command -v ldd >/dev/null 2>&1 && ldd "$eng" >/dev/null 2>&1; then
+        echo "ERROR: ldd resolved deps; not fully static: $info" >&2
+        ldd "$eng" >&2 || true
+        return 1
+      fi
+      if command -v readelf >/dev/null 2>&1 && readelf -l "$eng" 2>/dev/null | grep -q 'INTERP'; then
+        echo "ERROR: engine has INTERP (dynamic): $info" >&2
+        return 1
+      fi
+      echo "engine static OK (no dynamic INTERP): ${info:-unknown}"
       ;;
   esac
-  if [[ "$info" != *"dynamically linked"* ]]; then
-    echo "ERROR: expected dynamically linked engine, got: ${info:-unknown}" >&2
-    return 1
-  fi
-  if [[ "$info" == *musl* ]]; then
-    echo "ERROR: musl-linked engine not allowed for Synology SPK" >&2
-    return 1
-  fi
-  if command -v readelf >/dev/null 2>&1; then
-    if ! readelf -l "$eng" 2>/dev/null | grep -q 'INTERP'; then
-      echo "ERROR: engine missing INTERP (not a dynamic ELF)" >&2
-      return 1
-    fi
-    echo "engine dynamic deps (readelf):"
-    readelf -d "$eng" 2>/dev/null | grep -E 'NEEDED|Shared library' | head -20 || true
-  fi
   return 0
 }

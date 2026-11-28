@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 组装群晖 SPK：Toolkit 引擎 + webapp + Toolkit 运行时（Web 服务形态）。
+# 组装群晖 SPK：静态引擎 + webapp + Toolkit 运行时（Web 服务形态）。
 # 用法:
 #   ./scripts/synology/package-spk.sh <x86_64|armv8> \
 #     --engine PATH --webapp DIR --runtime-dir DIR [--version VER]
@@ -26,9 +26,8 @@ while [[ $# -gt 0 ]]; do
     --webapp) WEBAPP="${2:?}"; shift 2 ;;
     --runtime-dir) RUNTIME_DIR="${2:?}"; shift 2 ;;
     --version) VERSION="${2:?}"; shift 2 ;;
-    # 兼容旧参数名（勿再传 musl web 包目录）
     --web-dir)
-      echo "ERROR: --web-dir 已移除；请分别传 --engine 与 --webapp（Toolkit 引擎，非 musl Web zip）" >&2
+      echo "ERROR: --web-dir 已移除；请分别传 --engine 与 --webapp" >&2
       exit 1
       ;;
     *) echo "unknown arg: $1" >&2; exit 1 ;;
@@ -68,7 +67,7 @@ echo "    engine=$ENGINE"
 echo "    webapp=$WEBAPP"
 echo "    runtime=$RUNTIME_DIR"
 
-kotv_syno_assert_dynamic_engine "$ENGINE"
+kotv_syno_assert_static_engine "$ENGINE"
 if [[ ! -f "$WEBAPP/index.html" ]]; then
   echo "ERROR: missing webapp: $WEBAPP/index.html" >&2
   exit 1

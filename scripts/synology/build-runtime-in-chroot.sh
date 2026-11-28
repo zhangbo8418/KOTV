@@ -180,6 +180,20 @@ build_python() {
   CC="$CC" CXX="$CXX" \
     ac_cv_file__dev_ptmx=yes ac_cv_file__dev_ptc=no \
     ./configure "${py_cfg[@]}"
+  # Toolkit sysroot 常无可用 ffi.h（_ctypes 会挂）；能编过则保留，否则禁用。
+  if ! echo '#include <ffi.h>' | "$CC" $CFLAGS -E - >/dev/null 2>&1; then
+    local ffi_h
+    ffi_h="$(find "$SYSROOT" -name ffi.h 2>/dev/null | head -1 || true)"
+    if [[ -n "$ffi_h" ]]; then
+      echo "[python] add -I$(dirname "$ffi_h") for ffi.h"
+      # shellcheck disable=SC2016
+      sed -i.bak "s|^CFLAGS=\\(.*\\)$|CFLAGS=\\1 -I$(dirname "$ffi_h")|" Makefile
+    fi
+    if ! echo '#include <ffi.h>' | "$CC" $CFLAGS -I"$(dirname "${ffi_h:-/}")" -E - >/dev/null 2>&1; then
+      echo "[python] ffi.h unavailable; disable _ctypes"
+      printf '%s\n' '*disabled*' '_ctypes' '_ctypes_test' >>Modules/Setup.local
+    fi
+  fi
   make -j"$jobs"
   make DESTDIR="$BUILD_ROOT/python-dest" install
   rm -rf "$dest"
@@ -237,6 +251,7 @@ build_jre() {
     --disable-warnings-as-errors
     --with-native-debug-symbols=none
     --with-debug-level=release
+    --enable-headless-only
     --with-extra-cflags="$CFLAGS"
     --with-extra-cxxflags="$CXXFLAGS"
     --with-extra-ldflags="$LDFLAGS"
@@ -390,8 +405,7 @@ EOF
   fi
 
   cd "$chrome_src"
-  rm -rf third_party/llvm-build 2>/dev/null || true
-
+  # 勿删 third_party/llvm-build：GN 仍读 cr_build_revision；改用宿主 clang
   local out_dir="out/HeadlessSyno"
   local args=(
     "is_debug=false"
@@ -412,6 +426,8 @@ EOF
     "target_sysroot=\"${SYSROOT}\""
     "use_custom_libcxx=true"
     "is_clang=true"
+    'clang_base_path="/usr"'
+    "clang_use_chrome_plugins=false"
   )
   gn gen "$out_dir" --args="${args[*]}"
   ninja -C "$out_dir" -j"$jobs" headless_shell chrome-headless-shell \
@@ -464,6 +480,10 @@ build_ffmpeg() {
     --extra-cflags="$CFLAGS"
     --extra-ldflags="$LDFLAGS"
   )
+  # Toolkit 交叉/CI 环境常无 nasm；禁用 x86asm 仍可出 ffmpeg 二进制
+  if ! command -v nasm >/dev/null 2>&1 && ! command -v yasm >/dev/null 2>&1; then
+    ff_cfg+=(--disable-x86asm)
+  fi
   if [[ "$CROSS" -eq 1 ]]; then
     ff_cfg+=(
       --enable-cross-compile

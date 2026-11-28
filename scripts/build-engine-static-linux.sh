@@ -26,10 +26,10 @@ TMP_ABS="$ROOT/$TMP_REL"
 mkdir -p "$(dirname "$TMP_ABS")"
 
 VER_LD="$(kotv_engine_version_ldflags "$VERSION")"
+# -s -w 缩体积；-trimpath 去掉本地路径；external+static 链进 musl/QuickJS
 LDFLAGS="-s -w ${VER_LD} -linkmode external -extldflags '-static'"
 IMAGE="${KOTV_STATIC_GO_IMAGE:-golang:1.27.4-alpine}"
-# Docker/CI 挂载仓库时 git 常不可用或 safe.directory 失败，关掉 VCS stamping
-BUILD_VCS="-buildvcs=false"
+BUILD_FLAGS=(-trimpath -buildvcs=false)
 
 (cd "$ROOT/internal/spider" && go run gen_qjsinc.go)
 
@@ -49,13 +49,13 @@ if command -v docker >/dev/null 2>&1; then
       export GOFLAGS=-buildvcs=false
       cd /src/internal/spider && go run gen_qjsinc.go
       cd /src
-      go build -buildvcs=false -ldflags \"$LDFLAGS\" -o /src/$TMP_REL ./cmd/engine
+      go build -trimpath -buildvcs=false -ldflags \"$LDFLAGS\" -o /src/$TMP_REL ./cmd/engine
     "
 elif [[ "$(uname -s)" == "Linux" ]] && command -v musl-gcc >/dev/null 2>&1 && [[ "$GOARCH" == "$host_goarch" ]]; then
   echo "==> static engine via musl-gcc (GOARCH=$GOARCH; 若 C++ 链接失败请改用 Docker)"
   (cd "$ROOT" && \
     CGO_ENABLED=1 GOOS=linux GOARCH="$GOARCH" CC=musl-gcc CXX="${CXX:-musl-gcc}" \
-    go build $BUILD_VCS -ldflags "$LDFLAGS" -o "$TMP_ABS" ./cmd/engine)
+    go build "${BUILD_FLAGS[@]}" -ldflags "$LDFLAGS" -o "$TMP_ABS" ./cmd/engine)
 else
   echo "ERROR: Linux 全静态引擎需要 Docker（推荐）或 musl-gcc" >&2
   exit 1

@@ -909,7 +909,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y git python3 python3-pip xz-utils cifs-utils \
-            build-essential clang lld ninja-build pkg-config curl ca-certificates \
+            build-essential clang lld ninja-build nasm pkg-config curl ca-certificates \
             autoconf automake libtool cmake unzip zip rsync docker.io
           sudo systemctl start docker || sudo service docker start || true
           sudo usermod -aG docker "$USER" || true
@@ -917,7 +917,7 @@ jobs:
           docker version
 
       - name: Cache Synology toolkit + sources
-        if: matrix.kind == 'runtime' || matrix.kind == 'engine'
+        if: matrix.kind == 'runtime'
         uses: actions/cache@v4
         with:
           path: |
@@ -945,6 +945,7 @@ jobs:
               ./scripts/synology/ci-build-piece.sh runtime "${{ matrix.toolkit_plat }}" "${{ matrix.piece }}"
               ;;
             engine)
+              # musl 静态引擎（Docker alpine），不依赖 Toolkit
               ./scripts/synology/ci-build-piece.sh engine "${{ matrix.toolkit_plat }}"
               ;;
             webapp)
@@ -993,10 +994,12 @@ jobs:
           ls -lh dist/syno-pieces/
           ./scripts/synology/ci-assemble-spks.sh dist/syno-pieces
           ls -lh dist/KO影视-*-synology-*.spk
+          # shellcheck source=scripts/synology/common.sh
+          source scripts/synology/common.sh
           for arch in x86_64 armv8; do
             eng="dist/syno-engine-${arch}/kotv-engine"
             file "$eng"
-            readelf -d "$eng" 2>/dev/null | grep -E 'NEEDED|Shared library' | head -20 || true
+            kotv_syno_assert_static_engine "$eng"
           done
 
       - uses: actions/upload-artifact@v4
@@ -1177,7 +1180,7 @@ jobs:
             echo "| Android aarch64 | [APK](${base}/KO影视-${ver}-aarch64.apk) |"
             echo "| Android armv7 | [APK](${base}/KO影视-${ver}-armv7.apk) |"
             echo "| **Web 包**（引擎同端口） | [引擎+Web](${base}/KO影视-${ver}-web-linux-x86_64.zip) · [仅 webapp](${base}/KO影视-${ver}-web-static.zip) |"
-            echo "| **群晖 DSM 7.2 SPK**（Toolkit 引擎+运行时） | [x86_64](${base}/KO影视-${ver}-synology-x86_64.spk) · [armv8](${base}/KO影视-${ver}-synology-armv8.spk) |"
+            echo "| **群晖 DSM 7.2 SPK**（静态引擎 + Toolkit 运行时） | [x86_64](${base}/KO影视-${ver}-synology-x86_64.spk) · [armv8](${base}/KO影视-${ver}-synology-armv8.spk) |"
             echo "| iOS（未签名） | [IPA](${base}/KO影视-${ver}-ios.ipa) |"
           } > ./RELEASE_NOTES.md
 
