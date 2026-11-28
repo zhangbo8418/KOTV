@@ -5,10 +5,17 @@
 # 用法: kotv-windows-mpv-import-libs.sh [path/to/mpv-2.dll]
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=kotv-win-build-env.sh
+source "$ROOT/scripts/kotv-win-build-env.sh"
 dll="${1:-$ROOT/flutter/assets/mpv-libs/windows/mpv-2.dll}"
 [[ -f "$dll" ]] || { echo "usage: $0 <mpv-2.dll>" >&2; exit 1; }
 dir="$(cd "$(dirname "$dll")" && pwd)"
 dest_def="$dir/mpv-2.def"
+# MSVC lib.exe：arm64 包必须 -machine:ARM64，写死 x64 会 LNK4272 +  unresolved mpv_*。
+mpv_lib_machine="x64"
+if kotv_windows_is_arm64; then
+  mpv_lib_machine="ARM64"
+fi
 
 if command -v gendef >/dev/null 2>&1; then
   gendef - "$dll" >"$dest_def" 2>/dev/null || gendef "$dll" - >"$dest_def" 2>/dev/null || true
@@ -44,8 +51,8 @@ if [[ -s "$dest_def" && -n "$libexe" ]]; then
     win_def="$(cygpath -m "$dest_def")"
     win_out="$(cygpath -m "$dir/mpv.lib")"
   fi
-  MSYS2_ARG_CONV_EXCL='*' "$libexe" -nologo -machine:x64 "-def:$win_def" "-out:$win_out" \
-    && echo "ok windows/mpv.lib (MSVC import, LIBRARY=libmpv-2.dll)"
+  MSYS2_ARG_CONV_EXCL='*' "$libexe" -nologo "-machine:${mpv_lib_machine}" "-def:$win_def" "-out:$win_out" \
+    && echo "ok windows/mpv.lib (MSVC import, machine=${mpv_lib_machine}, LIBRARY=libmpv-2.dll)"
 fi
 
 if [[ ! -f "$dir/mpv.lib" && ! -f "$dir/libmpv.dll.a" ]]; then
