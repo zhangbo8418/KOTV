@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 群晖 Toolkit 共用：平台映射、sysroot / 交叉编译器、并行调度、引擎校验。
+# 群晖 Toolkit 共用：平台映射、sysroot / 交叉编译器、组件清单、引擎校验。
 # 由其它 scripts/synology/*.sh source，勿直接执行。
 # shellcheck shell=bash
 
@@ -22,6 +22,11 @@ kotv_syno_plat_meta() {
       return 1
       ;;
   esac
+}
+
+# Toolkit 运行时组件（CI 矩阵与本地 build-spk 共用）
+kotv_syno_runtime_components() {
+  echo "node python jre chromium ffmpeg"
 }
 
 # 是否在交叉编（Toolkit 目标 arch ≠ 宿主）
@@ -126,60 +131,10 @@ kotv_syno_njobs() {
   echo "${KOTV_SYNO_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
 }
 
-# 多任务并行时均分 make/ninja -j，避免 N 路各占满核
-# 用法: kotv_syno_jobs_budget <并行任务数>
-kotv_syno_jobs_budget() {
-  local n="${1:-1}" total
-  total="$(kotv_syno_njobs)"
-  if [[ "$n" -lt 1 ]]; then n=1; fi
-  local per=$(( total / n ))
-  if [[ "$per" -lt 1 ]]; then per=1; fi
-  echo "$per"
-}
-
-# 并行跑若干命令；任一失败则整体失败。日志前缀为任务名。
-# 用法: kotv_syno_parallel "name1:cmd1" "name2:cmd2" ...
-# cmd 在当前 shell 函数可见范围内执行（需 export -f 或外部脚本）。
-kotv_syno_parallel() {
-  local -a specs=("$@")
-  local -a pids=() names=()
-  local i spec name cmd logdir rc=0 pid
-  if [[ ${#specs[@]} -eq 0 ]]; then
-    return 0
-  fi
-  logdir="${KOTV_SYNO_PARALLEL_LOGDIR:-$(kotv_syno_root)/.syno-build/parallel-logs}"
-  mkdir -p "$logdir"
-  echo "==> parallel (${#specs[@]}): ${specs[*]%%:*}"
-  for spec in "${specs[@]}"; do
-    name="${spec%%:*}"
-    cmd="${spec#*:}"
-    if [[ -z "$name" || "$name" == "$spec" || -z "$cmd" ]]; then
-      echo "ERROR: kotv_syno_parallel want name:command, got: $spec" >&2
-      return 1
-    fi
-    names+=("$name")
-    (
-      set -euo pipefail
-      echo "[$name] start"
-      # shellcheck disable=SC2086
-      eval "$cmd"
-    ) >"$logdir/${name}.log" 2>&1 &
-    pids+=("$!")
-  done
-  for i in "${!pids[@]}"; do
-    pid="${pids[$i]}"
-    name="${names[$i]}"
-    if wait "$pid"; then
-      echo "[$name] ok"
-      # 成功时只回显末尾，减少 CI 刷屏；失败时整份日志
-      tail -n 40 "$logdir/${name}.log" 2>/dev/null || true
-    else
-      rc=1
-      echo "[$name] FAILED (see $logdir/${name}.log)" >&2
-      cat "$logdir/${name}.log" >&2 || true
-    fi
-  done
-  return "$rc"
+# CI artifact 名：syno-{piece}-{arch|any}
+kotv_syno_artifact_name() {
+  local piece="$1" arch="${2:-any}"
+  echo "syno-${piece}-${arch}"
 }
 
 # 断言引擎为 Toolkit 动态链 glibc（交叉产物勿用宿主 ldd 判定）

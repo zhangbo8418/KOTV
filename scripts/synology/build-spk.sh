@@ -1,48 +1,62 @@
 #!/usr/bin/env bash
-# 群晖 SPK 一站入口（CI）：Toolkit 编引擎+运行时，Web 形态（webapp），打 SPK。
-# 用法: ./scripts/synology/build-spk.sh <geminilake|rtd1296>
+# 群晖 SPK 本地一站入口（逐块 ci-build-piece → package）。
+# CI：workflow 矩阵各跑一块，最后 ci-assemble-spks.sh 合并打 SPK。
 #
-# deploy-toolkit 之后并行：webapp / engine / runtime(组件再并行) / bridge.jar
-# 产物:
-#   dist/syno-engine-{arch}/kotv-engine
-#   dist/syno-runtime-{arch}/
-#   dist/KO影视-{ver}-synology-{arch}.spk
+# 用法: ./scripts/synology/build-spk.sh <geminilake|rtd1296|all>
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 # shellcheck source=common.sh
 source "$ROOT/scripts/synology/common.sh"
 kotv_syno_load_versions
 
-PLATFORM="${1:?usage: build-spk.sh <geminilake|rtd1296>}"
-read -r ARCH_LABEL _GOARCH _TARGET <<<"$(kotv_syno_plat_meta "$PLATFORM")"
+ARG="${1:?usage: build-spk.sh <geminilake|rtd1296|all>}"
+chmod +x "$ROOT/scripts/synology/"*.sh
 
-chmod +x "$ROOT/scripts/synology/"*.sh "$ROOT/scripts/build-flutter-webapp.sh" "$ROOT/bridge/build.sh"
+"$ROOT/scripts/synology/ci-build-piece.sh" webapp
+"$ROOT/scripts/synology/ci-build-piece.sh" bridge
 
-echo "======== Synology SPK: $PLATFORM ($ARCH_LABEL) ========"
+build_plat_pieces() {
+  local plat="$1" c
+  "$ROOT/scripts/synology/ci-build-piece.sh" engine "$plat"
+  for c in $(kotv_syno_runtime_components); do
+    "$ROOT/scripts/synology/ci-build-piece.sh" runtime "$plat" "$c"
+  done
+}
 
-"$ROOT/scripts/synology/deploy-toolkit.sh" "$PLATFORM"
+package_one() {
+  local plat="$1" arch
+  read -r arch _ <<<"$(kotv_syno_plat_meta "$plat")"
+  mkdir -p "$ROOT/dist/syno-runtime-${arch}/bridge"
+  cp -a "$ROOT/dist/syno-bridge/spider-bridge.jar" \
+    "$ROOT/dist/syno-runtime-${arch}/bridge/spider-bridge.jar"
+  cat >"$ROOT/dist/syno-runtime-${arch}/.kotv-runtime" <<EOF
+platform=synology-${arch}
+toolkit_platform=${plat}
+dsm=${SYNO_DSM_VER}
+prepared=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+EOF
+  "$ROOT/scripts/synology/package-spk.sh" "$arch" \
+    --engine "$ROOT/dist/syno-engine-${arch}/kotv-engine" \
+    --webapp "$ROOT/dist/syno-webapp" \
+    --runtime-dir "$ROOT/dist/syno-runtime-${arch}"
+}
 
-WEBAPP="$ROOT/dist/syno-webapp"
-ENGINE_OUT="$ROOT/dist/syno-engine-${ARCH_LABEL}/kotv-engine"
-RUNTIME_DIR="$ROOT/dist/syno-runtime-${ARCH_LABEL}"
-LOGDIR="$ROOT/.syno-build/${PLATFORM}/spk-stage-logs"
-export KOTV_SYNO_PARALLEL_LOGDIR="$LOGDIR"
-mkdir -p "$LOGDIR"
+case "$ARG" in
+  all)
+    build_plat_pieces geminilake
+    build_plat_pieces rtd1296
+    package_one geminilake
+    package_one rtd1296
+    ;;
+  geminilake|rtd1296)
+    build_plat_pieces "$ARG"
+    package_one "$ARG"
+    ;;
+  *)
+    echo "usage: build-spk.sh <geminilake|rtd1296|all>" >&2
+    exit 1
+    ;;
+esac
 
-# Toolkit 就绪后四路并行（各自独立进程，互不抢同一 BUILD 子目录）
-echo "==> parallel stages: webapp / engine / runtime / bridge"
-kotv_syno_parallel \
-  "webapp:if [[ -f \"$WEBAPP/index.html\" ]]; then echo \"webapp cache hit: $WEBAPP\"; else \"$ROOT/scripts/build-flutter-webapp.sh\" \"$WEBAPP\"; fi" \
-  "engine:$ROOT/scripts/synology/build-engine.sh \"$PLATFORM\" \"$ENGINE_OUT\"" \
-  "runtime:$ROOT/scripts/synology/build-runtime-in-chroot.sh \"$PLATFORM\"" \
-  "bridge:if [[ -f \"$ROOT/bridge/spider-bridge.jar\" ]]; then echo \"bridge cache hit\"; else (cd \"$ROOT\" && ./bridge/build.sh); fi"
-
-mkdir -p "$RUNTIME_DIR/bridge"
-cp -a "$ROOT/bridge/spider-bridge.jar" "$RUNTIME_DIR/bridge/"
-
-"$ROOT/scripts/synology/package-spk.sh" "$ARCH_LABEL" \
-  --engine "$ENGINE_OUT" \
-  --webapp "$WEBAPP" \
-  --runtime-dir "$RUNTIME_DIR"
-
-echo "======== Synology SPK done ($ARCH_LABEL) ========"
+echo "======== Synology SPK done ($ARG) ========"
+ls -lh "$ROOT/dist"/KO影视-*-synology-*.spk

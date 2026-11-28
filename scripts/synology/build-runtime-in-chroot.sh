@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# 在 Synology DSM 7.2 Toolkit sysroot 下并行编译 Node / Python / JRE / Chromium / ffmpeg
+# 在 Synology DSM 7.2 Toolkit sysroot 下编译 Node / Python / JRE / Chromium / ffmpeg
 # 用法: ./scripts/synology/build-runtime-in-chroot.sh <geminilake|rtd1296>
 # 产出: dist/syno-runtime-{x86_64|armv8}/
 #
 # Node/Python/OpenJDK/ffmpeg：Toolkit GCC + sysroot（armv8 在 x86 runner 上交叉）
 # Chromium：主机 Clang + Toolkit sysroot（现代 Chromium 不支持 GCC）
-# 组件默认并行；可用 KOTV_SYNO_COMPONENTS 筛选，KOTV_SYNO_RUNTIME_SERIAL=1 强制串行。
+# CI 按组件拆 job：KOTV_SYNO_COMPONENTS=<一个组件>；本地可一次编多个（串行）。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -79,9 +79,8 @@ write_stamp() {
   echo "$ver" >"$OUT/.kotv-syno-${name}"
 }
 
-# 当前组件可用的 -j（并行调度时由外层注入 KOTV_SYNO_COMP_JOBS）
 comp_jobs() {
-  echo "${KOTV_SYNO_COMP_JOBS:-$JOBS_TOTAL}"
+  echo "$JOBS_TOTAL"
 }
 
 host_python() {
@@ -499,31 +498,13 @@ run_component() {
 }
 
 echo "======== syno runtime build: $PLATFORM → $OUT ========"
-COMPONENTS="${KOTV_SYNO_COMPONENTS:-node python jre chromium ffmpeg}"
-# shellcheck disable=SC2206
-COMP_ARR=($COMPONENTS)
-N_COMP=${#COMP_ARR[@]}
-# 并行时均分 -j；子 shell 继承本脚本函数定义（无需 export -f）
-KOTV_SYNO_COMP_JOBS="$(kotv_syno_jobs_budget "$N_COMP")"
-export KOTV_SYNO_COMP_JOBS
+COMPONENTS="${KOTV_SYNO_COMPONENTS:-$(kotv_syno_runtime_components)}"
+echo "==> components: ${COMPONENTS} (-j${JOBS_TOTAL})"
+# shellcheck disable=SC2086
+for c in $COMPONENTS; do
+  run_component "$c"
+done
 
-if [[ "${KOTV_SYNO_RUNTIME_SERIAL:-0}" == "1" ]]; then
-  echo "==> runtime serial (${COMPONENTS})"
-  for c in "${COMP_ARR[@]}"; do
-    run_component "$c"
-  done
-else
-  echo "==> runtime parallel (${COMPONENTS}); per-component -j${KOTV_SYNO_COMP_JOBS} (total cores ${JOBS_TOTAL})"
-  specs=()
-  for c in "${COMP_ARR[@]}"; do
-    specs+=("${c}:run_component ${c}")
-  done
-  export KOTV_SYNO_PARALLEL_LOGDIR="$BUILD_ROOT/runtime-logs"
-  kotv_syno_parallel "${specs[@]}"
-fi
-
-_parallel_flag=1
-if [[ "${KOTV_SYNO_RUNTIME_SERIAL:-0}" == "1" ]]; then _parallel_flag=0; fi
 cat >"$OUT/.kotv-runtime" <<EOF
 platform=synology-${ARCH_LABEL}
 toolkit_platform=${PLATFORM}
@@ -531,9 +512,8 @@ dsm=${DSM_VER}
 prepared=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 sysroot=${SYSROOT}
 cc=${CC}
-parallel=${_parallel_flag}
+components=${COMPONENTS}
 EOF
-unset _parallel_flag
 
 echo "======== done: $OUT ========"
 du -sh "$OUT"/* 2>/dev/null || ls -la "$OUT"

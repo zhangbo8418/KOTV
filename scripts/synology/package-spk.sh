@@ -102,14 +102,11 @@ cp -a "$RUNTIME_DIR/chromium" "$PKG_ROOT/runtime/chromium"
 [[ -d "$RUNTIME_DIR/ffmpeg" ]] && cp -a "$RUNTIME_DIR/ffmpeg" "$PKG_ROOT/runtime/ffmpeg"
 
 mkdir -p "$PKG_ROOT/runtime/bridge"
-if [[ -f "$RUNTIME_DIR/bridge/spider-bridge.jar" ]]; then
-  cp -a "$RUNTIME_DIR/bridge/spider-bridge.jar" "$PKG_ROOT/runtime/bridge/"
-elif [[ -f "$ROOT/bridge/spider-bridge.jar" ]]; then
-  cp -a "$ROOT/bridge/spider-bridge.jar" "$PKG_ROOT/runtime/bridge/"
-else
-  (cd "$ROOT" && ./bridge/build.sh)
-  cp -a "$ROOT/bridge/spider-bridge.jar" "$PKG_ROOT/runtime/bridge/"
+if [[ ! -f "$RUNTIME_DIR/bridge/spider-bridge.jar" ]]; then
+  echo "ERROR: missing $RUNTIME_DIR/bridge/spider-bridge.jar（先跑 ci-build-piece bridge / assemble）" >&2
+  exit 1
 fi
+cp -a "$RUNTIME_DIR/bridge/spider-bridge.jar" "$PKG_ROOT/runtime/bridge/"
 [[ -f "$RUNTIME_DIR/.kotv-runtime" ]] && cp -a "$RUNTIME_DIR/.kotv-runtime" "$PKG_ROOT/runtime/.kotv-runtime"
 
 install -m 755 "$META/scripts/start-stop-status" "$STAGING/scripts/start-stop-status"

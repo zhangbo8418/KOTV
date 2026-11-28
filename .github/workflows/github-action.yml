@@ -854,34 +854,58 @@ jobs:
             dist/KO影视-*-web-static.zip
           if-no-files-found: error
 
-  # 群晖 DSM 7.2 SPK：Toolkit 编引擎 + 运行时；形态为 Web（engine+webapp）
-  build-synology-spk:
+  # 群晖：按「组件 × 架构」分 job 编译，全部完成后 synology-package 合并打 SPK
+  synology-piece:
     runs-on: ubuntu-latest
     needs: [set-tag]
-    timeout-minutes: 600
+    timeout-minutes: ${{ matrix.timeout_minutes }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - toolkit_plat: geminilake
-            arch_label: x86_64
-          - toolkit_plat: rtd1296
-            arch_label: armv8
+          # —— runtime × arch ——
+          - { kind: runtime, toolkit_plat: geminilake, arch_label: x86_64, piece: node,     artifact: syno-node-x86_64,     timeout_minutes: 180 }
+          - { kind: runtime, toolkit_plat: geminilake, arch_label: x86_64, piece: python,   artifact: syno-python-x86_64,   timeout_minutes: 180 }
+          - { kind: runtime, toolkit_plat: geminilake, arch_label: x86_64, piece: jre,      artifact: syno-jre-x86_64,      timeout_minutes: 360 }
+          - { kind: runtime, toolkit_plat: geminilake, arch_label: x86_64, piece: chromium, artifact: syno-chromium-x86_64, timeout_minutes: 600 }
+          - { kind: runtime, toolkit_plat: geminilake, arch_label: x86_64, piece: ffmpeg,   artifact: syno-ffmpeg-x86_64,   timeout_minutes: 120 }
+          - { kind: runtime, toolkit_plat: rtd1296,    arch_label: armv8,  piece: node,     artifact: syno-node-armv8,     timeout_minutes: 180 }
+          - { kind: runtime, toolkit_plat: rtd1296,    arch_label: armv8,  piece: python,   artifact: syno-python-armv8,   timeout_minutes: 180 }
+          - { kind: runtime, toolkit_plat: rtd1296,    arch_label: armv8,  piece: jre,      artifact: syno-jre-armv8,      timeout_minutes: 360 }
+          - { kind: runtime, toolkit_plat: rtd1296,    arch_label: armv8,  piece: chromium, artifact: syno-chromium-armv8, timeout_minutes: 600 }
+          - { kind: runtime, toolkit_plat: rtd1296,    arch_label: armv8,  piece: ffmpeg,   artifact: syno-ffmpeg-armv8,   timeout_minutes: 120 }
+          # —— engine × arch ——
+          - { kind: engine, toolkit_plat: geminilake, arch_label: x86_64, piece: engine, artifact: syno-engine-x86_64, timeout_minutes: 60 }
+          - { kind: engine, toolkit_plat: rtd1296,    arch_label: armv8,  piece: engine, artifact: syno-engine-armv8,  timeout_minutes: 60 }
+          # —— 与架构无关 ——
+          - { kind: webapp, toolkit_plat: "", arch_label: any, piece: webapp, artifact: syno-webapp-any, timeout_minutes: 60 }
+          - { kind: bridge, toolkit_plat: "", arch_label: any, piece: bridge, artifact: syno-bridge-any, timeout_minutes: 30 }
+    name: synology ${{ matrix.piece }} (${{ matrix.arch_label }})
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
+        if: matrix.kind == 'engine'
         with:
           go-version: '1.27.4'
           check-latest: true
           cache: true
 
       - uses: actions/setup-java@v4
+        if: matrix.kind == 'bridge' || matrix.piece == 'jre'
         with:
           distribution: temurin
           java-version: "21"
 
+      - uses: subosito/flutter-action@v2
+        if: matrix.kind == 'webapp'
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
       - name: Install build deps
+        if: matrix.kind != 'webapp' && matrix.kind != 'bridge'
         run: |
           sudo apt-get update
           sudo apt-get install -y git python3 python3-pip xz-utils cifs-utils \
@@ -889,17 +913,11 @@ jobs:
             autoconf automake libtool cmake unzip zip rsync docker.io
           sudo systemctl start docker || sudo service docker start || true
           sudo usermod -aG docker "$USER" || true
-          # 当前 shell 立刻可用 docker（免重登）
           sudo chmod 666 /var/run/docker.sock || true
           docker version
 
-      - uses: subosito/flutter-action@v2
-        with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          channel: stable
-          cache: true
-
       - name: Cache Synology toolkit + sources
+        if: matrix.kind == 'runtime' || matrix.kind == 'engine'
         uses: actions/cache@v4
         with:
           path: |
@@ -907,34 +925,92 @@ jobs:
             .toolkit/toolkit_tarballs
             .toolkit/build_env
             .syno-src-cache
-          key: syno-toolkit-7.2-${{ matrix.toolkit_plat }}-${{ hashFiles('scripts/synology/versions.env') }}-v3
+          key: syno-toolkit-7.2-${{ matrix.toolkit_plat }}-${{ hashFiles('scripts/synology/versions.env') }}-v4
           restore-keys: |
             syno-toolkit-7.2-${{ matrix.toolkit_plat }}-
             syno-toolkit-7.2-
 
-      - name: Build SPK (Toolkit engine + runtime + webapp)
+      - name: Build piece
         env:
           KOTV_VERSION: ${{ needs.set-tag.outputs.tag }}
           KOTV_TOOLKIT_ROOT: ${{ github.workspace }}/.toolkit
           KOTV_SYNO_SRC_CACHE: ${{ github.workspace }}/.syno-src-cache
-          KOTV_SYNO_BUILD_ROOT: ${{ github.workspace }}/.syno-build/${{ matrix.toolkit_plat }}
+          KOTV_SYNO_BUILD_ROOT: ${{ github.workspace }}/.syno-build/${{ matrix.toolkit_plat }}-${{ matrix.piece }}
           KOTV_SYNO_DOCKER_DEPLOY: "1"
           KOTV_JAVA_TOOLCHAIN: "21"
         run: |
           chmod +x bridge/build.sh scripts/*.sh scripts/synology/*.sh
-          ./scripts/synology/build-spk.sh "${{ matrix.toolkit_plat }}"
-          ls -lh dist/KO影视-*-synology-*.spk
-          # 交叉产物勿用宿主 ldd；file/readelf 在 package/build-engine 已校验
-          eng="dist/syno-engine-${{ matrix.arch_label }}/kotv-engine"
-          file "$eng"
-          readelf -d "$eng" 2>/dev/null | grep -E 'NEEDED|Shared library' | head -20 || true
-          rm -rf .syno-build/${{ matrix.toolkit_plat }} || true
+          case "${{ matrix.kind }}" in
+            runtime)
+              ./scripts/synology/ci-build-piece.sh runtime "${{ matrix.toolkit_plat }}" "${{ matrix.piece }}"
+              ;;
+            engine)
+              ./scripts/synology/ci-build-piece.sh engine "${{ matrix.toolkit_plat }}"
+              ;;
+            webapp)
+              flutter config --enable-web
+              ./scripts/synology/ci-build-piece.sh webapp
+              ;;
+            bridge)
+              ./scripts/synology/ci-build-piece.sh bridge
+              ;;
+            *)
+              echo "unknown kind ${{ matrix.kind }}" >&2
+              exit 1
+              ;;
+          esac
+          ls -lh dist/syno-pieces/
+          rm -rf .syno-build/${{ matrix.toolkit_plat }}-${{ matrix.piece }} || true
 
       - uses: actions/upload-artifact@v4
         with:
           retention-days: 1
-          name: synology-spk-${{ matrix.arch_label }}
-          path: dist/KO影视-*-synology-${{ matrix.arch_label }}.spk
+          name: ${{ matrix.artifact }}
+          path: dist/syno-pieces/${{ matrix.artifact }}.tar
+          if-no-files-found: error
+
+  synology-package:
+    runs-on: ubuntu-latest
+    needs: [set-tag, synology-piece]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: syno-*
+          path: dist/syno-pieces-dl
+          merge-multiple: false
+
+      - name: Assemble SPKs
+        env:
+          KOTV_VERSION: ${{ needs.set-tag.outputs.tag }}
+        run: |
+          chmod +x scripts/synology/*.sh
+          # download-artifact 每个 artifact 一个子目录，内含 .tar
+          mkdir -p dist/syno-pieces
+          find dist/syno-pieces-dl -type f -name 'syno-*.tar' -exec cp -f {} dist/syno-pieces/ \;
+          ls -lh dist/syno-pieces/
+          ./scripts/synology/ci-assemble-spks.sh dist/syno-pieces
+          ls -lh dist/KO影视-*-synology-*.spk
+          for arch in x86_64 armv8; do
+            eng="dist/syno-engine-${arch}/kotv-engine"
+            file "$eng"
+            readelf -d "$eng" 2>/dev/null | grep -E 'NEEDED|Shared library' | head -20 || true
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          retention-days: 1
+          name: synology-spk-x86_64
+          path: dist/KO影视-*-synology-x86_64.spk
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          retention-days: 1
+          name: synology-spk-armv8
+          path: dist/KO影视-*-synology-armv8.spk
           if-no-files-found: error
 
   build-ios:
@@ -980,7 +1056,7 @@ jobs:
       - build-mac-amd64
       - build-android
       - build-web
-      - build-synology-spk
+      - synology-package
       - build-ios
     permissions:
       contents: write
