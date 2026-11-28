@@ -1348,45 +1348,66 @@ kotv_syno_chromium_patch_src() {
     '# define __NR_pidfd_open 434' \
     '#endif'
 
-  # Linux 关 NSS 后 Configure 没有 CreateSslSystemTrustStoreChromeRoot；补 Chrome Root Store only
+  # 关 NSS 后头文件不声明 CreateSslSystemTrustStoreChromeRoot（仅 NSS|Mac|Win|Android）
+  # 与 ChromeOS 一样改走已声明的 CreateChromeOnlySystemTrustStore（Chrome Root Store，HTTPS 可用）
   kotv_syno_chromium_patch_chrome_root_linux "$src"
 }
 
-# system_trust_store.cc：NSS 版 CreateSslSystemTrustStoreChromeRoot 之后插入 Linux Chrome-only
+# cert_verify_proc.cc：IS_CHROMEOS → IS_CHROMEOS || IS_LINUX 使用 CreateChromeOnlySystemTrustStore
 kotv_syno_chromium_patch_chrome_root_linux() {
   local src="${1:?}" f mark='KOTV_CHROME_ROOT_LINUX'
-  f="$src/net/cert/internal/system_trust_store.cc"
-  [[ -f "$f" ]] || return 0
+  f="$src/net/cert/cert_verify_proc.cc"
+  [[ -f "$f" ]] || {
+    echo "ERROR: missing $f" >&2
+    return 1
+  }
   grep -q "$mark" "$f" && return 0
-  if ! grep -q 'make_unique<TrustStoreNSS>' "$f"; then
-    echo "[chromium] WARN: $f has no TrustStoreNSS chrome-root impl; skip" >&2
+  if ! grep -q 'CreateChromeOnlySystemTrustStore' "$f"; then
+    echo "ERROR: $f has no CreateChromeOnlySystemTrustStore call site" >&2
+    return 1
+  fi
+  # 精确改 CreateBuiltinWithChromeRootStore 内的分支（勿误伤别处 IS_CHROMEOS）
+  if grep -q 'BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_LINUX)' "$f" \
+    && grep -q 'CreateChromeOnlySystemTrustStore' "$f"; then
+    # 已有 Linux 分支则只打标记注释，避免重复
+    local tmp; tmp="$(mktemp)"
+    awk -v mark="$mark" '
+      /CreateChromeOnlySystemTrustStore/ && !done {
+        print "// " mark
+        done=1
+      }
+      { print }
+    ' "$f" >"$tmp"
+    mv "$tmp" "$f"
+    echo "[chromium] patched cert_verify_proc.cc ($mark, already IS_LINUX)"
     return 0
   fi
-  local tmp
-  tmp="$(mktemp)"
-  # 只在「TrustStoreNSS() 实现」后面的第一个 #elif IS_MAC 前插入（避开文件头 include 分支）
+  local tmp; tmp="$(mktemp)"
   awk -v mark="$mark" '
-    /make_unique<TrustStoreNSS>/ { saw_nss_impl=1 }
-    /#elif BUILDFLAG\(IS_MAC\)/ && saw_nss_impl && !done {
-      print "#elif BUILDFLAG(IS_LINUX)"
-      print "// " mark ": no NSS in Toolkit sysroot; Chrome Root Store only (HTTPS via BoringSSL)"
-      print "std::unique_ptr<SystemTrustStore> CreateSslSystemTrustStoreChromeRoot("
-      print "    std::unique_ptr<TrustStoreChrome> chrome_root) {"
-      print "  return CreateChromeOnlySystemTrustStore(std::move(chrome_root));"
-      print "}"
-      print ""
-      done=1
-      saw_nss_impl=0
+    /#if BUILDFLAG\(IS_CHROMEOS\)/ && !done {
+      # 下一非空行应是 CreateChromeOnlySystemTrustStore
+      chrome_if=$0
+      getline
+      while ($0 ~ /^[[:space:]]*$/) getline
+      if ($0 ~ /CreateChromeOnlySystemTrustStore/) {
+        print "#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_LINUX)  // " mark
+        print
+        done=1
+        next
+      }
+      print chrome_if
+      print
+      next
     }
     { print }
   ' "$f" >"$tmp"
   if ! grep -q "$mark" "$tmp"; then
-    echo "ERROR: failed to inject Linux Chrome-only trust store into $f" >&2
+    echo "ERROR: failed to patch CreateChromeOnlySystemTrustStore branch in $f" >&2
     rm -f "$tmp"
     return 1
   fi
   mv "$tmp" "$f"
-  echo "[chromium] patched system_trust_store.cc ($mark)"
+  echo "[chromium] patched cert_verify_proc.cc ($mark)"
 }
 
 kotv_syno_chromium_fill_dri_pc() {
