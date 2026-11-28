@@ -4,31 +4,35 @@ publish_to: "none"
 version: 0.3.6+46
 
 environment:
-  sdk: ^3.5.4
+  # 主线 / Win8+ 为 Dart 3.13（Flutter 3.47.1+）；Win7 由 adapt-flutter-win7-sdk.sh 改写。
+  sdk: ^3.11.0
 
 dependencies:
   flutter:
     sdk: flutter
   flutter_localizations:
     sdk: flutter
+  # 3.x 需大改 API；Win7 adapt 也不迁。保持 2.6.x。
   flutter_riverpod: ^2.6.1
   http: ^1.2.2
-  # 主线拉最新兼容版；Win7 线由 adapt-flutter-win7-sdk.sh 尽量钉到同档新版本。
-  video_player: ^2.9.2
+  # 主线拉最新兼容版；Win7 线由 adapt-flutter-win7-sdk.sh 钉 2.9.2。
+  video_player: ^2.14.0
   web: ^1.1.0
-  # 0.40.0。Win7 / Flutter 3.19 同样用 0.40.0：adapt + flutter-pub-get 在 pub-cache 里放宽 SDK 校验，不升级 Flutter。
+  # 0.40.0。Win7 由 adapt 钉 0.39.1 + pub-cache 放宽 SDK。
   fvp: 0.40.0
-  # 读 fvp 写进 Logger('fvp') 的 mdk 事件（播放信息里的实际解码）。Win7 线钉 1.2.0。
-  logging: ^1.2.0
+  # 读 fvp 写进 Logger('fvp') 的 mdk 事件。Win7 线钉 1.2.0。
+  logging: ^1.3.0
   path_provider: ^2.1.5
   path: ^1.9.0
-  shared_preferences: ^2.3.3
-  window_manager: 0.4.3
+  shared_preferences: ^2.5.0
+  # 0.6+ 改 nativeapi（旧 API 仅 legacy.dart）；0.7 要 Dart ^3.14。
+  # 主线升到 0.5.2（仍 windowManager 单例）；Win7 adapt 钉 0.4.3。
+  window_manager: 0.5.2
   url_launcher: ^6.3.1
   # 添加源时选择本机配置文件；桌面走系统原生对话框。
-  file_selector: ^1.0.0
-  # 播放中防休眠/屏保（手机+桌面）。
-  wakelock_plus: 1.4.0
+  file_selector: ^1.1.0
+  # 播放中防休眠/屏保（手机+桌面）。Win7 adapt 钉 1.2.8。
+  wakelock_plus: 1.8.2
   # 爬虫弹窗里的自由排版。不执行脚本。
   flutter_html: ^3.0.0
   # 0.15.6 仍导出 query_selector.matches(Element, String)。0.15.7 删了这个函数，且 SDK 升到 ^3.6.0，Win7 的 Dart 3.3.4 解不开。
@@ -36,15 +40,15 @@ dependencies:
   cryptography: ^2.9.0
 
 dependency_overrides:
-  # 2.12.1 Messages.kt 重复声明 MessagesPigeonMethodCodec，Kotlin 编不过
-  video_player_android: 2.11.0
+  # 2.12.1 Messages.kt 重复声明 MessagesPigeonMethodCodec；2.12.2+ / 2.13 已修，跟 video_player ^2.14。
+  video_player_android: 2.13.0
   # 2.3.x 改走 JNI，Android 7 上取目录抛 ClassNotFoundException（Landroid/content/Context;），缓存目录全取不到
   path_provider_android: 2.2.23
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^4.0.0
+  flutter_lints: ^6.0.0
 
 flutter:
   uses-material-design: true

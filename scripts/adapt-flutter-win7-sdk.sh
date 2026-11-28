@@ -15,12 +15,15 @@ APP="$ROOT/flutter/pubspec.yaml"
 
 # 主工程：Dart 3.3（Flutter 3.19）
 perl -i -pe 's/sdk:\s*\^3\.[0-9.]+/sdk: ">=3.3.0 <3.4.0"/' "$APP"
-perl -i -pe 's/flutter_lints:\s*\^4\.0\.0/flutter_lints: ^3.0.0/' "$APP"
-perl -i -pe 's/path_provider:\s*\^2\.1\.5/path_provider: 2.1.4/' "$APP"
-perl -i -pe 's/shared_preferences:\s*\^2\.3\.3/shared_preferences: 2.3.0/' "$APP"
-perl -i -pe 's/web:\s*\^1\.1\.0/web: 0.5.1/' "$APP"
+perl -i -pe 's/flutter_lints:\s*\^[^\n]+/flutter_lints: ^3.0.0/' "$APP"
+perl -i -pe 's/path_provider:\s*\^[^\n]+/path_provider: 2.1.4/' "$APP"
+perl -i -pe 's/shared_preferences:\s*\^[^\n]+/shared_preferences: 2.3.0/' "$APP"
+perl -i -pe 's/web:\s*\^[^\n]+/web: 0.5.1/' "$APP"
 perl -i -pe 's/wakelock_plus:\s*[^\n]+/wakelock_plus: 1.2.8/' "$APP"
+perl -i -pe 's/window_manager:\s*[^\n]+/window_manager: 0.4.3/' "$APP"
 perl -i -pe 's/video_player:\s*\^[^\n]+/video_player: 2.9.2/' "$APP"
+perl -i -pe 's/file_selector:\s*\^[^\n]+/file_selector: 1.0.3/' "$APP"
+perl -i -pe 's/logging:\s*\^[^\n]+/logging: 1.2.0/' "$APP"
 # 钉 0.39.1；SDK 约束在 pub-cache 里放宽，见 flutter-pub-get.sh。
 perl -i -pe 's/fvp:\s*[^\n]+/fvp: 0.39.1/' "$APP"
 # 3.0.0 要 collection ^1.19.0，Flutter 3.19 的 flutter_test 把 collection 钉死在 1.18.0。
@@ -99,6 +102,7 @@ dependency_overrides:
   fvp: 0.39.1
   web: 0.5.1
   wakelock_plus: 1.2.8
+  window_manager: 0.4.3
   flutter_html: 3.0.0-beta.2
   # beta.2 依赖 csslib ^0.17.2；html >=0.15.5 依赖 csslib ^1.0.0，两边解不开。
   html: 0.15.4

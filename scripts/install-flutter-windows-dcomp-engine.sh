@@ -30,7 +30,7 @@ MARKER="$ENGINE_CACHE/kotv-dcomp-engine.marker"
 
 echo "==> DComp engine: tag=$TAG ver=$VER sdk=$FLUTTER_SDK"
 
-# 工具只认 engine.stamp 字符串；SDK 须为同系列（主线 Win 钉 3.47.1）。
+# 工具只认 engine.stamp 字符串；SDK 须为同系列（Win8+ x64/arm64 钉 3.47.1）。
 STAMP_FILE="$FLUTTER_SDK/bin/internal/engine.version"
 if [[ -f "$STAMP_FILE" ]]; then
   echo "    engine.version=$(tr -d '\r\n' < "$STAMP_FILE")"

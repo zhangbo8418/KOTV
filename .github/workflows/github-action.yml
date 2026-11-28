@@ -8,9 +8,9 @@ on:
 
 env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  # 主线 Flutter 跟 stable 最新；Win8+ x64 钉 3.47.1（DComp 制品上限）；Win7 钉 3.19.6
+  # 主线 Flutter 跟 stable 最新；Win8+（x64/arm64）钉 3.47.1（DComp 制品上限，含双架构）；Win7 钉 3.19.6
   FLUTTER_VERSION: "3.50.1"
-  FLUTTER_WINDOWS_X64_VERSION: "3.47.1"
+  FLUTTER_WINDOWS_VERSION: "3.47.1"
   FLUTTER_WIN7_VERSION: "3.19.6"
   KOTV_DCOMP_ENGINE_TAG: "windows-v3.47.1+2"
   KOTV_DCOMP_ENGINE_VER: "3.47.1"
@@ -63,7 +63,7 @@ jobs:
 
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: ${{ env.FLUTTER_WINDOWS_X64_VERSION }}
+          flutter-version: ${{ env.FLUTTER_WINDOWS_VERSION }}
           channel: stable
           cache: true
 
@@ -160,7 +160,7 @@ jobs:
             KO影视-*-x86_64-setup.exe
           if-no-files-found: error
 
-  # Windows arm64 桌面包（原生 windows-11-arm；无 DComp / 非 Win7）
+  # Windows arm64 桌面包（原生 windows-11-arm；与 x64 同用 DComp / Flutter 3.47.1）
   build-win-arm64:
     runs-on: windows-11-arm
     needs: [set-tag, build-updater]
@@ -182,11 +182,21 @@ jobs:
       - name: Ensure Flutter
         shell: bash
         env:
-          FLUTTER_VERSION: ${{ env.FLUTTER_VERSION }}
+          FLUTTER_VERSION: ${{ env.FLUTTER_WINDOWS_VERSION }}
         run: |
           chmod +x scripts/ci-ensure-flutter.sh
           ./scripts/ci-ensure-flutter.sh
           flutter precache --windows || true
+
+      - name: Install DComp Windows engine
+        shell: bash
+        env:
+          KOTV_DCOMP_ENGINE_TAG: ${{ env.KOTV_DCOMP_ENGINE_TAG }}
+          KOTV_DCOMP_ENGINE_VER: ${{ env.KOTV_DCOMP_ENGINE_VER }}
+        run: |
+          chmod +x scripts/install-flutter-windows-dcomp-engine.sh
+          ./scripts/install-flutter-windows-dcomp-engine.sh
+          test -f "$(dirname "$(dirname "$(command -v flutter)")")/bin/cache/artifacts/engine/kotv-dcomp-engine.marker"
 
       - name: Setup MSVC (Flutter Windows)
         uses: ilammy/msvc-dev-cmd@v1
@@ -246,6 +256,9 @@ jobs:
           CC: aarch64-w64-mingw32-clang
           CXX: aarch64-w64-mingw32-clang++
           KOTV_JAVA_TOOLCHAIN: "21"
+          KOTV_DCOMP_ENGINE_TAG: ${{ env.KOTV_DCOMP_ENGINE_TAG }}
+          KOTV_DCOMP_ENGINE_VER: ${{ env.KOTV_DCOMP_ENGINE_VER }}
+          CMAKE_GENERATOR: "Visual Studio 17 2022"
         run: |
           chmod +x bridge/build.sh scripts/*.sh
           ./scripts/package-flutter-windows.sh windows-arm64

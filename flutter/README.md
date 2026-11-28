@@ -56,8 +56,8 @@ cd flutter && flutter run -d macos   # KOTV_RUNTIME 默认用仓库 runtime/
 ## Windows 7（实验线）
 
 - **官方最后支持 Win7 的稳定版是 Flutter 3.19.x**；Win7 CI 钉 `3.19.6`（见 `.github/workflows/github-action.yml` 的 `build-flutter-win7` job）。
-- **Win8+ x64 钉 Flutter 3.47.1**（须与 DComp 引擎制品同一 stamp；`edde746/flutter-plezy` 目前最高 `windows-v3.47.1+2`）；打包前跑 `scripts/install-flutter-windows-dcomp-engine.sh`。Win7 另线（Flutter 3.19 + 进程内 GDI+ 播控，无第二进程 exe），勿与 Win8+ 混打包。
-- **其它平台主线（macOS / Linux / Android / Web / Win arm64）用 Flutter 3.50.1**（`sdk: ^3.5.4`）；Win7 构建前会跑 `scripts/adapt-flutter-win7-sdk.sh` 临时放宽约束。
+- **Win8+（x64 / arm64）钉 Flutter 3.47.1**（须与 DComp 引擎制品同一 stamp；`edde746/flutter-plezy` 目前最高 `windows-v3.47.1+2`，含 windows-arm64）；打包前跑 `scripts/install-flutter-windows-dcomp-engine.sh`。Win7 另线（Flutter 3.19 + 进程内 GDI+ 播控，无第二进程 exe），勿与 Win8+ 混打包。
+- **其它平台主线（macOS / Linux / Android / Web / iOS）用 Flutter 3.50.1**（`sdk: ^3.11.0`）；Win7 构建前会跑 `scripts/adapt-flutter-win7-sdk.sh` 临时放宽约束。
 - 桌面 **内置 MPV** 走原生 libmpv 通道（原生 Surface；接入完成前默认 FVP）。
 - Python 爬虫依赖见 `scripts/python-requirements.txt`，打进 `runtime/python`。
 - UI 闪退时由看门狗杀掉残留 `kotv-engine`（见 `engine_launcher.dart`）。
