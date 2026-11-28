@@ -668,9 +668,11 @@ cpp_link_args = ['--sysroot=${SYSROOT}', '-L${deps}/lib']
 EOF
     mconf+=(--cross-file="$xf")
   fi
+  # 与 cmake 相同：勿让环境 CFLAGS 里的 --sysroot=…-gnu/… 被拆坏后注入
   (
     cd "$src"
-    meson setup build "${mconf[@]}"
+    env -u CFLAGS -u CXXFLAGS -u LDFLAGS -u CPPFLAGS \
+      meson setup build "${mconf[@]}"
     ninja -C build -j"$jobs"
     ninja -C build install
   )
@@ -846,10 +848,55 @@ kotv_syno_dep_rkmpp() {
   kotv_syno_dep_mark rkmpp "$ver"
 }
 
+# Toolkit 内核头过旧时缺的 UAPI（仅装头文件到 deps/include，供 rkrga 等）
+kotv_syno_dep_linux_uapi_headers() {
+  local deps ver="sync_file-6.6"
+  deps="$(kotv_syno_deps_prefix)"
+  if kotv_syno_dep_ok linux-uapi "$ver" "include/linux/sync_file.h"; then
+    echo "[deps] linux-uapi $ver cache hit"; return 0
+  fi
+  mkdir -p "$deps/include/linux"
+  # 来自 Linux v6.6 uapi；Toolkit sysroot 无此头导致 rkrga 失败
+  cat >"$deps/include/linux/sync_file.h" <<'EOF'
+/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
+#ifndef _UAPI_LINUX_SYNC_H
+#define _UAPI_LINUX_SYNC_H
+#include <linux/ioctl.h>
+#include <linux/types.h>
+struct sync_merge_data {
+  char name[32];
+  __s32 fd2;
+  __s32 fence;
+  __u32 flags;
+  __u32 pad;
+};
+struct sync_fence_info {
+  char obj_name[32];
+  char driver_name[32];
+  __s32 status;
+  __u32 flags;
+  __u64 timestamp_ns;
+};
+struct sync_file_info {
+  char name[32];
+  __s32 status;
+  __u32 flags;
+  __u32 num_fences;
+  __u32 pad;
+  __u64 sync_fence_info;
+};
+#define SYNC_IOC_MAGIC '>'
+#define SYNC_IOC_MERGE _IOWR(SYNC_IOC_MAGIC, 3, struct sync_merge_data)
+#define SYNC_IOC_FILE_INFO _IOWR(SYNC_IOC_MAGIC, 4, struct sync_file_info)
+#endif
+EOF
+  kotv_syno_dep_mark linux-uapi "$ver"
+}
+
 # rkrga：Rockchip RGA（与 rkmpp 配对）
 kotv_syno_dep_rkrga() {
   kotv_syno_load_versions
-  local ver="$SYNO_RKRGA_COMMIT" deps tarball src
+  local ver="${SYNO_RKRGA_COMMIT}-uapi1" deps tarball src
   if [[ "$PLATFORM" != rtd1296 ]]; then
     echo "[deps] rkrga skip (arm only, PLATFORM=$PLATFORM)"
     return 0
@@ -858,8 +905,9 @@ kotv_syno_dep_rkrga() {
     echo "[deps] rkrga $ver cache hit"; return 0
   fi
   deps="$(kotv_syno_deps_prefix)"
-  tarball="$(kotv_syno_dep_fetch "https://github.com/nyanmisaka/rk-mirrors/archive/${ver}.tar.gz")"
-  src="$(kotv_syno_dep_extract "$tarball" "rk-mirrors-${ver}")"
+  kotv_syno_dep_linux_uapi_headers
+  tarball="$(kotv_syno_dep_fetch "https://github.com/nyanmisaka/rk-mirrors/archive/${SYNO_RKRGA_COMMIT}.tar.gz")"
+  src="$(kotv_syno_dep_extract "$tarball" "rk-mirrors-${SYNO_RKRGA_COMMIT}")"
   kotv_syno_export_deps_env
   kotv_syno_meson_build "$src" -Dlibdrm=false -Dlibrga_demo=false
   if [[ -f "$deps/lib/pkgconfig/librga.pc" ]]; then
@@ -891,7 +939,8 @@ kotv_syno_ensure_deps_ffmpeg() {
   kotv_syno_export_deps_env
   kotv_syno_dep_media_driver
   kotv_syno_export_deps_env
-  # arm：rkmpp/rkrga
+  # arm：rkmpp/rkrga（先补 Toolkit 缺失的 linux UAPI 头）
+  kotv_syno_dep_linux_uapi_headers
   kotv_syno_dep_rkmpp
   kotv_syno_export_deps_env
   kotv_syno_dep_rkrga
@@ -1183,7 +1232,7 @@ kotv_syno_ensure_deps_chromium() {
   sysroot="$(kotv_syno_chromium_sysroot)"
   export KOTV_SYNO_CHROMIUM_SYSROOT="$sysroot"
   # stamp：清单版本；改清单必须 bump
-  want="toolkit-headless:gcc-rt3:dri-pc2:compat-h3-pidfd"
+  want="toolkit-headless:gcc-rt3:dri-pc2:compat-h4-srcpatch"
   stamp="$sysroot/.kotv-chromium-sysroot"
   if [[ -f "$stamp" && "$(cat "$stamp" 2>/dev/null || true)" == "$want" ]] \
     && kotv_syno_chromium_verify_sysroot "$sysroot"; then

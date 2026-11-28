@@ -551,12 +551,13 @@ use_custom_libcxx = true
 is_clang = true
 clang_base_path = "${clang_base}"
 clang_use_chrome_plugins = false
-# headless 不碰系统输入/GBM；libdrm 走 third_party；vaapi 因无 x11/wayland 本为 false
+# headless 不碰系统输入/GBM；Toolkit sysroot 无 NSS → 关证书 NSS
 use_xkbcommon = false
 use_system_minigbm = false
 ozone_platform_x11 = false
 ozone_platform_wayland = false
 ozone_platform_drm = false
+use_nss_certs = false
 extra_cflags = "${extra_c}"
 extra_cxxflags = "${extra_c}"
 extra_ldflags = "${extra_ld}"

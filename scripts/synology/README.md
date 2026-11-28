@@ -11,7 +11,7 @@
 | **Python** | Toolkit + `.syno-deps` | optional：zlib/bzip2/xz/zstd(static+PIC)/libffi/openssl/sqlite/ncurses/readline/libuuid |
 | **JRE** | Toolkit + `.syno-deps` | alsa、cups、fontconfig(+expat/freetype)、X11（静态）；交叉 `--disable-malloc0returnsnull` |
 | **ffmpeg** | Toolkit + `.syno-deps` | jellyfin-ffmpeg 源；VAAPI（libdrm/libva + **media-driver iHD**）+ CUDA（ffnvcodec 头，运行时 dlopen）+ QSV（libvpl，x86）+ rkmpp/rkrga（arm） |
-| **Chromium** | Clang + **Toolkit sysroot ABI** | `headless.gn`；GCC crt/`libgcc`、`dri.pc`、compat/`HWCAP2`/`SYS_pkey_*`；只编 `headless_shell` |
+| **Chromium** | Clang + **Toolkit sysroot ABI** | `headless.gn` + `use_nss_certs=false`（无系统 NSS）；compat/源码补 HWCAP2/`SYS_pkey`/`pidfd`；只编 `headless_shell` |
 
 构建：`kotv_syno_ensure_deps <profile>`。打包：各组件 install 后统一 `kotv_syno_bundle_component`——按 ELF `DT_NEEDED` 只从 Toolkit deps/GCC 收 `.so` 进 `lib/`，并写 `$ORIGIN` rpath（`patchelf`）；能静态的在 deps 期静态。
 
