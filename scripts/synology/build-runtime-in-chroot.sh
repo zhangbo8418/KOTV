@@ -113,6 +113,7 @@ build_node() {
     return 0
   fi
   echo "[node] build $ver for $ARCH_LABEL (-j$jobs)"
+  kotv_syno_ensure_deps node
   local tarball="$SRC_CACHE/node-${ver}.tar.gz"
   download "https://nodejs.org/dist/${ver}/node-${ver}.tar.gz" "$tarball"
   local src="$BUILD_ROOT/node-${ver}"
@@ -160,8 +161,8 @@ build_python() {
     return 0
   fi
   echo "[python] build $ver for $ARCH_LABEL (-j$jobs)"
-  kotv_syno_ensure_libffi
-  kotv_syno_export_deps_pkgconfig
+  kotv_syno_ensure_deps python
+  local deps; deps="$(kotv_syno_deps_prefix)"
 
   local tarball="$SRC_CACHE/Python-${ver}.tgz"
   download "https://www.python.org/ftp/python/${ver}/Python-${ver}.tgz" "$tarball"
@@ -175,6 +176,7 @@ build_python() {
     --enable-shared
     --disable-test-modules
     --with-system-ffi
+    --with-openssl="$deps"
   )
   if [[ "$CROSS" -eq 1 ]]; then
     ensurepip=no
@@ -196,6 +198,9 @@ build_python() {
   rm -rf "$dest"
   mkdir -p "$dest"
   cp -a "$BUILD_ROOT/python-dest/opt/kotv-python/." "$dest/"
+  # 共享库：libpython 已在 prefix；openssl 等若为 .so 一并打进 lib/
+  mkdir -p "$dest/lib"
+  kotv_syno_deps_ship_shared "$dest/lib" ssl crypto z bz2 lzma zstd sqlite3 ncursesw readline uuid
   if [[ -x "$dest/bin/python3" ]]; then
     if "$dest/bin/python3" -c 'import sys; print(sys.version)' >/dev/null 2>&1; then
       "$dest/bin/python3" -m pip install --upgrade pip wheel || true
@@ -224,9 +229,10 @@ build_jre() {
     echo "ERROR: host java (boot JDK) required to build OpenJDK" >&2
     exit 1
   fi
-  kotv_syno_ensure_alsa
-  local deps
+  kotv_syno_ensure_deps jre
+  local deps x11
   deps="$(kotv_syno_deps_prefix)"
+  x11="${KOTV_SYNO_X11_PREFIX:-$deps}"
 
   local gitdir="$SRC_CACHE/jdk${ver}u"
   if [[ ! -d "$gitdir/.git" ]]; then
@@ -245,9 +251,10 @@ build_jre() {
     javac_bin="$(command -v javac || command -v java)"
     boot="$(cd "$(dirname "$javac_bin")/.." && pwd)"
   fi
-  # OpenJDK 不允许 --without-alsa；alsa 用 Toolkit 自编前缀。图像库走 bundled。
+  # building.md：alsa/cups/fontconfig/X11 不可 --without-*；图像库 bundled。
   local jdk_cfg=(
     --with-boot-jdk="$boot"
+    --with-sysroot="$SYSROOT"
     --with-jvm-variants=server
     --with-toolchain-type=gcc
     --disable-warnings-as-errors
@@ -255,9 +262,9 @@ build_jre() {
     --with-debug-level=release
     --enable-headless-only
     --with-alsa="$deps"
-    --with-x=no
-    --with-cups=no
-    --with-fontconfig=no
+    --with-cups="$deps"
+    --with-fontconfig="$deps"
+    --with-x="$x11"
     --with-freetype=bundled
     --with-libjpeg=bundled
     --with-giflib=bundled
@@ -352,6 +359,7 @@ build_chromium() {
     return 0
   fi
   echo "[chromium] build headless_shell $tag for $ARCH_LABEL (Clang + Toolkit sysroot, -j$jobs)"
+  kotv_syno_ensure_deps chromium
 
   if ! command -v clang >/dev/null 2>&1; then
     echo "[chromium] installing clang on host..."
@@ -470,7 +478,7 @@ EOF
 
 # ---------- ffmpeg ----------
 build_ffmpeg() {
-  local ver="6.1.1"
+  local ver="${SYNO_FFMPEG_VER}"
   local dest="$OUT/ffmpeg"
   local jobs
   jobs="$(comp_jobs)"
@@ -479,6 +487,7 @@ build_ffmpeg() {
     return 0
   fi
   echo "[ffmpeg] build $ver for $ARCH_LABEL (-j$jobs)"
+  kotv_syno_ensure_deps ffmpeg
   local tarball="$SRC_CACHE/ffmpeg-${ver}.tar.xz"
   download "https://ffmpeg.org/releases/ffmpeg-${ver}.tar.xz" "$tarball"
   local src="$BUILD_ROOT/ffmpeg-${ver}"
@@ -489,11 +498,12 @@ build_ffmpeg() {
     --prefix=/opt/kotv-ffmpeg
     --enable-gpl
     --enable-shared
+    --enable-openssl
     --disable-doc
     --disable-debug
     --cc="$CC"
     --cxx="$CXX"
-    --extra-cflags="$CFLAGS"
+    --extra-cflags="$CFLAGS ${CPPFLAGS:-}"
     --extra-ldflags="$LDFLAGS"
   )
   # Toolkit 交叉/CI 环境常无 nasm；禁用 x86asm 仍可出 ffmpeg 二进制
@@ -517,6 +527,7 @@ build_ffmpeg() {
   chmod +x "$dest/ffmpeg"
   mkdir -p "$dest/lib"
   cp -a "$BUILD_ROOT/ffmpeg-dest/opt/kotv-ffmpeg/lib/"*.so* "$dest/lib/" 2>/dev/null || true
+  kotv_syno_deps_ship_shared "$dest/lib" ssl crypto z
   write_stamp ffmpeg "$ver"
   rm -rf "$src" "$BUILD_ROOT/ffmpeg-dest"
   echo "[ffmpeg] ready: $dest/ffmpeg"
