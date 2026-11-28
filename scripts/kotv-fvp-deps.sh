@@ -68,18 +68,17 @@ kotv_export_fvp_deps() {
 }
 
 # 是否 Windows ARM64 宿主（打包机 / CI）。
+# 与 kotv_windows_is_arm64 同判据：MINGW 下 uname -m 常谎报 x86_64，须看 OS 串 / PROCESSOR_*。
 kotv_mdk_windows_want_arm64() {
   case "${KOTV_MDK_WINDOWS_ARCH:-}" in
     arm64|ARM64|aarch64) return 0 ;;
     x64|amd64|X64) return 1 ;;
   esac
-  local m pa pa64
-  m="$(uname -m 2>/dev/null || true)"
-  pa="${PROCESSOR_ARCHITECTURE:-}"
-  pa64="${PROCESSOR_ARCHITEW6432:-}"
-  case "$m" in ARM64|arm64|aarch64) return 0 ;; esac
-  [[ "$pa" == "ARM64" || "$pa64" == "ARM64" ]] && return 0
-  return 1
+  local _root
+  _root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  # shellcheck source=kotv-win-build-env.sh
+  source "$_root/scripts/kotv-win-build-env.sh"
+  kotv_windows_is_arm64
 }
 
 # GitHub mdk-sdk v0.37+ 不再发布 mdk-sdk-windows-x64.7z，改为 *-vsYYYY.7z。

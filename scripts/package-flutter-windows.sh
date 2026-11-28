@@ -105,6 +105,11 @@ source "$ROOT/scripts/kotv-fvp-deps.sh"
 kotv_export_fvp_deps
 flutter config --enable-windows-desktop
 KOTV_FLUTTER_TARGET=windows "$ROOT/scripts/flutter-pub-get.sh"
+# mdk 包按打包目标选：arm64 必须多架构 SDK（含 lib/arm64），勿跟宿主 uname 误判成 x64。
+case "$PLAT" in
+  windows-arm64) export KOTV_MDK_WINDOWS_ARCH=arm64 ;;
+  *) export KOTV_MDK_WINDOWS_ARCH=x64 ;;
+esac
 kotv_ensure_mdk_windows_sdk
 # Win7 播控由 runner/CMakeLists.txt 读 ENV{KOTV_WIN7}（每次 configure 重算，不依赖 option 缓存）。
 # 勿写 `flutter build -- -DKOTV_WIN7_CHROME=…`：会被当成 Dart target（Target file not found）。
