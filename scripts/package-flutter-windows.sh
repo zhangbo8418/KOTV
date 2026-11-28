@@ -14,7 +14,8 @@ source "$ROOT/scripts/kotv-release-name.sh"
 # shellcheck source=kotv-win-build-env.sh
 source "$ROOT/scripts/kotv-win-build-env.sh"
 
-PLAT="${1:-windows-x64}"
+# 无参跟宿主（MINGW 谎报时由 kotv_windows_plat 纠正），勿默认 windows-x64。
+PLAT="${1:-$(kotv_windows_plat)}"
 case "$PLAT" in
   windows-x64) FLUTTER_WIN_ARCH=x64; GOARCH_WIN=amd64 ;;
   windows-arm64)

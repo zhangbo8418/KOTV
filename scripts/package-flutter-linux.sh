@@ -6,9 +6,12 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=kotv-release-name.sh
 source "$ROOT/scripts/kotv-release-name.sh"
+# shellcheck source=kotv-win-build-env.sh
+source "$ROOT/scripts/kotv-win-build-env.sh"
 export PATH="${HOME}/flutter/bin:${PATH}"
 
-PLAT="${1:-linux-x64}"
+# 无参跟宿主 arch（勿默认 linux-x64：aarch64 本机会编出 amd64 引擎 + arm64 Flutter 混包）。
+PLAT="${1:-$(kotv_detect_host_plat)}"
 case "$PLAT" in
   linux-x64) FLUTTER_LINUX_ARCH=x64; GOARCH_LINUX=amd64 ;;
   linux-arm64) FLUTTER_LINUX_ARCH=arm64; GOARCH_LINUX=arm64 ;;

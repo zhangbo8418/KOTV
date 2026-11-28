@@ -350,12 +350,18 @@ kotv_linux_set_origin_rpath() {
 
 kotv_linux_resolve_soname() {
   local soname="$1"
-  local dir
+  local dir m
+  m="$(uname -m 2>/dev/null || true)"
   for dir in \
     "${KOTV_MPV_PREFIX:-$ROOT/.build/desktop-mpv/prefix}/lib" \
     "/usr/local/lib" \
+    "/usr/lib/aarch64-linux-gnu" \
+    "/lib/aarch64-linux-gnu" \
     "/usr/lib/x86_64-linux-gnu" \
-    "/lib/x86_64-linux-gnu"; do
+    "/lib/x86_64-linux-gnu" \
+    "/usr/lib/${m}-linux-gnu" \
+    "/lib/${m}-linux-gnu" \
+    "/usr/lib"; do
     [[ -f "$dir/$soname" ]] && { printf '%s\n' "$dir/$soname"; return 0; }
   done
   return 1

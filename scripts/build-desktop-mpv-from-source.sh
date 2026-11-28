@@ -877,7 +877,7 @@ ensure_libplacebo() {
   if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
     export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
   else
-    export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig:$PREFIX/lib/x86_64-linux-gnu/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+    export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig:$PREFIX/lib/x86_64-linux-gnu/pkgconfig:$PREFIX/lib/aarch64-linux-gnu/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
   fi
   if pkg-config --atleast-version="$LIBPLACEBO_MIN" libplacebo 2>/dev/null \
     && [[ "$cached_profile" == "$want_profile" ]] \
@@ -1017,7 +1017,7 @@ ensure_libplacebo() {
   if [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
     export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
   else
-    export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig:$PREFIX/lib/x86_64-linux-gnu/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+    export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig:$PREFIX/lib/x86_64-linux-gnu/pkgconfig:$PREFIX/lib/aarch64-linux-gnu/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
   fi
   if ! pkg-config --atleast-version="$LIBPLACEBO_MIN" libplacebo; then
     echo "ERROR: libplacebo install not visible to pkg-config (>= $LIBPLACEBO_MIN)" >&2
