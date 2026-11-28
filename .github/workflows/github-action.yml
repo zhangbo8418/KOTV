@@ -927,7 +927,7 @@ jobs:
             .toolkit/build_env
             .syno-src-cache
             .syno-deps
-          key: syno-toolkit-7.2-${{ matrix.toolkit_plat }}-${{ hashFiles('scripts/synology/versions.env', 'scripts/synology/toolkit-deps.sh') }}-v17
+          key: syno-toolkit-7.2-${{ matrix.toolkit_plat }}-${{ hashFiles('scripts/synology/versions.env', 'scripts/synology/toolkit-deps.sh') }}-v18
           restore-keys: |
             syno-toolkit-7.2-${{ matrix.toolkit_plat }}-
             syno-toolkit-7.2-

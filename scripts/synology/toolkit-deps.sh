@@ -487,14 +487,19 @@ EOF
 
 kotv_syno_dep_libdrm() {
   kotv_syno_load_versions
-  local ver="$SYNO_LIBDRM_VER"
+  local upstream="$SYNO_LIBDRM_VER" stamp="$SYNO_LIBDRM_VER" intel_opt=enabled
   kotv_syno_export_deps_env
-  kotv_syno_dep_meson_lib libdrm "$ver" \
-    "https://dri.freedesktop.org/libdrm/libdrm-${ver}.tar.xz" \
-    "libdrm-${ver}" "include/libdrm/drm.h" \
+  # arm（rtd1296）无 Intel GPU；开 intel 会编 test_decode 且交叉链不上 libpciaccess
+  if [[ "$PLATFORM" == rtd1296 ]]; then
+    intel_opt=disabled
+    stamp="${upstream}-nointel"
+  fi
+  kotv_syno_dep_meson_lib libdrm "$stamp" \
+    "https://dri.freedesktop.org/libdrm/libdrm-${upstream}.tar.xz" \
+    "libdrm-${upstream}" "include/libdrm/drm.h" \
     -Dudev=false -Dcairo-tests=disabled -Dvalgrind=disabled \
     -Dexynos=disabled -Dfreedreno=disabled -Domap=disabled -Detnaviv=disabled \
-    -Dintel=enabled -Dnouveau=disabled -Dradeon=disabled -Damdgpu=disabled \
+    -Dintel="$intel_opt" -Dnouveau=disabled -Dradeon=disabled -Damdgpu=disabled \
     -Dinstall-test-programs=false
 }
 
@@ -868,12 +873,13 @@ EOF
   echo "[deps] chromium: wrote compat header $compat"
 }
 
-# checkout 后补 partition_alloc 源码（extra_cflags 单 argv 不可靠时仍能过）
+# checkout 后补 partition_alloc：
+# - aarch64_support.h / bits/hwcap 提供 HWCAP2 后，tagging.cc 本地 #define 会 -Wunused-macros
+# - pkey：在系统头之后补 SYS_pkey_*（勿文件头无条件插入，否则未使用也 Werror）
 kotv_syno_chromium_patch_src() {
   local src="${1:?}" f
   f="$src/base/allocator/partition_allocator/src/partition_alloc/aarch64_support.h"
   if [[ -f "$f" ]] && ! grep -q 'KOTV_HWCAP2' "$f"; then
-    # 在第一个 #include 之前插入宏，供本头内 HWCAP2_* 使用
     local tmp
     tmp="$(mktemp)"
     {
@@ -889,27 +895,94 @@ kotv_syno_chromium_patch_src() {
     mv "$tmp" "$f"
     echo "[chromium] patched aarch64_support.h (HWCAP2)"
   fi
+  f="$src/base/allocator/partition_allocator/src/partition_alloc/tagging.cc"
+  if [[ -f "$f" ]] && ! grep -q 'KOTV_TAGGING_NO_LOCAL_HWCAP' "$f"; then
+    # 删掉本地 HWCAP2_* 后备定义（已由 aarch64_support / sysroot 提供）
+    python3 - "$f" <<'PY'
+import re, sys
+path = sys.argv[1]
+text = open(path, encoding="utf-8").read()
+new, n = re.subn(
+    r"\n#ifndef HWCAP2_BTI\n#define HWCAP2_BTI.*?\n#endif\n"
+    r"(?:#ifndef HWCAP2_MTE\n#define HWCAP2_MTE.*?\n#endif\n)?",
+    "\n/* KOTV_TAGGING_NO_LOCAL_HWCAP: provided by aarch64_support.h / sysroot */\n",
+    text,
+    count=1,
+    flags=re.S,
+)
+if n:
+    open(path, "w", encoding="utf-8").write(new)
+    print("patched tagging.cc")
+else:
+    # 宽松：逐段删
+    new2 = text
+    for pat in (
+        r"#ifndef HWCAP2_BTI\n#define HWCAP2_BTI \(1 << 17\)\n#endif\n?",
+        r"#ifndef HWCAP2_MTE\n#define HWCAP2_MTE \(1 << 18\)\n#endif\n?",
+        r"#ifndef HWCAP2_BTI\n#define HWCAP2_BTI.*?\n#endif\n?",
+        r"#ifndef HWCAP2_MTE\n#define HWCAP2_MTE.*?\n#endif\n?",
+    ):
+        new2, _ = re.subn(pat, "", new2, count=1, flags=re.S)
+    if new2 != text:
+        if "KOTV_TAGGING_NO_LOCAL_HWCAP" not in new2:
+            new2 = "/* KOTV_TAGGING_NO_LOCAL_HWCAP */\n" + new2
+        open(path, "w", encoding="utf-8").write(new2)
+        print("patched tagging.cc (loose)")
+    else:
+        print("WARN: tagging.cc HWCAP block not found", file=sys.stderr)
+PY
+  fi
   f="$src/base/allocator/partition_allocator/src/partition_alloc/thread_isolation/pkey.cc"
   if [[ -f "$f" ]] && ! grep -q 'KOTV_SYS_PKEY' "$f"; then
-    local tmp
-    tmp="$(mktemp)"
-    {
-      echo '/* KOTV_SYS_PKEY */'
-      echo '#ifndef SYS_pkey_mprotect'
-      echo '# if defined(__x86_64__)'
-      echo '#  define SYS_pkey_mprotect 329'
-      echo '#  define SYS_pkey_alloc 330'
-      echo '#  define SYS_pkey_free 331'
-      echo '# elif defined(__aarch64__)'
-      echo '#  define SYS_pkey_mprotect 288'
-      echo '#  define SYS_pkey_alloc 289'
-      echo '#  define SYS_pkey_free 290'
-      echo '# endif'
-      echo '#endif'
-      cat "$f"
-    } >"$tmp"
-    mv "$tmp" "$f"
-    echo "[chromium] patched pkey.cc (SYS_pkey_*)"
+    python3 - "$f" <<'PY'
+import sys
+path = sys.argv[1]
+text = open(path, encoding="utf-8").read()
+block = r'''
+/* KOTV_SYS_PKEY: Toolkit headers may omit these; after system includes. */
+#ifndef SYS_pkey_mprotect
+# if defined(__x86_64__)
+#  define SYS_pkey_mprotect 329
+#  define SYS_pkey_alloc 330
+#  define SYS_pkey_free 331
+# elif defined(__aarch64__)
+#  define SYS_pkey_mprotect 288
+#  define SYS_pkey_alloc 289
+#  define SYS_pkey_free 290
+# endif
+#endif
+'''
+# 插在最后一个 #include 之后，保证先看到系统头；若已有 SYS_* 则 ifndef 跳过，避免 unused
+lines = text.splitlines(keepends=True)
+last_inc = -1
+for i, ln in enumerate(lines):
+    if ln.lstrip().startswith("#include"):
+        last_inc = i
+if last_inc < 0:
+    print("WARN: pkey.cc no includes", file=sys.stderr)
+    sys.exit(0)
+# 若后续已有 SYS_pkey 使用，在 include 后插入；并用诊断忽略 unused（部分 TU 可能裁掉 pkey 路径）
+inject = (
+    "/* KOTV_SYS_PKEY */\n"
+    "#pragma clang diagnostic push\n"
+    '#pragma clang diagnostic ignored "-Wunused-macros"\n'
+    "#ifndef SYS_pkey_mprotect\n"
+    "# if defined(__x86_64__)\n"
+    "#  define SYS_pkey_mprotect 329\n"
+    "#  define SYS_pkey_alloc 330\n"
+    "#  define SYS_pkey_free 331\n"
+    "# elif defined(__aarch64__)\n"
+    "#  define SYS_pkey_mprotect 288\n"
+    "#  define SYS_pkey_alloc 289\n"
+    "#  define SYS_pkey_free 290\n"
+    "# endif\n"
+    "#endif\n"
+    "#pragma clang diagnostic pop\n"
+)
+lines.insert(last_inc + 1, inject)
+open(path, "w", encoding="utf-8").write("".join(lines))
+print("patched pkey.cc")
+PY
   fi
 }
 
