@@ -32,9 +32,25 @@ if [[ -s "$dest_def" ]]; then
   rm -f "$dest_def.bak"
 fi
 
-if [[ -s "$dest_def" ]] && command -v dlltool >/dev/null 2>&1; then
-  dlltool -d "$dest_def" -l "$dir/libmpv.dll.a" -D libmpv-2.dll \
-    && echo "ok windows/libmpv.dll.a (dlltool, LIBRARY=libmpv-2.dll)"
+# MinGW 导入库：arm64 须用 aarch64 dlltool / llvm-dlltool -m arm64，勿用 PATH 上的 x86_64 dlltool。
+if [[ -s "$dest_def" ]]; then
+  dlltool_bin=""
+  dlltool_args=()
+  if kotv_windows_is_arm64; then
+    if command -v aarch64-w64-mingw32-dlltool >/dev/null 2>&1; then
+      dlltool_bin=aarch64-w64-mingw32-dlltool
+    elif command -v llvm-dlltool >/dev/null 2>&1; then
+      dlltool_bin=llvm-dlltool
+      dlltool_args=(-m arm64)
+    fi
+  fi
+  if [[ -z "$dlltool_bin" ]] && command -v dlltool >/dev/null 2>&1; then
+    dlltool_bin=dlltool
+  fi
+  if [[ -n "$dlltool_bin" ]]; then
+    "$dlltool_bin" "${dlltool_args[@]}" -d "$dest_def" -l "$dir/libmpv.dll.a" -D libmpv-2.dll \
+      && echo "ok windows/libmpv.dll.a ($dlltool_bin, LIBRARY=libmpv-2.dll)"
+  fi
 fi
 
 libexe=""

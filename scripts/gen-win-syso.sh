@@ -30,7 +30,15 @@ case "$PLAT" in
     ;;
   windows-arm64)
     OUT="$ROOT/rsrc_windows_arm64.syso"
-    if ! (cd "$WORKDIR" && windres -i kotv.rc -o kotv.syso -O coff); then
+    # 默认 windres 产出 pe-x86-64；arm64 Go 需 pe-aarch64-little（llvm-mingw 的 aarch64-windres 亦可）。
+    wr=windres
+    wr_args=(-i kotv.rc -o kotv.syso -O coff)
+    if command -v aarch64-w64-mingw32-windres >/dev/null 2>&1; then
+      wr=aarch64-w64-mingw32-windres
+    else
+      wr_args+=(-F pe-aarch64-little)
+    fi
+    if ! (cd "$WORKDIR" && "$wr" "${wr_args[@]}"); then
       echo "WARNING: windres arm64 failed, skip icon embed" >&2
       exit 0
     fi
