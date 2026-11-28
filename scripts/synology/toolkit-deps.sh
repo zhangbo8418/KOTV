@@ -77,16 +77,17 @@ kotv_syno_dep_fetch() {
     name="$(echo "$url" | sed -n 's|.*/\([^/]*\)/archive/.*|\1|p')"
     tarball="$SRC_CACHE/${name}-${tag#v}"
   fi
-  download "$url" "$tarball"
+  download "$url" "$tarball" || return 1
   if [[ "$tarball" == *.gz || "$tarball" == *.tgz ]]; then
     if ! gzip -t "$tarball" 2>/dev/null; then
-      echo "[deps] corrupt archive, re-download: $(basename "$tarball")"
+      echo "[deps] corrupt archive, re-download: $(basename "$tarball")" >&2
       rm -f "$tarball"
-      download "$url" "$tarball"
+      download "$url" "$tarball" || return 1
       gzip -t "$tarball" || { echo "ERROR: bad gzip: $tarball" >&2; return 1; }
     fi
   fi
-  echo "$tarball"
+  # 仅路径走 stdout（供 tarball="$(kotv_syno_dep_fetch …)"）
+  printf '%s\n' "$tarball"
 }
 
 kotv_syno_dep_extract() {

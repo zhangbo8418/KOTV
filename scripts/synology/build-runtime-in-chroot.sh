@@ -42,22 +42,23 @@ kotv_syno_export_toolchain "$ENV_DIR"
 echo "==> platform=$PLATFORM arch=$ARCH_LABEL cross=$CROSS sysroot=$SYSROOT"
 
 download() {
+  # 日志一律 stderr：kotv_syno_dep_fetch 等会用 $(download/…) 吃 stdout
   local url="$1" dest="$2"
   mkdir -p "$(dirname "$dest")"
   if [[ -f "$dest" && -s "$dest" ]]; then
     if [[ "$dest" == *.gz || "$dest" == *.tgz ]] && ! gzip -t "$dest" 2>/dev/null; then
-      echo "  corrupt cache, re-download: $(basename "$dest")"
+      echo "  corrupt cache, re-download: $(basename "$dest")" >&2
       rm -f "$dest"
     else
-      echo "  cache hit: $(basename "$dest")"
+      echo "  cache hit: $(basename "$dest")" >&2
       return 0
     fi
   fi
-  echo "  download: $url"
+  echo "  download: $url" >&2
   local i partial="${dest}.partial.$$"
   for i in 1 2 3 4 5; do
     rm -f "$partial"
-    if curl -fL --http1.1 --retry 3 --retry-delay 2 --connect-timeout 30 \
+    if curl -fsSL --http1.1 --retry 3 --retry-delay 2 --connect-timeout 30 \
       -o "$partial" "$url" && [[ -s "$partial" ]]; then
       if [[ "$dest" == *.gz || "$dest" == *.tgz ]] && ! gzip -t "$partial" 2>/dev/null; then
         rm -f "$partial"
