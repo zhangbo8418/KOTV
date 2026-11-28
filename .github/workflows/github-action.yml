@@ -868,12 +868,12 @@ jobs:
           - { kind: runtime, toolkit_plat: geminilake, arch_label: x86_64, piece: python,   artifact: syno-python-x86_64,   timeout_minutes: 180 }
           - { kind: runtime, toolkit_plat: geminilake, arch_label: x86_64, piece: jre,      artifact: syno-jre-x86_64,      timeout_minutes: 360 }
           - { kind: runtime, toolkit_plat: geminilake, arch_label: x86_64, piece: chromium, artifact: syno-chromium-x86_64, timeout_minutes: 600 }
-          - { kind: runtime, toolkit_plat: geminilake, arch_label: x86_64, piece: ffmpeg,   artifact: syno-ffmpeg-x86_64,   timeout_minutes: 120 }
+          - { kind: runtime, toolkit_plat: geminilake, arch_label: x86_64, piece: ffmpeg,   artifact: syno-ffmpeg-x86_64,   timeout_minutes: 180 }
           - { kind: runtime, toolkit_plat: rtd1296,    arch_label: armv8,  piece: node,     artifact: syno-node-armv8,     timeout_minutes: 180 }
           - { kind: runtime, toolkit_plat: rtd1296,    arch_label: armv8,  piece: python,   artifact: syno-python-armv8,   timeout_minutes: 180 }
           - { kind: runtime, toolkit_plat: rtd1296,    arch_label: armv8,  piece: jre,      artifact: syno-jre-armv8,      timeout_minutes: 360 }
           - { kind: runtime, toolkit_plat: rtd1296,    arch_label: armv8,  piece: chromium, artifact: syno-chromium-armv8, timeout_minutes: 600 }
-          - { kind: runtime, toolkit_plat: rtd1296,    arch_label: armv8,  piece: ffmpeg,   artifact: syno-ffmpeg-armv8,   timeout_minutes: 120 }
+          - { kind: runtime, toolkit_plat: rtd1296,    arch_label: armv8,  piece: ffmpeg,   artifact: syno-ffmpeg-armv8,   timeout_minutes: 180 }
           # —— engine × arch ——
           - { kind: engine, toolkit_plat: geminilake, arch_label: x86_64, piece: engine, artifact: syno-engine-x86_64, timeout_minutes: 60 }
           - { kind: engine, toolkit_plat: rtd1296,    arch_label: armv8,  piece: engine, artifact: syno-engine-armv8,  timeout_minutes: 60 }
@@ -927,7 +927,7 @@ jobs:
             .toolkit/build_env
             .syno-src-cache
             .syno-deps
-          key: syno-toolkit-7.2-${{ matrix.toolkit_plat }}-${{ hashFiles('scripts/synology/versions.env', 'scripts/synology/toolkit-deps.sh') }}-v14
+          key: syno-toolkit-7.2-${{ matrix.toolkit_plat }}-${{ hashFiles('scripts/synology/versions.env', 'scripts/synology/toolkit-deps.sh') }}-v15
           restore-keys: |
             syno-toolkit-7.2-${{ matrix.toolkit_plat }}-
             syno-toolkit-7.2-

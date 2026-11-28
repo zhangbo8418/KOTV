@@ -343,7 +343,8 @@ kotv_syno_ensure_deps_python() {
     --disable-doc --disable-scripts --disable-xzdec --disable-lzmadec \
     --enable-static --disable-shared
   kotv_syno_dep_zstd
-  kotv_syno_dep_autotools libffi "$SYNO_LIBFFI_VER" \
+  # CPython 把 libffi.a 链进 _ctypes.so，必须 -fPIC；stamp 带 -pic 逼旧 cache 失效
+  CFLAGS="${CFLAGS:-} -fPIC" kotv_syno_dep_autotools libffi "${SYNO_LIBFFI_VER}-pic" \
     "https://github.com/libffi/libffi/releases/download/v${SYNO_LIBFFI_VER}/libffi-${SYNO_LIBFFI_VER}.tar.gz" \
     "libffi-${SYNO_LIBFFI_VER}" "include/ffi.h" \
     --disable-docs --disable-multi-os-directory --enable-static --disable-shared
@@ -408,11 +409,115 @@ kotv_syno_ensure_deps_jre() {
   kotv_syno_export_deps_env
 }
 
+# ---------- jellyfin-ffmpeg HWA：libpciaccess → libdrm → libva(drm) ----------
+kotv_syno_dep_libpciaccess() {
+  kotv_syno_load_versions
+  # shared：供 libdrm.so / 运行时 VAAPI 链路
+  kotv_syno_dep_autotools libpciaccess "$SYNO_LIBPCIACCESS_VER" \
+    "https://xorg.freedesktop.org/archive/individual/lib/libpciaccess-${SYNO_LIBPCIACCESS_VER}.tar.xz" \
+    "libpciaccess-${SYNO_LIBPCIACCESS_VER}" "include/pciaccess.h" \
+    --enable-shared --disable-static
+}
+
+kotv_syno_dep_meson_lib() {
+  # $1=name $2=ver $3=url $4=dirname $5=probe 其余=meson 选项
+  local name="$1" ver="$2" url="$3" dirname="$4" probe="$5"
+  shift 5
+  local deps host jobs tarball src
+  if kotv_syno_dep_ok "$name" "$ver" "$probe"; then
+    echo "[deps] $name $ver cache hit"
+    return 0
+  fi
+  if ! command -v meson >/dev/null 2>&1 || ! command -v ninja >/dev/null 2>&1; then
+    echo "ERROR: meson+ninja required to build $name" >&2
+    return 1
+  fi
+  deps="$(kotv_syno_deps_prefix)"
+  host="$(kotv_syno_deps_host_triple)"
+  jobs="$(kotv_syno_njobs)"
+  tarball="$(kotv_syno_dep_fetch "$url")"
+  src="$(kotv_syno_dep_extract "$tarball" "$dirname")"
+  mkdir -p "$deps"
+  (
+    cd "$src"
+    local mconf=(
+      --prefix="$deps"
+      --libdir=lib
+      --buildtype=release
+      --default-library=shared
+      "$@"
+    )
+    if [[ "$PLATFORM" == rtd1296 ]]; then
+      # 交叉：写临时 meson cross file
+      local xf="$BUILD_ROOT/meson-cross-${PLATFORM}.txt"
+      cat >"$xf" <<EOF
+[binaries]
+c = '$CC'
+cpp = '$CXX'
+ar = '${AR:-ar}'
+strip = '${STRIP:-strip}'
+pkg-config = '$(command -v pkg-config)'
+
+[host_machine]
+system = 'linux'
+cpu_family = 'aarch64'
+cpu = 'aarch64'
+endian = 'little'
+
+[built-in options]
+c_args = ['--sysroot=${SYSROOT}', '-I${deps}/include']
+c_link_args = ['--sysroot=${SYSROOT}', '-L${deps}/lib']
+cpp_args = ['--sysroot=${SYSROOT}', '-I${deps}/include']
+cpp_link_args = ['--sysroot=${SYSROOT}', '-L${deps}/lib']
+EOF
+      mconf+=(--cross-file="$xf")
+    fi
+    meson setup build "${mconf[@]}"
+    ninja -C build -j"$jobs"
+    ninja -C build install
+  )
+  kotv_syno_dep_mark "$name" "$ver"
+}
+
+kotv_syno_dep_libdrm() {
+  kotv_syno_load_versions
+  local ver="$SYNO_LIBDRM_VER"
+  kotv_syno_export_deps_env
+  kotv_syno_dep_meson_lib libdrm "$ver" \
+    "https://dri.freedesktop.org/libdrm/libdrm-${ver}.tar.xz" \
+    "libdrm-${ver}" "include/libdrm/drm.h" \
+    -Dudev=false -Dcairo-tests=disabled -Dvalgrind=disabled \
+    -Dexynos=disabled -Dfreedreno=disabled -Domap=disabled -Detnaviv=disabled \
+    -Dintel=enabled -Dnouveau=disabled -Dradeon=disabled -Damdgpu=disabled \
+    -Dinstall-test-programs=false
+}
+
+kotv_syno_dep_libva() {
+  # drm-only（群晖无桌面 X11）；运行时靠 DSM /dev/dri + LIBVA_DRIVERS_PATH
+  kotv_syno_load_versions
+  local ver="$SYNO_LIBVA_VER" deps
+  kotv_syno_export_deps_env
+  deps="$(kotv_syno_deps_prefix)"
+  kotv_syno_dep_meson_lib libva "$ver" \
+    "https://github.com/intel/libva/archive/refs/tags/${ver}.tar.gz" \
+    "libva-${ver}" "include/va/va.h" \
+    -Denable_docs=false \
+    -Dwith_x11=no -Dwith_glx=no -Dwith_wayland=no \
+    -Ddisable_drm=false \
+    -Ddriverdir="${deps}/lib/dri"
+}
+
 kotv_syno_ensure_deps_ffmpeg() {
   kotv_syno_load_versions
-  echo "[deps] profile=ffmpeg (zlib openssl)"
+  echo "[deps] profile=ffmpeg (zlib openssl libpciaccess libdrm libva → jellyfin-ffmpeg VAAPI)"
   kotv_syno_dep_zlib
   kotv_syno_dep_openssl
+  kotv_syno_export_deps_env
+  kotv_syno_dep_libpciaccess
+  kotv_syno_export_deps_env
+  kotv_syno_dep_libdrm
+  kotv_syno_export_deps_env
+  kotv_syno_dep_libva
   kotv_syno_export_deps_env
 }
 
@@ -491,9 +596,10 @@ kotv_syno_chromium_fill_gcc_rt() {
 }
 
 kotv_syno_chromium_fill_hwcap2() {
-  # Toolkit 头文件缺 HWCAP2_*/PR_MTE_*；原地 patch 常 Permission denied（只读 sysroot）。
-  # 写可写 compat 头，由 GN extra_cflags -include 强制注入（避免 tagging.cc 本地 #define 触发 -Wunused-macros）。
-  local sysroot="$1" compat
+  # Toolkit 头文件缺 HWCAP2_*/PR_MTE_*/SYS_pkey_*。
+  # Chromium GN 把 extra_cflags 整串当成单个 argv → 必须用无空格的 -includePATH；
+  # 同时把宏写进可写 sysroot 头，并在 checkout 后 patch 源码（三保险）。
+  local sysroot="$1" compat hwcap_bits
   mkdir -p "$sysroot/usr/include"
   compat="$sysroot/usr/include/kotv-chromium-compat.h"
   cat >"$compat" <<'EOF'
@@ -526,10 +632,92 @@ kotv_syno_chromium_fill_hwcap2() {
 #ifndef PR_MTE_TAG_MASK
 #define PR_MTE_TAG_MASK (0xffffUL << PR_MTE_TAG_SHIFT)
 #endif
+/* memory-protection keys syscalls (Toolkit headers may omit) */
+#if defined(__x86_64__)
+#ifndef SYS_pkey_mprotect
+#define SYS_pkey_mprotect 329
+#endif
+#ifndef SYS_pkey_alloc
+#define SYS_pkey_alloc 330
+#endif
+#ifndef SYS_pkey_free
+#define SYS_pkey_free 331
+#endif
+#elif defined(__aarch64__)
+#ifndef SYS_pkey_mprotect
+#define SYS_pkey_mprotect 288
+#endif
+#ifndef SYS_pkey_alloc
+#define SYS_pkey_alloc 289
+#endif
+#ifndef SYS_pkey_free
+#define SYS_pkey_free 290
+#endif
+#endif
 EOF
+  # 直接补进 bits/hwcap.h（rsync 副本可写），不依赖 -include
+  hwcap_bits="$sysroot/usr/include/bits/hwcap.h"
+  if [[ -f "$hwcap_bits" ]] && ! grep -q 'KOTV_HWCAP2' "$hwcap_bits"; then
+    cat >>"$hwcap_bits" <<'EOF'
+
+/* KOTV_HWCAP2: Toolkit glibc too old for Chromium partition_alloc */
+#ifndef HWCAP2_BTI
+#define HWCAP2_BTI (1 << 17)
+#endif
+#ifndef HWCAP2_MTE
+#define HWCAP2_MTE (1 << 18)
+#endif
+EOF
+    echo "[deps] chromium: patched $hwcap_bits"
+  fi
   export KOTV_SYNO_CHROMIUM_COMPAT_H="$compat"
   echo "$compat" >"$sysroot/.kotv-chromium-compat-h"
   echo "[deps] chromium: wrote compat header $compat"
+}
+
+# checkout 后补 partition_alloc 源码（extra_cflags 单 argv 不可靠时仍能过）
+kotv_syno_chromium_patch_src() {
+  local src="${1:?}" f
+  f="$src/base/allocator/partition_allocator/src/partition_alloc/aarch64_support.h"
+  if [[ -f "$f" ]] && ! grep -q 'KOTV_HWCAP2' "$f"; then
+    # 在第一个 #include 之前插入宏，供本头内 HWCAP2_* 使用
+    local tmp
+    tmp="$(mktemp)"
+    {
+      echo '/* KOTV_HWCAP2 */'
+      echo '#ifndef HWCAP2_BTI'
+      echo '#define HWCAP2_BTI (1 << 17)'
+      echo '#endif'
+      echo '#ifndef HWCAP2_MTE'
+      echo '#define HWCAP2_MTE (1 << 18)'
+      echo '#endif'
+      cat "$f"
+    } >"$tmp"
+    mv "$tmp" "$f"
+    echo "[chromium] patched aarch64_support.h (HWCAP2)"
+  fi
+  f="$src/base/allocator/partition_allocator/src/partition_alloc/thread_isolation/pkey.cc"
+  if [[ -f "$f" ]] && ! grep -q 'KOTV_SYS_PKEY' "$f"; then
+    local tmp
+    tmp="$(mktemp)"
+    {
+      echo '/* KOTV_SYS_PKEY */'
+      echo '#ifndef SYS_pkey_mprotect'
+      echo '# if defined(__x86_64__)'
+      echo '#  define SYS_pkey_mprotect 329'
+      echo '#  define SYS_pkey_alloc 330'
+      echo '#  define SYS_pkey_free 331'
+      echo '# elif defined(__aarch64__)'
+      echo '#  define SYS_pkey_mprotect 288'
+      echo '#  define SYS_pkey_alloc 289'
+      echo '#  define SYS_pkey_free 290'
+      echo '# endif'
+      echo '#endif'
+      cat "$f"
+    } >"$tmp"
+    mv "$tmp" "$f"
+    echo "[chromium] patched pkey.cc (SYS_pkey_*)"
+  fi
 }
 
 kotv_syno_chromium_fill_dri_pc() {
@@ -598,7 +786,7 @@ kotv_syno_ensure_deps_chromium() {
   sysroot="$(kotv_syno_chromium_sysroot)"
   export KOTV_SYNO_CHROMIUM_SYSROOT="$sysroot"
   # stamp：清单版本；改清单必须 bump
-  want="toolkit-headless:gcc-rt3:dri-pc2:compat-h1"
+  want="toolkit-headless:gcc-rt3:dri-pc2:compat-h2-pkey"
   stamp="$sysroot/.kotv-chromium-sysroot"
   if [[ -f "$stamp" && "$(cat "$stamp" 2>/dev/null || true)" == "$want" ]] \
     && kotv_syno_chromium_verify_sysroot "$sysroot"; then

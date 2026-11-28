@@ -521,12 +521,16 @@ EOF
   fi
   local out_dir="out/HeadlessSyno"
   mkdir -p "$out_dir"
-  # target_sysroot = Toolkit 副本；-B/-L 找 crt/libgcc；-include compat 补 HWCAP2/PR_MTE
-  local extra_ld="-L${chrome_sysroot}/usr/lib -L${chrome_sysroot}/lib"
+  # 源码补丁：HWCAP2 / SYS_pkey（GN extra_cflags 整串是单个 argv，不可靠）
+  kotv_syno_chromium_patch_src "$chrome_src"
+
+  # target_sysroot = Toolkit 副本；-B/-L 找 crt/libgcc
+  # GN 把 extra_*flags 整串当作一个 cflags 元素 → 必须无空格（-includePATH / 单段 -L）
+  local extra_ld="-L${chrome_sysroot}/usr/lib"
   if [[ -n "$gcc_libdir" ]]; then
-    extra_ld+=" -B${gcc_libdir} -L${gcc_libdir}"
+    extra_ld="-B${gcc_libdir}"
   fi
-  local extra_c="-include ${compat_h}"
+  local extra_c="-include${compat_h}"
   cat >"$out_dir/args.gn" <<EOF
 import("//build/args/headless.gn")
 is_debug = false
@@ -557,6 +561,7 @@ extra_cflags = "${extra_c}"
 extra_cxxflags = "${extra_c}"
 extra_ldflags = "${extra_ld}"
 EOF
+  echo "[chromium] args.gn extra_cflags=${extra_c}"
   gn gen "$out_dir"
   # 只编 headless_shell（chrome-headless-shell 不是稳定 ninja 目标名）
   ninja -C "$out_dir" -j"$jobs" headless_shell
@@ -580,58 +585,88 @@ EOF
   echo "[chromium] ready: $dest/chrome-headless-shell"
 }
 
-# ---------- ffmpeg ----------
+# ---------- jellyfin-ffmpeg（Toolkit 编，群晖 VAAPI/DRM 硬解）----------
 build_ffmpeg() {
   local ver="${SYNO_FFMPEG_VER}"
   local dest="$OUT/ffmpeg"
   local jobs
   jobs="$(comp_jobs)"
-  if stamp_ok ffmpeg "$ver" && [[ -x "$dest/ffmpeg" ]]; then
-    echo "[ffmpeg] skip (cached $ver)"
+  if stamp_ok ffmpeg "jellyfin-${ver}" && [[ -x "$dest/ffmpeg" ]]; then
+    echo "[ffmpeg] skip (cached jellyfin-$ver)"
     return 0
   fi
-  echo "[ffmpeg] build $ver for $ARCH_LABEL (-j$jobs)"
+  echo "[ffmpeg] build jellyfin-ffmpeg $ver for $ARCH_LABEL (Toolkit + VAAPI, -j$jobs)"
   kotv_syno_ensure_deps ffmpeg
   kotv_syno_export_deps_env
   local deps
   deps="$(kotv_syno_deps_prefix)"
-  local tarball="$SRC_CACHE/ffmpeg-${ver}.tar.xz"
-  download "https://ffmpeg.org/releases/ffmpeg-${ver}.tar.xz" "$tarball"
-  local src="$BUILD_ROOT/ffmpeg-${ver}"
+
+  local tarball="$SRC_CACHE/jellyfin-ffmpeg-${ver}.tar.gz"
+  download "https://github.com/jellyfin/jellyfin-ffmpeg/archive/refs/tags/v${ver}.tar.gz" "$tarball"
+  local src="$BUILD_ROOT/jellyfin-ffmpeg-${ver}"
   rm -rf "$src"
-  tar -xJf "$tarball" -C "$BUILD_ROOT"
-  cd "$src"
-  # OpenSSL ≥3 + GPL 需要 --enable-version3；严禁扫到 Toolkit sysroot 的 OpenSSL 1.1
-  # 勿 --pkg-config-flags=--static；PKG_CONFIG_* 只看见 deps
-  export PKG_CONFIG_SYSROOT_DIR=""
-  export PKG_CONFIG_LIBDIR="${deps}/lib/pkgconfig:${deps}/lib64/pkgconfig"
-  export PKG_CONFIG_PATH="$PKG_CONFIG_LIBDIR"
-  export OPENSSL_CFLAGS="-I${deps}/include"
-  export OPENSSL_LIBS="-L${deps}/lib -lssl -lcrypto"
-  # 探针：编译单元必须看到 OPENSSL_VERSION_MAJOR>=3
-  if ! printf '%s\n' '#include <openssl/opensslv.h>' 'int x[OPENSSL_VERSION_MAJOR >= 3 ? 1 : -1];' \
-    | $CC -I"${deps}/include" -c -x c - -o /tmp/kotv-ossl-probe.o 2>/dev/null; then
-    echo "ERROR: deps OpenSSL headers are not ≥3.0 under -I${deps}/include" >&2
-    ls -la "${deps}/include/openssl" 2>/dev/null | head || true
+  tar -xzf "$tarball" -C "$BUILD_ROOT"
+  # github archive 目录名 jellyfin-ffmpeg-<tag without v>
+  if [[ ! -d "$src" ]]; then
+    echo "ERROR: extract missing $src" >&2
+    ls -la "$BUILD_ROOT" | head -20 >&2 || true
     exit 1
   fi
-  rm -f /tmp/kotv-ossl-probe.o
-  # CFLAGS 去掉可能带进的旧 -I；只保留 sysroot + deps
-  local ff_cflags="--sysroot=${SYSROOT} -O2 -pipe -I${deps}/include"
+  cd "$src"
+
+  # 只看见 Toolkit deps 的 pkg-config；交叉时 check_pkg_config openssl>=3 失败会误报 <3+gpl
+  export PKG_CONFIG_SYSROOT_DIR=""
+  export PKG_CONFIG_LIBDIR="${deps}/lib/pkgconfig:${deps}/lib64/pkgconfig:${deps}/share/pkgconfig"
+  export PKG_CONFIG_PATH="$PKG_CONFIG_LIBDIR"
+  unset PKG_CONFIG_PATH_FOR_TARGET || true
+  if ! command -v pkg-config >/dev/null 2>&1; then
+    echo "ERROR: pkg-config required for jellyfin-ffmpeg (openssl/libva/libdrm)" >&2
+    exit 1
+  fi
+  local ossl_ver
+  ossl_ver="$(pkg-config --modversion openssl 2>/dev/null || true)"
+  if [[ -z "$ossl_ver" ]] || ! pkg-config --exists "openssl >= 3.0.0"; then
+    echo "ERROR: pkg-config openssl>=3 failed (got '${ossl_ver:-none}'); PKG_CONFIG_LIBDIR=$PKG_CONFIG_LIBDIR" >&2
+    ls -la "${deps}/lib/pkgconfig"/openssl*.pc 2>/dev/null || true
+    cat "${deps}/lib/pkgconfig/openssl.pc" 2>/dev/null || true
+    exit 1
+  fi
+  echo "[ffmpeg] openssl via pkg-config: $ossl_ver"
+  pkg-config --exists libva libdrm || {
+    echo "ERROR: libva/libdrm.pc missing under deps (VAAPI)" >&2
+    ls -la "${deps}/lib/pkgconfig" | head -40 >&2 || true
+    exit 1
+  }
+
+  # 交叉：openssl 的 check_pkg_config 还要能链过（-ldl -lpthread -lz）
+  local ff_cflags="-I${deps}/include --sysroot=${SYSROOT} -O2 -pipe"
+  local ff_ldflags="-L${deps}/lib -L${deps}/lib64 --sysroot=${SYSROOT} -Wl,-O1 -Wl,-rpath-link,${deps}/lib"
   local ff_cfg=(
     --prefix=/opt/kotv-ffmpeg
+    --target-os=linux
+    --extra-version=Jellyfin-KOTV
     --enable-gpl
     --enable-version3
     --enable-shared
-    --enable-openssl
+    --disable-static
     --disable-doc
+    --disable-ffplay
     --disable-debug
+    --disable-libxcb
+    --disable-libxcb-shm
+    --disable-libxcb-xfixes
+    --disable-libxcb-shape
+    --disable-xlib
+    --disable-sdl2
+    --enable-openssl
+    --enable-libdrm
+    --enable-vaapi
     --cc="$CC"
     --cxx="$CXX"
     --extra-cflags="$ff_cflags"
-    --extra-ldflags="-L${deps}/lib -L${deps}/lib64 --sysroot=${SYSROOT} -Wl,-O1"
+    --extra-ldflags="$ff_ldflags"
+    --extra-libs="-ldl -lpthread -lz"
   )
-  # Toolkit 交叉/CI 环境常无 nasm；禁用 x86asm 仍可出 ffmpeg 二进制
   if ! command -v nasm >/dev/null 2>&1 && ! command -v yasm >/dev/null 2>&1; then
     ff_cfg+=(--disable-x86asm)
   fi
@@ -639,23 +674,41 @@ build_ffmpeg() {
     ff_cfg+=(
       --enable-cross-compile
       --arch=aarch64
-      --target-os=linux
       --cross-prefix="$(dirname "$CC")/$(basename "$CC" | sed 's/gcc$//')"
     )
+  else
+    ff_cfg+=(--arch=x86_64)
   fi
+  # 探针：与 configure 相同的交叉 CC + flags 必须看见 OpenSSL≥3 且能链 libssl
+  if ! printf '%s\n' '#include <openssl/ssl.h>' 'int main(void){OPENSSL_init_ssl(0,0);return 0;}' \
+    | $CC $ff_cflags -x c - -o /tmp/kotv-ossl-link $ff_ldflags -lssl -lcrypto -ldl -lpthread -lz 2>/tmp/kotv-ossl-link.err; then
+    echo "ERROR: openssl link probe failed (cross/native)" >&2
+    cat /tmp/kotv-ossl-link.err >&2 || true
+    exit 1
+  fi
+  rm -f /tmp/kotv-ossl-link /tmp/kotv-ossl-link.err
+
   ./configure "${ff_cfg[@]}"
   make -j"$jobs"
   make DESTDIR="$BUILD_ROOT/ffmpeg-dest" install
   rm -rf "$dest"
-  mkdir -p "$dest"
+  mkdir -p "$dest/lib"
   cp -a "$BUILD_ROOT/ffmpeg-dest/opt/kotv-ffmpeg/bin/ffmpeg" "$dest/ffmpeg"
   chmod +x "$dest/ffmpeg"
-  mkdir -p "$dest/lib"
+  # ffprobe 可选
+  [[ -x "$BUILD_ROOT/ffmpeg-dest/opt/kotv-ffmpeg/bin/ffprobe" ]] \
+    && cp -a "$BUILD_ROOT/ffmpeg-dest/opt/kotv-ffmpeg/bin/ffprobe" "$dest/ffprobe" || true
   cp -a "$BUILD_ROOT/ffmpeg-dest/opt/kotv-ffmpeg/lib/"*.so* "$dest/lib/" 2>/dev/null || true
-  kotv_syno_deps_ship_shared "$dest/lib" ssl crypto z
-  write_stamp ffmpeg "$ver"
+  kotv_syno_deps_ship_shared "$dest/lib" ssl crypto z drm va va-drm pciaccess
+  # 运行时提示：Intel 群晖用 DSM 的 iHD/i965；可设 LIBVA_DRIVERS_PATH
+  cat >"$dest/README-hwa.txt" <<'EOF'
+KOTV jellyfin-ffmpeg (Toolkit-built) with VAAPI/DRM.
+On Synology Intel NAS: ensure /dev/dri exists; set LIBVA_DRIVERS_PATH to DSM dri
+(e.g. /usr/lib/dri) if drivers are not beside this lib/.
+EOF
+  write_stamp ffmpeg "jellyfin-${ver}"
   rm -rf "$src" "$BUILD_ROOT/ffmpeg-dest"
-  echo "[ffmpeg] ready: $dest/ffmpeg"
+  echo "[ffmpeg] ready: $dest/ffmpeg (jellyfin-$ver + vaapi)"
 }
 
 run_component() {

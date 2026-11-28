@@ -10,8 +10,8 @@
 | **Node** | Toolkit + `.syno-deps` | 原生：zlib/c-ares/nghttp2/openssl `--shared-*`；交叉：树内 deps（避免 host 链目标 .so）；brotli/ICU 树内 |
 | **Python** | Toolkit + `.syno-deps` | CPython optional：zlib/bzip2/xz/zstd(static+PIC)/libffi/openssl/sqlite/ncurses/readline/libuuid |
 | **JRE** | Toolkit + `.syno-deps` | OpenJDK 必选：alsa、cups、fontconfig(+expat/freetype)、X11 栈（含 libXfixes；交叉 `--disable-malloc0returnsnull`） |
-| **ffmpeg** | Toolkit + `.syno-deps` | zlib、openssl≥3（`--enable-openssl --enable-version3`；pkg-config 不走 `--static`） |
-| **Chromium** | Clang + **Toolkit sysroot ABI** | `headless.gn`（关 gtk/alsa/…）；清单补齐：GCC `crtbeginS`/`libgcc`、`dri.pc`（`use_sysroot` 强制）、arm `HWCAP2_*`；不编系统 libdrm/xkbcommon；只编 `headless_shell` |
+| **ffmpeg** | Toolkit + `.syno-deps` | **jellyfin-ffmpeg**（钉 tag）；zlib、openssl≥3、libpciaccess/libdrm/libva(drm)；`--enable-vaapi --enable-libdrm`（群晖 `/dev/dri`）；不编 CUDA/QSV/rkmpp |
+| **Chromium** | Clang + **Toolkit sysroot ABI** | `headless.gn`；清单：GCC crt/`libgcc`、`dri.pc`、compat/`bits/hwcap.h`/`SYS_pkey_*` + 源码补丁；只编 `headless_shell` |
 
 目标链接 **禁止宿主 `/usr`**。宿主只允许构建工具：Clang、meson/ninja、boot JDK、交叉 build-python、Node 的 `CC_host`。
 
