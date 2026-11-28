@@ -561,8 +561,15 @@ kotv_syno_dep_libvpl() {
       -DBUILD_SHARED_LIBS=ON -DBUILD_TESTS=OFF
     ninja -C build -j"$jobs"
     ninja -C build install
-    # ffmpeg pkg-config 名是 vpl
+    # ffmpeg check_pkg_config 找 mfxvideo.h（无 vpl/ 前缀）→ 补 -I…/vpl
     if [[ -f "$deps/lib/pkgconfig/vpl.pc" ]]; then
+      if ! grep -q 'includedir}/vpl' "$deps/lib/pkgconfig/vpl.pc"; then
+        if grep -q '^Cflags:' "$deps/lib/pkgconfig/vpl.pc"; then
+          sed -i 's|^Cflags: \(.*\)|Cflags: \1 -I${includedir}/vpl|' "$deps/lib/pkgconfig/vpl.pc"
+        else
+          echo 'Cflags: -I${includedir} -I${includedir}/vpl' >>"$deps/lib/pkgconfig/vpl.pc"
+        fi
+      fi
       grep -q 'lstdc++' "$deps/lib/pkgconfig/vpl.pc" \
         || echo "Libs.private: -lstdc++" >>"$deps/lib/pkgconfig/vpl.pc"
     fi
