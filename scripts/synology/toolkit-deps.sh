@@ -117,6 +117,20 @@ kotv_syno_bundle_set_rpath() {
   fi
 }
 
+# 拷单个 .so：外链/绝对 symlink 解成实体文件，避免打进包后断链（如 Toolkit libgcc_s）
+kotv_syno_bundle_copy_one() {
+  local src="$1" dest_lib="$2" bn real
+  bn="$(basename "$src")"
+  if [[ -L "$src" ]]; then
+    real="$(readlink -f "$src" 2>/dev/null || true)"
+    if [[ -n "$real" && -f "$real" ]]; then
+      cp -a "$real" "$dest_lib/$bn"
+      return 0
+    fi
+  fi
+  cp -a "$src" "$dest_lib/"
+}
+
 # 把同族 libfoo.so* 拷进 dest_lib，返回 dest 内用于继续追 NEEDED 的路径
 kotv_syno_bundle_copy_family() {
   local src="$1" dest_lib="$2" soname="$3"
@@ -129,13 +143,46 @@ kotv_syno_bundle_copy_family() {
   shopt -u nullglob
   for f in "${fam[@]}"; do
     [[ -e "$f" ]] || continue
-    cp -a "$f" "$dest_lib/"
+    kotv_syno_bundle_copy_one "$f" "$dest_lib"
   done
   if [[ -e "$dest_lib/$soname" ]]; then
     printf '%s\n' "$dest_lib/$soname"
   elif [[ -e "$dest_lib/$base" ]]; then
     printf '%s\n' "$dest_lib/$base"
   fi
+}
+
+# 强制从 Toolkit deps 收指定 stem（不依赖 DT_NEEDED），再追其 NEEDED
+# 用法：kotv_syno_bundle_force_stems "$dest/lib" libpciaccess libdrm_intel …
+kotv_syno_bundle_force_stems() {
+  local dest_lib="${1:?}"
+  shift
+  local deps stem src copied
+  local -a search=() elves=()
+  deps="$(kotv_syno_deps_prefix)"
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && search+=("$line")
+  done < <(kotv_syno_bundle_search_dirs "$dest_lib")
+  for stem in "$@"; do
+    [[ -n "$stem" ]] || continue
+    src="$(kotv_syno_bundle_resolve "${stem}.so" "${search[@]}" || true)"
+    [[ -z "$src" ]] && src="$(kotv_syno_bundle_resolve "${stem}.so.0" "${search[@]}" || true)"
+    [[ -z "$src" ]] && src="$(kotv_syno_bundle_resolve "${stem}.so.1" "${search[@]}" || true)"
+    if [[ -z "$src" ]]; then
+      shopt -s nullglob
+      local cands=( "$deps/lib/${stem}.so"* )
+      shopt -u nullglob
+      ((${#cands[@]})) && src="${cands[0]}"
+    fi
+    if [[ -z "$src" ]]; then
+      echo "[bundle] force-miss $stem (not in Toolkit deps)" >&2
+      continue
+    fi
+    copied="$(kotv_syno_bundle_copy_family "$src" "$dest_lib" "$(basename "$src")" || true)"
+    [[ -n "$copied" ]] && elves+=("$copied")
+    echo "[bundle] force-ship $stem"
+  done
+  ((${#elves[@]})) && kotv_syno_bundle_libs "$dest_lib" "${elves[@]}"
 }
 
 # 从 ELF DT_NEEDED 递归收集 → dest_lib，并写 rpath
@@ -421,6 +468,15 @@ kotv_syno_dep_bzip2() {
   kotv_syno_dep_mark bzip2 "$ver"
 }
 
+kotv_syno_dep_xz() {
+  kotv_syno_load_versions
+  kotv_syno_dep_autotools xz "$SYNO_XZ_VER" \
+    "https://github.com/tukaani-project/xz/releases/download/v${SYNO_XZ_VER}/xz-${SYNO_XZ_VER}.tar.gz" \
+    "xz-${SYNO_XZ_VER}" "include/lzma.h" \
+    --disable-doc --disable-scripts --disable-xzdec --disable-lzmadec \
+    --disable-lzmainfo --disable-lzma-links
+}
+
 # 只装静态库：避免 sysroot LDFLAGS 下 shared 链 Scrt1 → undefined main
 kotv_syno_dep_zstd() {
   kotv_syno_load_versions
@@ -549,11 +605,7 @@ kotv_syno_ensure_deps_python() {
   kotv_syno_dep_zlib
   kotv_syno_export_deps_env
   kotv_syno_dep_bzip2
-  kotv_syno_dep_autotools xz "$SYNO_XZ_VER" \
-    "https://github.com/tukaani-project/xz/releases/download/v${SYNO_XZ_VER}/xz-${SYNO_XZ_VER}.tar.gz" \
-    "xz-${SYNO_XZ_VER}" "include/lzma.h" \
-    --disable-doc --disable-scripts --disable-xzdec --disable-lzmadec \
-    --enable-static --disable-shared
+  kotv_syno_dep_xz
   kotv_syno_dep_zstd
   # CPython 把 libffi.a 链进 _ctypes.so，必须 -fPIC；stamp 带 -pic 逼旧 cache 失效
   CFLAGS="${CFLAGS:-} -fPIC" kotv_syno_dep_autotools libffi "${SYNO_LIBFFI_VER}-pic" \
@@ -1045,6 +1097,8 @@ kotv_syno_ensure_deps_ffmpeg() {
   kotv_syno_load_versions
   echo "[deps] profile=ffmpeg (VAAPI/media-driver + CUDA/ffnvcodec + QSV/libvpl + rkmpp/rkrga + librtmp/libsrt)"
   kotv_syno_dep_zlib
+  kotv_syno_dep_bzip2
+  kotv_syno_dep_xz
   kotv_syno_dep_openssl
   kotv_syno_export_deps_env
   # 推拉流：RTMP / SRT（链 deps OpenSSL）
@@ -1293,6 +1347,46 @@ kotv_syno_chromium_patch_src() {
     '#ifndef __NR_pidfd_open' \
     '# define __NR_pidfd_open 434' \
     '#endif'
+
+  # Linux 关 NSS 后 Configure 没有 CreateSslSystemTrustStoreChromeRoot；补 Chrome Root Store only
+  kotv_syno_chromium_patch_chrome_root_linux "$src"
+}
+
+# system_trust_store.cc：NSS 版 CreateSslSystemTrustStoreChromeRoot 之后插入 Linux Chrome-only
+kotv_syno_chromium_patch_chrome_root_linux() {
+  local src="${1:?}" f mark='KOTV_CHROME_ROOT_LINUX'
+  f="$src/net/cert/internal/system_trust_store.cc"
+  [[ -f "$f" ]] || return 0
+  grep -q "$mark" "$f" && return 0
+  if ! grep -q 'make_unique<TrustStoreNSS>' "$f"; then
+    echo "[chromium] WARN: $f has no TrustStoreNSS chrome-root impl; skip" >&2
+    return 0
+  fi
+  local tmp
+  tmp="$(mktemp)"
+  # 只在「TrustStoreNSS() 实现」后面的第一个 #elif IS_MAC 前插入（避开文件头 include 分支）
+  awk -v mark="$mark" '
+    /make_unique<TrustStoreNSS>/ { saw_nss_impl=1 }
+    /#elif BUILDFLAG\(IS_MAC\)/ && saw_nss_impl && !done {
+      print "#elif BUILDFLAG(IS_LINUX)"
+      print "// " mark ": no NSS in Toolkit sysroot; Chrome Root Store only (HTTPS via BoringSSL)"
+      print "std::unique_ptr<SystemTrustStore> CreateSslSystemTrustStoreChromeRoot("
+      print "    std::unique_ptr<TrustStoreChrome> chrome_root) {"
+      print "  return CreateChromeOnlySystemTrustStore(std::move(chrome_root));"
+      print "}"
+      print ""
+      done=1
+      saw_nss_impl=0
+    }
+    { print }
+  ' "$f" >"$tmp"
+  if ! grep -q "$mark" "$tmp"; then
+    echo "ERROR: failed to inject Linux Chrome-only trust store into $f" >&2
+    rm -f "$tmp"
+    return 1
+  fi
+  mv "$tmp" "$f"
+  echo "[chromium] patched system_trust_store.cc ($mark)"
 }
 
 kotv_syno_chromium_fill_dri_pc() {

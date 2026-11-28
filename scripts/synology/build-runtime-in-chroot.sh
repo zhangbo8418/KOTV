@@ -598,7 +598,7 @@ build_ffmpeg() {
   local dest="$OUT/ffmpeg"
   local jobs
   jobs="$(comp_jobs)"
-  local stamp_ver="jellyfin-${ver}-hwa8"
+  local stamp_ver="jellyfin-${ver}-hwa9"
   if stamp_ok ffmpeg "$stamp_ver" && [[ -x "$dest/ffmpeg" ]]; then
     echo "[ffmpeg] skip (cached $stamp_ver)"
     return 0
@@ -765,18 +765,26 @@ build_ffmpeg() {
   mkdir -p "$dest/lib"
   cp -a "$BUILD_ROOT/ffmpeg-dest/opt/kotv-ffmpeg/lib/"*.so* "$dest/lib/" 2>/dev/null || true
   kotv_syno_bundle_component "$dest"
+  # DT_NEEDED 收不全的 HWA / 压缩库：强制从 Toolkit deps 打进包
+  local -a force_stems=(libbz2 liblzma)
+  if [[ "$CROSS" -eq 0 ]]; then
+    force_stems+=(libpciaccess libdrm_intel libigdgmm libvpl)
+  else
+    force_stems+=(librockchip_mpp librga)
+  fi
+  kotv_syno_bundle_force_stems "$dest/lib" "${force_stems[@]}"
   # 验收：HWA Toolkit .so / dri 进包（CUDA 专有运行时不随包）
-  local miss=0
-  for f in libssl libdrm libva librtmp libsrt; do
-    if ! ls "$dest/lib/${f}.so"* >/dev/null 2>&1; then
-      echo "ERROR: ffmpeg package missing Toolkit ${f}.so*" >&2
+  local miss=0 stem
+  for stem in libssl libdrm libva librtmp libsrt libbz2 liblzma; do
+    if ! ls "$dest/lib/${stem}.so"* >/dev/null 2>&1; then
+      echo "ERROR: ffmpeg package missing Toolkit ${stem}.so*" >&2
       miss=1
     fi
   done
   if [[ "$CROSS" -eq 0 ]]; then
-    for f in libvpl libigdgmm libpciaccess; do
-      if ! ls "$dest/lib/${f}.so"* >/dev/null 2>&1; then
-        echo "ERROR: ffmpeg package missing Toolkit ${f}.so* (QSV/VAAPI)" >&2
+    for stem in libvpl libigdgmm libpciaccess libdrm_intel; do
+      if ! ls "$dest/lib/${stem}.so"* >/dev/null 2>&1; then
+        echo "ERROR: ffmpeg package missing Toolkit ${stem}.so* (QSV/VAAPI)" >&2
         miss=1
       fi
     done
@@ -785,9 +793,9 @@ build_ffmpeg() {
       miss=1
     fi
   else
-    for f in librockchip_mpp librga; do
-      if ! ls "$dest/lib/${f}.so"* >/dev/null 2>&1; then
-        echo "ERROR: ffmpeg package missing Toolkit ${f}.so*" >&2
+    for stem in librockchip_mpp librga; do
+      if ! ls "$dest/lib/${stem}.so"* >/dev/null 2>&1; then
+        echo "ERROR: ffmpeg package missing Toolkit ${stem}.so*" >&2
         miss=1
       fi
     done
