@@ -4,6 +4,7 @@
 
 - **引擎**：DSM Toolkit GCC + sysroot **全静态**（`-trimpath`，`-ldflags="-s -w … -linkmode external -extldflags '-static --sysroot=…'"`）。CGO（QuickJS 等）也走同一工具链，不用宿主 libc / musl Docker。
 - **运行时**（Node/Python/JRE/Chromium/ffmpeg）：同一 Toolkit 交叉或本地编；不用 Liberica/CFT 预编译充数。
+- **deps**（`toolkit-deps.sh`）：Python 的 libffi、JRE 的 alsa-lib 等也用 Toolkit 编进独立前缀，不用宿主库、不用 sysroot 里损坏的布局。
 
 Web 便携包的 musl 静态引擎仍用仓库根目录 `scripts/build-engine-static-linux.sh`，与群晖路径分离。
 
@@ -16,7 +17,7 @@ Web 便携包的 musl 静态引擎仍用仓库根目录 `scripts/build-engine-st
 | `synology-piece`（矩阵） | runtime × `{x86_64,armv8}`；`engine`×2（Toolkit 静态）；`webapp`、`bridge` |
 | `synology-package` | 下载全部 `syno-*.tar` → `ci-assemble-spks.sh` → 两个 `.spk` |
 
-平台：`geminilake`→x86_64，`rtd1296`→armv8。
+平台：`geminilake`→x86_64，`rtd1296`→armv8。Python 钉 `3.14.x`（与宿主 `--with-build-python` major.minor 对齐）。
 
 ```bash
 ./scripts/synology/ci-build-piece.sh engine geminilake
@@ -24,7 +25,7 @@ Web 便携包的 musl 静态引擎仍用仓库根目录 `scripts/build-engine-st
 ./scripts/synology/ci-assemble-spks.sh
 ```
 
-共用逻辑在 `common.sh`（工具链探测、静态引擎校验、artifact 名）。
+共用：`common.sh`（工具链 / 引擎校验）、`toolkit-deps.sh`（自编依赖前缀）。
 
 ## 本地一站（慢，仅调试）
 

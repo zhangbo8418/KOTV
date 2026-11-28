@@ -64,6 +64,9 @@ download() {
   return 1
 }
 
+# shellcheck source=toolkit-deps.sh
+source "$ROOT/scripts/synology/toolkit-deps.sh"
+
 stamp_ok() {
   local name ver marker
   name="$1"
@@ -83,14 +86,20 @@ comp_jobs() {
   echo "$JOBS_TOTAL"
 }
 
-host_python() {
-  local p
-  p="$(command -v python3 || true)"
-  if [[ -z "$p" || ! -x "$p" ]]; then
-    echo "ERROR: host python3 required" >&2
-    return 1
-  fi
-  echo "$p"
+# 交叉编 Python 时宿主解释器 major.minor 必须与目标一致
+host_python_matching() {
+  local want_mm="$1" p got
+  for p in "python${want_mm}" python3; do
+    if command -v "$p" >/dev/null 2>&1; then
+      got="$("$p" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || true)"
+      if [[ "$got" == "$want_mm" ]]; then
+        command -v "$p"
+        return 0
+      fi
+    fi
+  done
+  echo "ERROR: need host Python ${want_mm} for cross-compile (found none)" >&2
+  return 1
 }
 
 # ---------- Node ----------
@@ -144,62 +153,44 @@ build_node() {
 build_python() {
   local ver="${SYNO_PYTHON_VER}"
   local dest="$OUT/python"
-  local jobs build_py
+  local jobs ensurepip=install build_py=""
   jobs="$(comp_jobs)"
   if stamp_ok python "$ver" && [[ -x "$dest/bin/python3" || -x "$dest/bin/python" ]]; then
     echo "[python] skip (cached $ver)"
     return 0
   fi
   echo "[python] build $ver for $ARCH_LABEL (-j$jobs)"
+  kotv_syno_ensure_libffi
+  kotv_syno_export_deps_pkgconfig
+
   local tarball="$SRC_CACHE/Python-${ver}.tgz"
   download "https://www.python.org/ftp/python/${ver}/Python-${ver}.tgz" "$tarball"
   local src="$BUILD_ROOT/Python-${ver}"
   rm -rf "$src"
   tar -xzf "$tarball" -C "$BUILD_ROOT"
   cd "$src"
+
   local py_cfg=(
     --prefix=/opt/kotv-python
     --enable-shared
-    --with-ensurepip=install
     --disable-test-modules
+    --with-system-ffi
   )
   if [[ "$CROSS" -eq 1 ]]; then
-    build_py="$(host_python)"
-    # Python 3.12+：交叉编必须提供宿主可执行的 build-python
-    py_cfg=(
-      --prefix=/opt/kotv-python
-      --enable-shared
-      --with-ensurepip=no
-      --disable-test-modules
+    ensurepip=no
+    build_py="$(host_python_matching "${ver%.*}")"
+    py_cfg+=(
       --host=aarch64-unknown-linux-gnu
       --build=x86_64-pc-linux-gnu
       --with-build-python="$build_py"
     )
-    echo "[python] cross-compile with --with-build-python=$build_py"
+    echo "[python] cross-compile --with-build-python=$build_py"
   fi
+  py_cfg+=(--with-ensurepip="$ensurepip")
+
   CC="$CC" CXX="$CXX" \
     ac_cv_file__dev_ptmx=yes ac_cv_file__dev_ptc=no \
     ./configure "${py_cfg[@]}"
-  # Toolkit sysroot 常无可用 ffi.h。优先补 -I；仍不行则在 Makefile 里关掉 _ctypes。
-  if ! echo '#include <ffi.h>' | "$CC" $CFLAGS -E - >/dev/null 2>&1; then
-    local ffi_h ffi_ok=0
-    ffi_h="$(find "$SYSROOT" -name ffi.h 2>/dev/null | head -1 || true)"
-    if [[ -n "$ffi_h" ]]; then
-      echo "[python] ffi.h → $ffi_h"
-      sed -i.bak "s|^CFLAGS=\\(.*\\)$|CFLAGS=\\1 -I$(dirname "$ffi_h")|" Makefile || true
-      if echo '#include <ffi.h>' | "$CC" $CFLAGS -I"$(dirname "$ffi_h")" -E - >/dev/null 2>&1; then
-        ffi_ok=1
-      fi
-    fi
-    if [[ "$ffi_ok" -ne 1 ]]; then
-      echo "[python] disable MODULE__CTYPES (no usable ffi.h)"
-      sed -i.bak \
-        -e 's/^MODULE__CTYPES_STATE=.*/MODULE__CTYPES_STATE=disabled/' \
-        -e 's/^MODULE__CTYPES_TEST_STATE=.*/MODULE__CTYPES_TEST_STATE=disabled/' \
-        Makefile || true
-      printf '%s\n' '*disabled*' '_ctypes' '_ctypes_test' >>Modules/Setup.local
-    fi
-  fi
   make -j"$jobs"
   make DESTDIR="$BUILD_ROOT/python-dest" install
   rm -rf "$dest"
@@ -233,6 +224,10 @@ build_jre() {
     echo "ERROR: host java (boot JDK) required to build OpenJDK" >&2
     exit 1
   fi
+  kotv_syno_ensure_alsa
+  local deps
+  deps="$(kotv_syno_deps_prefix)"
+
   local gitdir="$SRC_CACHE/jdk${ver}u"
   if [[ ! -d "$gitdir/.git" ]]; then
     git clone --depth 1 --branch "jdk${ver}u" \
@@ -250,6 +245,7 @@ build_jre() {
     javac_bin="$(command -v javac || command -v java)"
     boot="$(cd "$(dirname "$javac_bin")/.." && pwd)"
   fi
+  # OpenJDK 不允许 --without-alsa；alsa 用 Toolkit 自编前缀。图像库走 bundled。
   local jdk_cfg=(
     --with-boot-jdk="$boot"
     --with-jvm-variants=server
@@ -258,7 +254,7 @@ build_jre() {
     --with-native-debug-symbols=none
     --with-debug-level=release
     --enable-headless-only
-    --with-alsa=no
+    --with-alsa="$deps"
     --with-x=no
     --with-cups=no
     --with-fontconfig=no
@@ -266,9 +262,9 @@ build_jre() {
     --with-libjpeg=bundled
     --with-giflib=bundled
     --with-libpng=bundled
-    --with-extra-cflags="$CFLAGS"
-    --with-extra-cxxflags="$CXXFLAGS"
-    --with-extra-ldflags="$LDFLAGS"
+    --with-extra-cflags="$CFLAGS -I${deps}/include"
+    --with-extra-cxxflags="$CXXFLAGS -I${deps}/include"
+    --with-extra-ldflags="$LDFLAGS -L${deps}/lib -L${deps}/lib64"
   )
   if [[ "$CROSS" -eq 1 ]]; then
     jdk_cfg+=(--openjdk-target=aarch64-unknown-linux-gnu)
@@ -301,6 +297,7 @@ build_jre() {
   else
     cp -a "$jre_src/." "$dest/"
   fi
+  kotv_syno_deps_ship_shared "$dest/lib" asound
   write_stamp jre "$ver"
   rm -rf "$src"
   echo "[jre] ready: $dest"
@@ -419,41 +416,36 @@ EOF
   fi
 
   cd "$chrome_src"
-  # 宿主 clang + Toolkit sysroot；pkg-config 必须指向 sysroot 的 .pc
-  export PKG_CONFIG_SYSROOT_DIR="$SYSROOT"
-  export PKG_CONFIG_LIBDIR="${SYSROOT}/usr/lib/pkgconfig:${SYSROOT}/usr/share/pkgconfig:${SYSROOT}/usr/lib/${ARCH_LABEL}-linux-gnu/pkgconfig"
-  export PKG_CONFIG_PATH="$PKG_CONFIG_LIBDIR"
-  if ! command -v pkg-config >/dev/null 2>&1; then
-    echo "ERROR: pkg-config required for Chromium GN" >&2
+  # 官方 headless.gn：Ozone headless，关掉 xkbcommon/gtk/alsa 等系统库探测
+  if [[ ! -f build/args/headless.gn ]]; then
+    echo "ERROR: missing build/args/headless.gn in Chromium tree" >&2
     exit 1
   fi
   local out_dir="out/HeadlessSyno"
-  local args=(
-    "is_debug=false"
-    "is_component_build=false"
-    "is_official_build=true"
-    "symbol_level=0"
-    "blink_symbol_level=0"
-    "chrome_pgo_phase=0"
-    "enable_nacl=false"
-    "enable_remoting=false"
-    "enable_media_remoting=false"
-    "enable_print_preview=false"
-    "rtc_include_tests=false"
-    "v8_enable_i18n_support=false"
-    "use_gtk=false"
-    "use_cups=false"
-    "use_gio=false"
-    'target_os="linux"'
-    "target_cpu=\"${GN_CPU}\""
-    "use_sysroot=true"
-    "target_sysroot=\"${SYSROOT}\""
-    "use_custom_libcxx=true"
-    "is_clang=true"
-    'clang_base_path="/usr"'
-    "clang_use_chrome_plugins=false"
-  )
-  gn gen "$out_dir" --args="${args[*]}"
+  mkdir -p "$out_dir"
+  cat >"$out_dir/args.gn" <<EOF
+import("//build/args/headless.gn")
+is_debug = false
+is_component_build = false
+is_official_build = true
+symbol_level = 0
+blink_symbol_level = 0
+chrome_pgo_phase = 0
+enable_nacl = false
+enable_remoting = false
+rtc_include_tests = false
+v8_enable_i18n_support = false
+target_os = "linux"
+target_cpu = "${GN_CPU}"
+use_sysroot = true
+target_sysroot = "${SYSROOT}"
+use_custom_libcxx = true
+is_clang = true
+clang_base_path = "/usr"
+clang_use_chrome_plugins = false
+use_xkbcommon = false
+EOF
+  gn gen "$out_dir"
   ninja -C "$out_dir" -j"$jobs" headless_shell chrome-headless-shell \
     || ninja -C "$out_dir" -j"$jobs" headless_shell
 
