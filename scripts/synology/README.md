@@ -7,15 +7,17 @@
 | 组件 | 目标链接 | 依赖闭包（configure 前一次编齐） |
 |------|----------|----------------------------------|
 | **engine** | Toolkit GCC+sysroot **全静态** | 无外部 .so |
-| **Node** | Toolkit + `.syno-deps` | 原生：zlib/c-ares/nghttp2/openssl `--shared-*`；交叉：树内 deps（避免 host 链目标 .so）；brotli/ICU 树内 |
-| **Python** | Toolkit + `.syno-deps` | CPython optional：zlib/bzip2/xz/zstd(static+PIC)/libffi/openssl/sqlite/ncurses/readline/libuuid |
-| **JRE** | Toolkit + `.syno-deps` | OpenJDK 必选：alsa、cups、fontconfig(+expat/freetype)、X11 栈（含 libXfixes；交叉 `--disable-malloc0returnsnull`） |
-| **ffmpeg** | Toolkit + `.syno-deps` | **jellyfin-ffmpeg**；VAAPI（libdrm/libva）+ **CUDA**（ffnvcodec 头，运行时 dlopen）+ **QSV**（libvpl，x86）+ **rkmpp/rkrga**（arm 备用）；均 Toolkit 编 |
-| **Chromium** | Clang + **Toolkit sysroot ABI** | `headless.gn`；清单：GCC crt/`libgcc`、`dri.pc`、compat/`bits/hwcap.h`/`SYS_pkey_*` + 源码补丁；只编 `headless_shell` |
+| **Node** | Toolkit + `.syno-deps` | 原生：zlib/c-ares/nghttp2/openssl `--shared-*`；交叉：树内 deps；brotli/ICU 树内 |
+| **Python** | Toolkit + `.syno-deps` | optional：zlib/bzip2/xz/zstd(static+PIC)/libffi/openssl/sqlite/ncurses/readline/libuuid |
+| **JRE** | Toolkit + `.syno-deps` | alsa、cups、fontconfig(+expat/freetype)、X11（静态）；交叉 `--disable-malloc0returnsnull` |
+| **ffmpeg** | Toolkit + `.syno-deps` | jellyfin-ffmpeg 源；VAAPI（libdrm/libva）+ CUDA（ffnvcodec 头，运行时 dlopen）+ QSV（libvpl，x86）+ rkmpp/rkrga（arm） |
+| **Chromium** | Clang + **Toolkit sysroot ABI** | `headless.gn`；GCC crt/`libgcc`、`dri.pc`、compat/`HWCAP2`/`SYS_pkey_*`；只编 `headless_shell` |
 
-目标链接 **禁止宿主 `/usr`**。宿主只允许构建工具：Clang、meson/ninja、boot JDK、交叉 build-python、Node 的 `CC_host`。
+构建：`kotv_syno_ensure_deps <profile>`。打包：各组件 install 后统一 `kotv_syno_bundle_component`——按 ELF `DT_NEEDED` 只从 Toolkit deps/GCC 收 `.so` 进 `lib/`，并写 `$ORIGIN` rpath（`patchelf`）；能静态的在 deps 期静态。
 
-共用：`common.sh`、`toolkit-deps.sh`（`kotv_syno_ensure_deps <profile>`）。
+目标链接 **禁止宿主 `/usr`**。宿主只允许构建工具：Clang、meson/ninja、boot JDK、交叉 build-python、Node 的 `CC_host`、`patchelf`/`readelf`。
+
+共用：`common.sh`、`toolkit-deps.sh`。
 
 Web 便携包 musl 静态引擎仍用仓库根目录 `scripts/build-engine-static-linux.sh`，与群晖路径分离。
 

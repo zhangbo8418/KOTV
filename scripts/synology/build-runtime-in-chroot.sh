@@ -187,6 +187,7 @@ build_node() {
       CFLAGS_host="$host_cflags" CXXFLAGS_host="$host_cflags" \
       LDFLAGS_host="$host_ldflags"
   else
+    target_ldflags="${target_ldflags} $(kotv_syno_origin_rpath_flags)"
     CC="$CC" CXX="$CXX" \
       PKG_CONFIG_PATH="${PKG_CONFIG_PATH:-}" \
       PKG_CONFIG_LIBDIR="${PKG_CONFIG_LIBDIR:-}" \
@@ -196,13 +197,12 @@ build_node() {
     make -j"$jobs"
   fi
   rm -rf "$dest"
-  mkdir -p "$dest/lib"
+  mkdir -p "$dest"
   cp -a "$src/out/Release/node" "$dest/node"
   chmod +x "$dest/node"
-  if [[ "$CROSS" -eq 0 ]]; then
-    kotv_syno_deps_ship_shared "$dest/lib" ssl crypto z cares nghttp2
-  fi
   if [[ -f "$src/LICENSE" ]]; then cp "$src/LICENSE" "$dest/LICENSE"; fi
+  # 原生 --shared-*：按 NEEDED 收 Toolkit .so；交叉树内静态则闭包为空
+  kotv_syno_bundle_component "$dest"
   write_stamp node "$ver"
   rm -rf "$src"
   echo "[node] ready: $dest/node"
@@ -256,15 +256,15 @@ build_python() {
     export ac_cv_func_getaddrinfo=yes
     export ac_cv_buggy_getaddrinfo=no
   fi
+  export LDFLAGS="${LDFLAGS:-} $(kotv_syno_origin_rpath_flags)"
   CC="$CC" CXX="$CXX" ./configure "${py_cfg[@]}"
   make -j"$jobs"
   make DESTDIR="$BUILD_ROOT/python-dest" install
   rm -rf "$dest"
   mkdir -p "$dest"
   cp -a "$BUILD_ROOT/python-dest/opt/kotv-python/." "$dest/"
-  mkdir -p "$dest/lib"
-  # 静态库不会被拷；openssl/zlib/sqlite/ncurses 等 shared 才进包
-  kotv_syno_deps_ship_shared "$dest/lib" ssl crypto z bz2 sqlite3 ncursesw
+  # shared 依赖（openssl/ncurses/libpython…）按 NEEDED 从 Toolkit deps 收拢
+  kotv_syno_bundle_component "$dest"
   if [[ -x "$dest/bin/python3" ]]; then
     if "$dest/bin/python3" -c 'import sys; print(sys.version)' >/dev/null 2>&1; then
       "$dest/bin/python3" -m pip install --upgrade pip wheel || true
@@ -336,7 +336,7 @@ build_jre() {
     --with-libpng=bundled
     --with-extra-cflags="$CFLAGS -I${deps}/include"
     --with-extra-cxxflags="$CXXFLAGS -I${deps}/include"
-    --with-extra-ldflags="$LDFLAGS -L${deps}/lib -L${deps}/lib64"
+    --with-extra-ldflags="$LDFLAGS -L${deps}/lib -L${deps}/lib64 $(kotv_syno_origin_rpath_flags)"
   )
   if [[ "$CROSS" -eq 1 ]]; then
     jdk_cfg+=(--openjdk-target=aarch64-unknown-linux-gnu)
@@ -374,7 +374,7 @@ build_jre() {
       echo "[jre] cross: shipped images/jdk (host cannot run target jlink)"
     fi
   fi
-  kotv_syno_deps_ship_shared "$dest/lib" asound
+  kotv_syno_bundle_component "$dest"
   write_stamp jre "$ver"
   rm -rf "$src"
   echo "[jre] ready: $dest"
@@ -580,23 +580,25 @@ EOF
   ln -sfn chrome-headless-shell "$dest/chrome"
   find "$(dirname "$bin")" -maxdepth 1 -type f \( -name '*.pak' -o -name '*.bin' -o -name '*.dat' -o -name '*.so' -o -name 'icudtl.dat' -o -name 'v8_context_snapshot.bin' -o -name 'lib*.so*' \) \
     -exec cp -a {} "$dest/" \; 2>/dev/null || true
+  # headless 多为自带 libcxx；若仍有 Toolkit 运行时 NEEDED 则收进 lib/
+  kotv_syno_bundle_component "$dest"
   write_stamp chromium "$tag"
   rm -rf "$out_dir"
   echo "[chromium] ready: $dest/chrome-headless-shell"
 }
 
-# ---------- jellyfin-ffmpeg（Toolkit 编，群晖 VAAPI/DRM 硬解）----------
+# ---------- ffmpeg（jellyfin-ffmpeg 源 + Toolkit HWA 依赖）----------
 build_ffmpeg() {
   local ver="${SYNO_FFMPEG_VER}"
   local dest="$OUT/ffmpeg"
   local jobs
   jobs="$(comp_jobs)"
-  local stamp_ver="jellyfin-${ver}-hwa3"
+  local stamp_ver="jellyfin-${ver}-hwa4"
   if stamp_ok ffmpeg "$stamp_ver" && [[ -x "$dest/ffmpeg" ]]; then
     echo "[ffmpeg] skip (cached $stamp_ver)"
     return 0
   fi
-  echo "[ffmpeg] build jellyfin-ffmpeg $ver for $ARCH_LABEL (Toolkit + VAAPI/CUDA/QSV/rkmpp, -j$jobs)"
+  echo "[ffmpeg] build $ver for $ARCH_LABEL (Toolkit + VAAPI/CUDA/QSV/rkmpp, -j$jobs)"
   kotv_syno_ensure_deps ffmpeg
   kotv_syno_export_deps_env
   local deps
@@ -614,13 +616,13 @@ build_ffmpeg() {
   fi
   cd "$src"
 
-  # 只看见 Toolkit deps 的 pkg-config；交叉时 check_pkg_config openssl>=3 失败会误报 <3+gpl
+  # 只看见 Toolkit deps 的 pkg-config
   export PKG_CONFIG_SYSROOT_DIR=""
   export PKG_CONFIG_LIBDIR="${deps}/lib/pkgconfig:${deps}/lib64/pkgconfig:${deps}/share/pkgconfig"
   export PKG_CONFIG_PATH="$PKG_CONFIG_LIBDIR"
   unset PKG_CONFIG_PATH_FOR_TARGET || true
   if ! command -v pkg-config >/dev/null 2>&1; then
-    echo "ERROR: pkg-config required for jellyfin-ffmpeg" >&2
+    echo "ERROR: pkg-config required for ffmpeg" >&2
     exit 1
   fi
   local ossl_ver
@@ -638,11 +640,11 @@ build_ffmpeg() {
   }
 
   local ff_cflags="-I${deps}/include --sysroot=${SYSROOT} -O2 -pipe"
-  local ff_ldflags="-L${deps}/lib -L${deps}/lib64 --sysroot=${SYSROOT} -Wl,-O1 -Wl,-rpath-link,${deps}/lib"
+  local ff_ldflags="-L${deps}/lib -L${deps}/lib64 --sysroot=${SYSROOT} -Wl,-O1 -Wl,-rpath-link,${deps}/lib $(kotv_syno_origin_rpath_flags)"
   local ff_cfg=(
     --prefix=/opt/kotv-ffmpeg
     --target-os=linux
-    --extra-version=Jellyfin-KOTV
+    --extra-version=KOTV
     --enable-gpl
     --enable-version3
     --enable-shared
@@ -671,7 +673,6 @@ build_ffmpeg() {
     --extra-ldflags="$ff_ldflags"
     --extra-libs="-ldl -lpthread -lz"
   )
-  # cuda-llvm：宿主 clang 编 CUDA bitcode（ffmpeg 默认 nvcc=clang）；无 clang 则仅保留 ffnvcodec 动态加载路径
   if command -v clang >/dev/null 2>&1; then
     ff_cfg+=(--enable-cuda-llvm)
   fi
@@ -684,18 +685,17 @@ build_ffmpeg() {
       --arch=aarch64
       --cross-prefix="$(dirname "$CC")/$(basename "$CC" | sed 's/gcc$//')"
     )
-    # arm 备用：rkmpp；rkrga 由 jellyfin debian patch 注入 configure
     pkg-config --exists rockchip_mpp || {
       echo "ERROR: rockchip_mpp.pc missing (rkmpp)" >&2
       exit 1
     }
     ff_cfg+=(--enable-rkmpp)
+    # rkrga：上游 debian 补丁注入 configure 选项
     local rga_patch=""
     rga_patch="$(ls debian/patches/*rkrga* debian/patches/*rockchip*rga* 2>/dev/null | head -1 || true)"
     [[ -z "$rga_patch" ]] && rga_patch="$(ls debian/patches/0042-*rockchip* 2>/dev/null | head -1 || true)"
     if [[ -n "$rga_patch" && -f "$rga_patch" ]]; then
       echo "[ffmpeg] apply $rga_patch (rkrga)"
-      # debian 补丁路径前缀 FFmpeg/ → 源码根用 -p1
       if patch -p1 --forward --dry-run <"$rga_patch" >/dev/null 2>&1 \
         || patch -p1 --forward --dry-run <"$rga_patch" 2>&1 | grep -q 'previously applied'; then
         patch -p1 --forward <"$rga_patch" || true
@@ -711,7 +711,6 @@ build_ffmpeg() {
     fi
   else
     ff_cfg+=(--arch=x86_64)
-    # x86：QSV via oneVPL
     pkg-config --exists vpl || {
       echo "ERROR: vpl.pc missing (libvpl/QSV)" >&2
       exit 1
@@ -731,21 +730,43 @@ build_ffmpeg() {
   make -j"$jobs"
   make DESTDIR="$BUILD_ROOT/ffmpeg-dest" install
   rm -rf "$dest"
-  mkdir -p "$dest/lib"
+  mkdir -p "$dest"
   cp -a "$BUILD_ROOT/ffmpeg-dest/opt/kotv-ffmpeg/bin/ffmpeg" "$dest/ffmpeg"
   chmod +x "$dest/ffmpeg"
   [[ -x "$BUILD_ROOT/ffmpeg-dest/opt/kotv-ffmpeg/bin/ffprobe" ]] \
     && cp -a "$BUILD_ROOT/ffmpeg-dest/opt/kotv-ffmpeg/bin/ffprobe" "$dest/ffprobe" || true
+  mkdir -p "$dest/lib"
   cp -a "$BUILD_ROOT/ffmpeg-dest/opt/kotv-ffmpeg/lib/"*.so* "$dest/lib/" 2>/dev/null || true
-  kotv_syno_deps_ship_shared "$dest/lib" ssl crypto z drm va va-drm pciaccess vpl rockchip_mpp rga
+  kotv_syno_bundle_component "$dest"
+  # 验收：HWA 相关 Toolkit .so 必须进包（CUDA 为运行时 dlopen，不在此列）
+  local miss=0
+  for f in libssl libdrm libva; do
+    if ! ls "$dest/lib/${f}.so"* >/dev/null 2>&1; then
+      echo "ERROR: ffmpeg package missing Toolkit ${f}.so*" >&2
+      miss=1
+    fi
+  done
+  if [[ "$CROSS" -eq 0 ]]; then
+    if ! ls "$dest/lib"/libvpl.so* >/dev/null 2>&1; then
+      echo "ERROR: ffmpeg package missing Toolkit libvpl.so* (QSV)" >&2
+      miss=1
+    fi
+  elif ! ls "$dest/lib"/librockchip_mpp.so* >/dev/null 2>&1; then
+    echo "ERROR: ffmpeg package missing Toolkit librockchip_mpp.so* (rkmpp)" >&2
+    miss=1
+  fi
+  if [[ "$miss" -ne 0 ]]; then
+    ls -la "$dest/lib" | head -80 >&2 || true
+    exit 1
+  fi
   cat >"$dest/README-hwa.txt" <<'EOF'
-KOTV jellyfin-ffmpeg (Synology Toolkit-built)
+KOTV ffmpeg (Synology Toolkit-built)
 Enabled: VAAPI/DRM, CUDA/NVENC/NVDEC (ffnvcodec), QSV (libvpl, x86), rkmpp/rkrga (arm backup).
-Runtime:
-  - VAAPI: /dev/dri; LIBVA_DRIVERS_PATH may point at DSM dri (e.g. /usr/lib/dri)
-  - CUDA: Synology NVIDIA driver (libcuda / libnvidia-encode) must be present
-  - QSV: Intel oneVPL/MediaSDK GPU runtime on DSM
-  - rkmpp: Rockchip MPP devices (backup on arm)
+Shipped: Toolkit .so under lib/ (+ lib/dri when present); rpath=$ORIGIN/lib.
+Runtime (DSM-provided, not shipped):
+  - CUDA: NVIDIA driver (libcuda / libnvidia-encode)
+  - QSV: Intel oneVPL/MediaSDK GPU runtime
+  - VAAPI: /dev/dri; optional LIBVA_DRIVERS_PATH=.../lib/dri
 EOF
   write_stamp ffmpeg "$stamp_ver"
   rm -rf "$src" "$BUILD_ROOT/ffmpeg-dest"

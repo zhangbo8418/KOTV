@@ -34,20 +34,194 @@ kotv_syno_export_deps_env() {
   esac
 }
 
-kotv_syno_deps_ship_shared() {
+# ---------- 运行时打包（统一入口）----------
+# 原则：静态优先在 deps 构建期完成；不能静态的 .so 只从 Toolkit deps / Toolkit GCC
+# 按 ELF DT_NEEDED 闭包收进组件 dest/lib，并写 $ORIGIN rpath。禁止宿主 /usr。
+#
+# 用法（各组件 install 完成后只调一次）：
+#   kotv_syno_bundle_component "$dest"
+# 可选额外相对 deps 的目录：kotv_syno_bundle_component "$dest" lib/dri
+
+kotv_syno_bundle_is_glibc_soname() {
+  case "$1" in
+    libc.so.*|libm.so.*|libdl.so.*|libpthread.so.*|librt.so.*|libresolv.so.*| \
+    libutil.so.*|libnsl.so.*|libcrypt.so.*|libanl.so.*|libBrokenLocale.so.*| \
+    ld-linux*.so.*|linux-vdso.so.*)
+      return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+kotv_syno_elf_needed() {
+  local bin="$1"
+  [[ -f "$bin" ]] || return 0
+  if ! command -v readelf >/dev/null 2>&1; then
+    echo "ERROR: readelf required for shared-lib closure" >&2
+    return 1
+  fi
+  readelf -d "$bin" 2>/dev/null | sed -n 's/.*Shared library: \[\(.*\)\]/\1/p'
+}
+
+kotv_syno_is_elf() {
+  [[ -f "$1" ]] && readelf -h "$1" >/dev/null 2>&1
+}
+
+# 仅在给定目录中解析 soname（绝不搜 /usr）
+kotv_syno_bundle_resolve() {
+  local soname="$1"
+  shift
+  local d f stem
+  for d in "$@"; do
+    [[ -d "$d" ]] || continue
+    if [[ -e "$d/$soname" ]]; then
+      printf '%s\n' "$d/$soname"
+      return 0
+    fi
+  done
+  stem="${soname%%.so*}"
+  for d in "$@"; do
+    [[ -d "$d" ]] || continue
+    shopt -s nullglob
+    local cands=( "$d/${stem}.so"* )
+    shopt -u nullglob
+    for f in "${cands[@]}"; do
+      [[ "$(basename "$f")" == "$soname" ]] || continue
+      printf '%s\n' "$f"
+      return 0
+    done
+  done
+  return 1
+}
+
+kotv_syno_bundle_search_dirs() {
+  local deps dest_lib="${1:-}" gccso gccdir
+  deps="$(kotv_syno_deps_prefix)"
+  [[ -d "$deps/lib" ]] && printf '%s\n' "$deps/lib"
+  [[ -d "$deps/lib64" ]] && printf '%s\n' "$deps/lib64"
+  [[ -n "$dest_lib" && -d "$dest_lib" ]] && printf '%s\n' "$dest_lib"
+  # Toolkit GCC 运行时（libstdc++/libgcc_s/libatomic），仍是工具链产物
+  gccso="$("${CC:-gcc}" -print-file-name=libstdc++.so 2>/dev/null || true)"
+  if [[ -n "$gccso" && "$gccso" != "libstdc++.so" && -e "$gccso" ]]; then
+    gccdir="$(dirname "$gccso")"
+    [[ -d "$gccdir" ]] && printf '%s\n' "$gccdir"
+  fi
+}
+
+kotv_syno_bundle_set_rpath() {
+  local f="$1"
+  local rpath='$ORIGIN:$ORIGIN/lib:$ORIGIN/../lib'
+  [[ -f "$f" ]] || return 0
+  kotv_syno_is_elf "$f" || return 0
+  if command -v patchelf >/dev/null 2>&1; then
+    patchelf --set-rpath "$rpath" "$f" 2>/dev/null || true
+  fi
+}
+
+# 把同族 libfoo.so* 拷进 dest_lib，返回 dest 内用于继续追 NEEDED 的路径
+kotv_syno_bundle_copy_family() {
+  local src="$1" dest_lib="$2" soname="$3"
+  local dir base stem f
+  dir="$(dirname "$src")"
+  base="$(basename "$src")"
+  stem="${base%%.so*}"
+  shopt -s nullglob
+  local fam=( "$dir/${stem}.so"* )
+  shopt -u nullglob
+  for f in "${fam[@]}"; do
+    [[ -e "$f" ]] || continue
+    cp -a "$f" "$dest_lib/"
+  done
+  if [[ -e "$dest_lib/$soname" ]]; then
+    printf '%s\n' "$dest_lib/$soname"
+  elif [[ -e "$dest_lib/$base" ]]; then
+    printf '%s\n' "$dest_lib/$base"
+  fi
+}
+
+# 从 ELF DT_NEEDED 递归收集 → dest_lib，并写 rpath
+kotv_syno_bundle_libs() {
   local dest_lib="$1"
   shift
-  local deps name
-  deps="$(kotv_syno_deps_prefix)"
   mkdir -p "$dest_lib"
-  for name in "$@"; do
-    # 只拷真实存在的 .so（静态库静默跳过）
-    shopt -s nullglob
-    local files=( "${deps}/lib/lib${name}.so"* "${deps}/lib64/lib${name}.so"* )
-    shopt -u nullglob
-    ((${#files[@]})) && cp -a "${files[@]}" "$dest_lib/" || true
+  local -a search=() queue=()
+  local line elf soname src copied
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && search+=("$line")
+  done < <(kotv_syno_bundle_search_dirs "$dest_lib")
+
+  for elf in "$@"; do
+    [[ -f "$elf" ]] || continue
+    queue+=("$elf")
+  done
+
+  local -A seen=()
+  while ((${#queue[@]})); do
+    elf="${queue[0]}"
+    queue=("${queue[@]:1}")
+    [[ -n "${seen[$elf]:-}" ]] && continue
+    seen[$elf]=1
+    kotv_syno_bundle_set_rpath "$elf"
+    while IFS= read -r soname; do
+      [[ -n "$soname" ]] || continue
+      if kotv_syno_bundle_is_glibc_soname "$soname"; then
+        continue
+      fi
+      if [[ -e "$dest_lib/$soname" ]]; then
+        queue+=("$dest_lib/$soname")
+        continue
+      fi
+      src="$(kotv_syno_bundle_resolve "$soname" "${search[@]}" || true)"
+      if [[ -z "$src" ]]; then
+        echo "[bundle] missing Toolkit .so for NEEDED $soname (from $(basename "$elf")); DSM may provide at runtime"
+        continue
+      fi
+      copied="$(kotv_syno_bundle_copy_family "$src" "$dest_lib" "$soname" || true)"
+      [[ -n "$copied" ]] && queue+=("$copied")
+    done < <(kotv_syno_elf_needed "$elf")
   done
 }
+
+# 组件 install 后唯一打包入口：扫 dest ELF → Toolkit .so 闭包 → dest/lib + rpath
+# 其余参数：相对 deps 的额外目录（如 lib/dri）；deps/lib/dri 若存在会自动带上
+kotv_syno_bundle_component() {
+  local dest="$1"
+  shift
+  local dest_lib="$dest/lib" deps extra f n
+  mkdir -p "$dest_lib"
+  local -a elves=()
+  while IFS= read -r f; do
+    kotv_syno_is_elf "$f" || continue
+    elves+=("$f")
+  done < <(find "$dest" -type f \( -perm -111 -o -name '*.so' -o -name '*.so.*' \) 2>/dev/null)
+
+  if ((${#elves[@]} == 0)); then
+    echo "[bundle] WARN: no ELF under $dest" >&2
+    return 0
+  fi
+  echo "[bundle] $(basename "$dest"): ${#elves[@]} ELF → Toolkit .so → $dest_lib"
+  kotv_syno_bundle_libs "$dest_lib" "${elves[@]}"
+
+  deps="$(kotv_syno_deps_prefix)"
+  for extra in "$@" lib/dri; do
+    [[ -d "$deps/$extra" ]] || continue
+    mkdir -p "$dest/lib/$(basename "$extra")"
+    cp -a "$deps/$extra"/. "$dest/lib/$(basename "$extra")/"
+    echo "[bundle] shipped $extra"
+  done
+
+  while IFS= read -r f; do
+    kotv_syno_bundle_set_rpath "$f"
+  done < <(find "$dest_lib" -type f \( -name '*.so' -o -name '*.so.*' \) 2>/dev/null)
+
+  n="$(find "$dest_lib" -maxdepth 1 \( -name '*.so' -o -name '*.so.*' \) 2>/dev/null | wc -l | tr -d ' ')"
+  echo "[bundle] $(basename "$dest"): lib/ has ${n} .so*"
+}
+
+# 链接期 rpath（与 bundle 的 $ORIGIN 布局一致）
+kotv_syno_origin_rpath_flags() {
+  printf '%s' '-Wl,-rpath,$ORIGIN/lib -Wl,-rpath,$ORIGIN -Wl,-rpath,$ORIGIN/../lib'
+}
+
 
 # ---------- stamp / 解压 / autotools ----------
 
@@ -320,7 +494,7 @@ kotv_syno_dep_cups() {
 
 kotv_syno_ensure_deps_node() {
   kotv_syno_load_versions
-  # brotli 用 Node 树内（与源码常量对齐）；其余 Toolkit overlay
+  # brotli/ICU 用 Node 树内；其余 Toolkit overlay
   echo "[deps] profile=node (zlib c-ares nghttp2 openssl)"
   kotv_syno_dep_zlib
   kotv_syno_export_deps_env
@@ -414,7 +588,7 @@ kotv_syno_ensure_deps_jre() {
   kotv_syno_export_deps_env
 }
 
-# ---------- jellyfin-ffmpeg HWA：libpciaccess → libdrm → libva(drm) ----------
+# ---------- ffmpeg HWA：libpciaccess → libdrm → libva(drm) ----------
 kotv_syno_dep_libpciaccess() {
   # 0.18+ 仅 meson（无 ./configure）
   kotv_syno_load_versions
@@ -588,7 +762,7 @@ kotv_syno_dep_libvpl() {
   kotv_syno_dep_mark libvpl "$ver"
 }
 
-# rkmpp：Rockchip MPP（rtd1296 备用；nyanmisaka jellyfin-mpp-next）
+# rkmpp：Rockchip MPP（rtd1296 备用；nyanmisaka/rk-mirrors）
 kotv_syno_dep_rkmpp() {
   kotv_syno_load_versions
   local ver="$SYNO_RKMPP_COMMIT" deps jobs tarball src
@@ -610,6 +784,9 @@ kotv_syno_dep_rkmpp() {
   mkdir -p "$deps"
   (
     cd "$src"
+    # 勿单靠 CMAKE_SYSROOT（部分目标丢 --sysroot → 找不到 stdio.h）；flags 显式带 Toolkit sysroot
+    local cfl="--sysroot=${SYSROOT} -O2 -pipe -I${deps}/include"
+    local lfl="--sysroot=${SYSROOT} -L${deps}/lib -Wl,-O1"
     cmake -GNinja -S . -B build \
       -DCMAKE_BUILD_TYPE=Release \
       -DCMAKE_INSTALL_PREFIX="$deps" \
@@ -617,11 +794,14 @@ kotv_syno_dep_rkmpp() {
       -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
       -DCMAKE_C_COMPILER="$CC" \
       -DCMAKE_CXX_COMPILER="$CXX" \
-      -DCMAKE_SYSROOT="$SYSROOT" \
-      -DCMAKE_C_FLAGS="$CFLAGS" \
-      -DCMAKE_CXX_FLAGS="$CXXFLAGS" \
-      -DCMAKE_EXE_LINKER_FLAGS="$LDFLAGS" \
-      -DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS" \
+      -DCMAKE_C_FLAGS="$cfl" \
+      -DCMAKE_CXX_FLAGS="$cfl" \
+      -DCMAKE_EXE_LINKER_FLAGS="$lfl" \
+      -DCMAKE_SHARED_LINKER_FLAGS="$lfl" \
+      -DCMAKE_FIND_ROOT_PATH="$SYSROOT;$deps" \
+      -DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER \
+      -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
+      -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
       -DBUILD_TEST=OFF \
       -DBUILD_SHARED_LIBS=ON
     ninja -C build -j"$jobs"
@@ -649,7 +829,6 @@ kotv_syno_dep_rkrga() {
   tarball="$(kotv_syno_dep_fetch "https://github.com/nyanmisaka/rk-mirrors/archive/${ver}.tar.gz")"
   src="$(kotv_syno_dep_extract "$tarball" "rk-mirrors-${ver}")"
   kotv_syno_export_deps_env
-  # 与 jellyfin 相同：shared_library→library 以便可控；我们改编 shared 便于随包
   (
     cd "$src"
     # 保持 meson 默认 shared
@@ -873,15 +1052,12 @@ EOF
   echo "[deps] chromium: wrote compat header $compat"
 }
 
-# checkout 后补 partition_alloc：
-# - aarch64_support.h / bits/hwcap 提供 HWCAP2 后，tagging.cc 本地 #define 会 -Wunused-macros
-# - pkey：在系统头之后补 SYS_pkey_*（勿文件头无条件插入，否则未使用也 Werror）
+# checkout 后：补 HWCAP2/SYS_pkey；对易触发 -Wunused-macros 的 TU 关该告警（Toolkit 头过旧）
 kotv_syno_chromium_patch_src() {
   local src="${1:?}" f
   f="$src/base/allocator/partition_allocator/src/partition_alloc/aarch64_support.h"
   if [[ -f "$f" ]] && ! grep -q 'KOTV_HWCAP2' "$f"; then
-    local tmp
-    tmp="$(mktemp)"
+    local tmp; tmp="$(mktemp)"
     {
       echo '/* KOTV_HWCAP2 */'
       echo '#ifndef HWCAP2_BTI'
@@ -895,94 +1071,42 @@ kotv_syno_chromium_patch_src() {
     mv "$tmp" "$f"
     echo "[chromium] patched aarch64_support.h (HWCAP2)"
   fi
-  f="$src/base/allocator/partition_allocator/src/partition_alloc/tagging.cc"
-  if [[ -f "$f" ]] && ! grep -q 'KOTV_TAGGING_NO_LOCAL_HWCAP' "$f"; then
-    # 删掉本地 HWCAP2_* 后备定义（已由 aarch64_support / sysroot 提供）
-    python3 - "$f" <<'PY'
-import re, sys
-path = sys.argv[1]
-text = open(path, encoding="utf-8").read()
-new, n = re.subn(
-    r"\n#ifndef HWCAP2_BTI\n#define HWCAP2_BTI.*?\n#endif\n"
-    r"(?:#ifndef HWCAP2_MTE\n#define HWCAP2_MTE.*?\n#endif\n)?",
-    "\n/* KOTV_TAGGING_NO_LOCAL_HWCAP: provided by aarch64_support.h / sysroot */\n",
-    text,
-    count=1,
-    flags=re.S,
-)
-if n:
-    open(path, "w", encoding="utf-8").write(new)
-    print("patched tagging.cc")
-else:
-    # 宽松：逐段删
-    new2 = text
-    for pat in (
-        r"#ifndef HWCAP2_BTI\n#define HWCAP2_BTI \(1 << 17\)\n#endif\n?",
-        r"#ifndef HWCAP2_MTE\n#define HWCAP2_MTE \(1 << 18\)\n#endif\n?",
-        r"#ifndef HWCAP2_BTI\n#define HWCAP2_BTI.*?\n#endif\n?",
-        r"#ifndef HWCAP2_MTE\n#define HWCAP2_MTE.*?\n#endif\n?",
-    ):
-        new2, _ = re.subn(pat, "", new2, count=1, flags=re.S)
-    if new2 != text:
-        if "KOTV_TAGGING_NO_LOCAL_HWCAP" not in new2:
-            new2 = "/* KOTV_TAGGING_NO_LOCAL_HWCAP */\n" + new2
-        open(path, "w", encoding="utf-8").write(new2)
-        print("patched tagging.cc (loose)")
-    else:
-        print("WARN: tagging.cc HWCAP block not found", file=sys.stderr)
-PY
-  fi
+  for f in \
+    "$src/base/allocator/partition_allocator/src/partition_alloc/tagging.cc" \
+    "$src/base/allocator/partition_allocator/src/partition_alloc/thread_isolation/pkey.cc"
+  do
+    [[ -f "$f" ]] || continue
+    if ! grep -q 'KOTV_Wunused_macros' "$f"; then
+      local tmp; tmp="$(mktemp)"
+      {
+        echo '/* KOTV_Wunused_macros: Toolkit headers vs Chromium fallback macros */'
+        echo '#pragma clang diagnostic ignored "-Wunused-macros"'
+        cat "$f"
+      } >"$tmp"
+      mv "$tmp" "$f"
+      echo "[chromium] patched $(basename "$f") (-Wunused-macros)"
+    fi
+  done
   f="$src/base/allocator/partition_allocator/src/partition_alloc/thread_isolation/pkey.cc"
   if [[ -f "$f" ]] && ! grep -q 'KOTV_SYS_PKEY' "$f"; then
-    python3 - "$f" <<'PY'
-import sys
-path = sys.argv[1]
-text = open(path, encoding="utf-8").read()
-block = r'''
-/* KOTV_SYS_PKEY: Toolkit headers may omit these; after system includes. */
-#ifndef SYS_pkey_mprotect
-# if defined(__x86_64__)
-#  define SYS_pkey_mprotect 329
-#  define SYS_pkey_alloc 330
-#  define SYS_pkey_free 331
-# elif defined(__aarch64__)
-#  define SYS_pkey_mprotect 288
-#  define SYS_pkey_alloc 289
-#  define SYS_pkey_free 290
-# endif
-#endif
-'''
-# 插在最后一个 #include 之后，保证先看到系统头；若已有 SYS_* 则 ifndef 跳过，避免 unused
-lines = text.splitlines(keepends=True)
-last_inc = -1
-for i, ln in enumerate(lines):
-    if ln.lstrip().startswith("#include"):
-        last_inc = i
-if last_inc < 0:
-    print("WARN: pkey.cc no includes", file=sys.stderr)
-    sys.exit(0)
-# 若后续已有 SYS_pkey 使用，在 include 后插入；并用诊断忽略 unused（部分 TU 可能裁掉 pkey 路径）
-inject = (
-    "/* KOTV_SYS_PKEY */\n"
-    "#pragma clang diagnostic push\n"
-    '#pragma clang diagnostic ignored "-Wunused-macros"\n'
-    "#ifndef SYS_pkey_mprotect\n"
-    "# if defined(__x86_64__)\n"
-    "#  define SYS_pkey_mprotect 329\n"
-    "#  define SYS_pkey_alloc 330\n"
-    "#  define SYS_pkey_free 331\n"
-    "# elif defined(__aarch64__)\n"
-    "#  define SYS_pkey_mprotect 288\n"
-    "#  define SYS_pkey_alloc 289\n"
-    "#  define SYS_pkey_free 290\n"
-    "# endif\n"
-    "#endif\n"
-    "#pragma clang diagnostic pop\n"
-)
-lines.insert(last_inc + 1, inject)
-open(path, "w", encoding="utf-8").write("".join(lines))
-print("patched pkey.cc")
-PY
+    local tmp; tmp="$(mktemp)"
+    {
+      echo '/* KOTV_SYS_PKEY */'
+      echo '#ifndef SYS_pkey_mprotect'
+      echo '# if defined(__x86_64__)'
+      echo '#  define SYS_pkey_mprotect 329'
+      echo '#  define SYS_pkey_alloc 330'
+      echo '#  define SYS_pkey_free 331'
+      echo '# elif defined(__aarch64__)'
+      echo '#  define SYS_pkey_mprotect 288'
+      echo '#  define SYS_pkey_alloc 289'
+      echo '#  define SYS_pkey_free 290'
+      echo '# endif'
+      echo '#endif'
+      cat "$f"
+    } >"$tmp"
+    mv "$tmp" "$f"
+    echo "[chromium] patched pkey.cc (SYS_pkey_*)"
   fi
 }
 
