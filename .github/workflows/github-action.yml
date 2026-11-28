@@ -917,7 +917,7 @@ jobs:
           docker version
 
       - name: Cache Synology toolkit + sources
-        if: matrix.kind == 'runtime'
+        if: matrix.kind == 'runtime' || matrix.kind == 'engine'
         uses: actions/cache@v4
         with:
           path: |
@@ -925,7 +925,7 @@ jobs:
             .toolkit/toolkit_tarballs
             .toolkit/build_env
             .syno-src-cache
-          key: syno-toolkit-7.2-${{ matrix.toolkit_plat }}-${{ hashFiles('scripts/synology/versions.env') }}-v4
+          key: syno-toolkit-7.2-${{ matrix.toolkit_plat }}-${{ hashFiles('scripts/synology/versions.env') }}-v5
           restore-keys: |
             syno-toolkit-7.2-${{ matrix.toolkit_plat }}-
             syno-toolkit-7.2-
@@ -945,7 +945,7 @@ jobs:
               ./scripts/synology/ci-build-piece.sh runtime "${{ matrix.toolkit_plat }}" "${{ matrix.piece }}"
               ;;
             engine)
-              # musl 静态引擎（Docker alpine），不依赖 Toolkit
+              # Toolkit GCC+sysroot 全静态（CGO 依赖也走工具链）
               ./scripts/synology/ci-build-piece.sh engine "${{ matrix.toolkit_plat }}"
               ;;
             webapp)
@@ -1180,7 +1180,7 @@ jobs:
             echo "| Android aarch64 | [APK](${base}/KO影视-${ver}-aarch64.apk) |"
             echo "| Android armv7 | [APK](${base}/KO影视-${ver}-armv7.apk) |"
             echo "| **Web 包**（引擎同端口） | [引擎+Web](${base}/KO影视-${ver}-web-linux-x86_64.zip) · [仅 webapp](${base}/KO影视-${ver}-web-static.zip) |"
-            echo "| **群晖 DSM 7.2 SPK**（静态引擎 + Toolkit 运行时） | [x86_64](${base}/KO影视-${ver}-synology-x86_64.spk) · [armv8](${base}/KO影视-${ver}-synology-armv8.spk) |"
+            echo "| **群晖 DSM 7.2 SPK**（Toolkit 静态引擎 + 运行时） | [x86_64](${base}/KO影视-${ver}-synology-x86_64.spk) · [armv8](${base}/KO影视-${ver}-synology-armv8.spk) |"
             echo "| iOS（未签名） | [IPA](${base}/KO影视-${ver}-ios.ipa) |"
           } > ./RELEASE_NOTES.md
 

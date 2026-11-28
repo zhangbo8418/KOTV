@@ -137,7 +137,7 @@ kotv_syno_artifact_name() {
   echo "syno-${piece}-${arch}"
 }
 
-# 断言引擎为全静态（群晖 SPK 与 Web 包共用 musl 静态引擎）
+# 断言引擎为全静态（无 INTERP / 宿主 ldd 解不出动态依赖）
 kotv_syno_assert_static_engine() {
   local eng="$1"
   local info

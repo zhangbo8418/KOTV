@@ -154,7 +154,7 @@ CI 在 **KOTV Build**（`github-action.yml`）统一构建：
 | macOS x64 | `build-mac-amd64` | DMG |
 | Android | `build-android` | aarch64 / armv7 APK |
 | Web | `build-web` | musl 静态 linux-x64 引擎 + `webapp/` ZIP |
-| 群晖 DSM 7.2 | `synology-piece` → `synology-package` | 静态引擎 + Toolkit 运行时；组件×架构分 job，合并为 x86_64 / armv8 SPK |
+| 群晖 DSM 7.2 | `synology-piece` → `synology-package` | Toolkit 全静态引擎 + Toolkit 运行时；组件×架构分 job → SPK |
 | iOS | `build-ios` | 未签名 IPA |
 
 > **Web / Win7 / 群晖是主 CI 内的 job**，并非独立 workflow。

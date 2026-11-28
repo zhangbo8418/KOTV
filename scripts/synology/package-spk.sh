@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 组装群晖 SPK：静态引擎 + webapp + Toolkit 运行时（Web 服务形态）。
+# 组装群晖 SPK：Toolkit 全静态引擎 + webapp + Toolkit 运行时（Web 服务形态）。
 # 用法:
 #   ./scripts/synology/package-spk.sh <x86_64|armv8> \
 #     --engine PATH --webapp DIR --runtime-dir DIR [--version VER]

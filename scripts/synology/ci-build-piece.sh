@@ -60,10 +60,10 @@ case "$KIND" in
     pack_tar "$(kotv_syno_artifact_name "$COMP" "$ARCH_LABEL")" "$local_comp" "$local_stamp"
     ;;
   engine)
-    PLATFORM="${1:?engine needs platform (geminilake|rtd1296) for arch mapping}"
+    PLATFORM="${1:?engine needs toolkit platform}"
     read -r ARCH_LABEL _GOARCH _TARGET <<<"$(kotv_syno_plat_meta "$PLATFORM")"
     OUT="$ROOT/dist/syno-engine-${ARCH_LABEL}/kotv-engine"
-    # 静态引擎不依赖 Toolkit
+    "$ROOT/scripts/synology/deploy-toolkit.sh" "$PLATFORM"
     "$ROOT/scripts/synology/build-engine.sh" "$PLATFORM" "$OUT"
     pack_tar "$(kotv_syno_artifact_name engine "$ARCH_LABEL")" "syno-engine-${ARCH_LABEL}/kotv-engine"
     ;;

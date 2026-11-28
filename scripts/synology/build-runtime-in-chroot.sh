@@ -180,17 +180,23 @@ build_python() {
   CC="$CC" CXX="$CXX" \
     ac_cv_file__dev_ptmx=yes ac_cv_file__dev_ptc=no \
     ./configure "${py_cfg[@]}"
-  # Toolkit sysroot 常无可用 ffi.h（_ctypes 会挂）；能编过则保留，否则禁用。
+  # Toolkit sysroot 常无可用 ffi.h。优先补 -I；仍不行则在 Makefile 里关掉 _ctypes。
   if ! echo '#include <ffi.h>' | "$CC" $CFLAGS -E - >/dev/null 2>&1; then
-    local ffi_h
+    local ffi_h ffi_ok=0
     ffi_h="$(find "$SYSROOT" -name ffi.h 2>/dev/null | head -1 || true)"
     if [[ -n "$ffi_h" ]]; then
-      echo "[python] add -I$(dirname "$ffi_h") for ffi.h"
-      # shellcheck disable=SC2016
-      sed -i.bak "s|^CFLAGS=\\(.*\\)$|CFLAGS=\\1 -I$(dirname "$ffi_h")|" Makefile
+      echo "[python] ffi.h → $ffi_h"
+      sed -i.bak "s|^CFLAGS=\\(.*\\)$|CFLAGS=\\1 -I$(dirname "$ffi_h")|" Makefile || true
+      if echo '#include <ffi.h>' | "$CC" $CFLAGS -I"$(dirname "$ffi_h")" -E - >/dev/null 2>&1; then
+        ffi_ok=1
+      fi
     fi
-    if ! echo '#include <ffi.h>' | "$CC" $CFLAGS -I"$(dirname "${ffi_h:-/}")" -E - >/dev/null 2>&1; then
-      echo "[python] ffi.h unavailable; disable _ctypes"
+    if [[ "$ffi_ok" -ne 1 ]]; then
+      echo "[python] disable MODULE__CTYPES (no usable ffi.h)"
+      sed -i.bak \
+        -e 's/^MODULE__CTYPES_STATE=.*/MODULE__CTYPES_STATE=disabled/' \
+        -e 's/^MODULE__CTYPES_TEST_STATE=.*/MODULE__CTYPES_TEST_STATE=disabled/' \
+        Makefile || true
       printf '%s\n' '*disabled*' '_ctypes' '_ctypes_test' >>Modules/Setup.local
     fi
   fi
@@ -252,6 +258,14 @@ build_jre() {
     --with-native-debug-symbols=none
     --with-debug-level=release
     --enable-headless-only
+    --with-alsa=no
+    --with-x=no
+    --with-cups=no
+    --with-fontconfig=no
+    --with-freetype=bundled
+    --with-libjpeg=bundled
+    --with-giflib=bundled
+    --with-libpng=bundled
     --with-extra-cflags="$CFLAGS"
     --with-extra-cxxflags="$CXXFLAGS"
     --with-extra-ldflags="$LDFLAGS"
@@ -405,7 +419,14 @@ EOF
   fi
 
   cd "$chrome_src"
-  # 勿删 third_party/llvm-build：GN 仍读 cr_build_revision；改用宿主 clang
+  # 宿主 clang + Toolkit sysroot；pkg-config 必须指向 sysroot 的 .pc
+  export PKG_CONFIG_SYSROOT_DIR="$SYSROOT"
+  export PKG_CONFIG_LIBDIR="${SYSROOT}/usr/lib/pkgconfig:${SYSROOT}/usr/share/pkgconfig:${SYSROOT}/usr/lib/${ARCH_LABEL}-linux-gnu/pkgconfig"
+  export PKG_CONFIG_PATH="$PKG_CONFIG_LIBDIR"
+  if ! command -v pkg-config >/dev/null 2>&1; then
+    echo "ERROR: pkg-config required for Chromium GN" >&2
+    exit 1
+  fi
   local out_dir="out/HeadlessSyno"
   local args=(
     "is_debug=false"
@@ -420,6 +441,9 @@ EOF
     "enable_print_preview=false"
     "rtc_include_tests=false"
     "v8_enable_i18n_support=false"
+    "use_gtk=false"
+    "use_cups=false"
+    "use_gio=false"
     'target_os="linux"'
     "target_cpu=\"${GN_CPU}\""
     "use_sysroot=true"
