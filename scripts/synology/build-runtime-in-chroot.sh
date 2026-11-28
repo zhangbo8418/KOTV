@@ -548,13 +548,17 @@ build_ffmpeg() {
   echo "[ffmpeg] build $ver for $ARCH_LABEL (-j$jobs)"
   kotv_syno_ensure_deps ffmpeg
   kotv_syno_export_deps_env
+  local deps
+  deps="$(kotv_syno_deps_prefix)"
   local tarball="$SRC_CACHE/ffmpeg-${ver}.tar.xz"
   download "https://ffmpeg.org/releases/ffmpeg-${ver}.tar.xz" "$tarball"
   local src="$BUILD_ROOT/ffmpeg-${ver}"
   rm -rf "$src"
   tar -xJf "$tarball" -C "$BUILD_ROOT"
   cd "$src"
-  # OpenSSL ≥3 + GPL 需要 --enable-version3；只看见 Toolkit deps
+  # OpenSSL ≥3 + GPL 需要 --enable-version3；-I deps 必须压过 Toolkit sysroot 旧 openssl 1.1
+  export OPENSSL_CFLAGS="-I${deps}/include"
+  export OPENSSL_LIBS="-L${deps}/lib -lssl -lcrypto"
   local ff_cfg=(
     --prefix=/opt/kotv-ffmpeg
     --enable-gpl
@@ -565,8 +569,9 @@ build_ffmpeg() {
     --disable-debug
     --cc="$CC"
     --cxx="$CXX"
-    --extra-cflags="$CFLAGS ${CPPFLAGS:-}"
-    --extra-ldflags="$LDFLAGS"
+    --extra-cflags="-I${deps}/include ${CFLAGS} ${CPPFLAGS:-}"
+    --extra-ldflags="-L${deps}/lib -L${deps}/lib64 ${LDFLAGS}"
+    --pkg-config-flags=--static
   )
   # Toolkit 交叉/CI 环境常无 nasm；禁用 x86asm 仍可出 ffmpeg 二进制
   if ! command -v nasm >/dev/null 2>&1 && ! command -v yasm >/dev/null 2>&1; then

@@ -30,7 +30,7 @@ kotv_syno_export_deps_env() {
   esac
   case " ${LDFLAGS:-} " in
     *" -L${deps}/lib "*) ;;
-    *) export LDFLAGS="-L${deps}/lib -L${deps}/lib64 ${LDFLAGS:-}" ;;
+    *) export LDFLAGS="-L${deps}/lib -L${deps}/lib64 -Wl,-rpath-link,${deps}/lib -Wl,-rpath-link,${deps}/lib64 ${LDFLAGS:-}" ;;
   esac
 }
 
@@ -190,7 +190,7 @@ kotv_syno_dep_bzip2() {
 kotv_syno_dep_zstd() {
   kotv_syno_load_versions
   local ver="$SYNO_ZSTD_VER" deps jobs tarball src
-  if kotv_syno_dep_ok zstd "$ver" "include/zstd.h"; then
+  if kotv_syno_dep_ok zstd "$ver" "include/zdict.h"; then
     echo "[deps] zstd $ver cache hit"; return 0
   fi
   deps="$(kotv_syno_deps_prefix)"; jobs="$(kotv_syno_njobs)"
@@ -201,7 +201,9 @@ kotv_syno_dep_zstd() {
     cd "$src"
     make -j"$jobs" -C lib CC="$CC" AR="$AR" CFLAGS="$CFLAGS" LDFLAGS="$LDFLAGS" libzstd.a
     cp -a lib/libzstd.a "$deps/lib/"
-    cp -a lib/zstd.h lib/zstd_errors.h "$deps/include/" 2>/dev/null || cp -a lib/*.h "$deps/include/"
+    # CPython _zstd 还要 zdict.h
+    cp -a lib/zstd.h lib/zstd_errors.h lib/zdict.h "$deps/include/" 2>/dev/null \
+      || cp -a lib/*.h "$deps/include/"
     cat >"$deps/lib/pkgconfig/libzstd.pc" <<EOF
 prefix=$deps
 libdir=\${prefix}/lib
@@ -349,10 +351,12 @@ kotv_syno_ensure_deps_python() {
     "https://www.sqlite.org/${SYNO_SQLITE_YEAR}/sqlite-autoconf-${SYNO_SQLITE_VER}.tar.gz" \
     "sqlite-autoconf-${SYNO_SQLITE_VER}" "include/sqlite3.h" \
     --enable-threadsafe
-  kotv_syno_dep_autotools ncurses "$SYNO_NCURSES_VER" \
+  # --without-progs：交叉时 host strip 无法剥目标 tic 等；stamp 带 -noprogs 迫使旧缓存重建
+  kotv_syno_dep_autotools ncurses "${SYNO_NCURSES_VER}-noprogs" \
     "https://ftp.gnu.org/gnu/ncurses/ncurses-${SYNO_NCURSES_VER}.tar.gz" \
     "ncurses-${SYNO_NCURSES_VER}" "include/ncursesw/curses.h" \
     --with-shared --without-debug --without-ada --enable-widec \
+    --without-progs --without-tests --without-manpages \
     --enable-pc-files --with-pkg-config-libdir="$(kotv_syno_deps_prefix)/lib/pkgconfig"
   local deps; deps="$(kotv_syno_deps_prefix)"
   mkdir -p "$deps/include"
@@ -504,10 +508,10 @@ kotv_syno_ensure_deps_chromium() {
   local sysroot stamp want
   sysroot="$(kotv_syno_chromium_sysroot)"
   export KOTV_SYNO_CHROMIUM_SYSROOT="$sysroot"
-  want="toolkit:${SYNO_LIBDRM_VER}:${SYNO_LIBXKBCOMMON_VER}:${SYNO_MESA_VER}"
+  want="toolkit:${SYNO_LIBDRM_VER}:${SYNO_LIBXKBCOMMON_VER}:dri-pc1"
   stamp="$sysroot/.kotv-chromium-sysroot"
   if [[ -f "$stamp" && "$(cat "$stamp" 2>/dev/null || true)" == "$want" ]] \
-    && [[ -f "$sysroot/usr/lib/pkgconfig/dri.pc" || -f "$sysroot/usr/share/pkgconfig/dri.pc" ]] \
+    && [[ -f "$sysroot/usr/lib/pkgconfig/dri.pc" ]] \
     && [[ -f "$sysroot/usr/lib/pkgconfig/xkbcommon.pc" || -f "$sysroot/usr/share/pkgconfig/xkbcommon.pc" ]]; then
     echo "[deps] profile=chromium — Toolkit sysroot cache hit ($sysroot)"
     return 0
@@ -535,24 +539,19 @@ kotv_syno_ensure_deps_chromium() {
     -Denable-x11=false -Denable-wayland=false -Denable-docs=false \
     -Denable-tools=false -Denable-xkbregistry=false
 
-  # Mesa softpipe → 提供 dri.pc（use_sysroot=true 时 Chromium 必查）
-  kotv_syno_chromium_meson_install mesa "$SYNO_MESA_VER" \
-    "https://archive.mesa3d.org/mesa-${SYNO_MESA_VER}.tar.xz" \
-    "mesa-${SYNO_MESA_VER}" "usr/lib/pkgconfig/dri.pc" \
-    -Dplatforms=[] \
-    -Dgallium-drivers=softpipe \
-    -Dvulkan-drivers=[] \
-    -Dglx=disabled -Dllvm=disabled \
-    -Dgbm=enabled -Degl=disabled \
-    -Dmicrosoft-clc=disabled \
-    -Dlibunwind=disabled -Dvalgrind=disabled \
-    -Dbuild-tests=false
-
-  if [[ ! -f "$sysroot/usr/lib/pkgconfig/dri.pc" && ! -f "$sysroot/usr/share/pkgconfig/dri.pc" ]]; then
-    echo "ERROR: mesa install missing dri.pc under $sysroot" >&2
-    find "$sysroot" -name 'dri.pc' 2>/dev/null | head || true
-    return 1
-  fi
+  # use_sysroot=true 时 Chromium 必查 dri.pc（仅 dridriverdir）；headless + bundled minigbm 不链系统 Mesa
+  mkdir -p "$sysroot/usr/lib/dri" "$sysroot/usr/lib/pkgconfig"
+  cat >"$sysroot/usr/lib/pkgconfig/dri.pc" <<'EOF'
+prefix=/usr
+libdir=${prefix}/lib
+includedir=${prefix}/include
+dridriverdir=${libdir}/dri
+Name: dri
+Description: Direct Rendering Infrastructure (pkg-config for Chromium sysroot)
+Version: 24.2.8
+Cflags:
+Libs:
+EOF
   echo "$want" >"$stamp"
   echo "[deps] profile=chromium ready: $sysroot"
 }
@@ -562,16 +561,26 @@ kotv_syno_ensure_x11() {
   kotv_syno_load_versions
   local deps x="https://www.x.org/archive/individual"
   deps="$(kotv_syno_deps_prefix)"
-  if kotv_syno_dep_ok x11-stack "$SYNO_LIBX11_VER" "include/X11/Xlib.h" \
-    && [[ -f "$deps/include/X11/Intrinsic.h" ]]; then
+  if kotv_syno_dep_ok x11-stack "${SYNO_LIBX11_VER}+xtrans" "include/X11/Xlib.h" \
+    && [[ -f "$deps/include/X11/Intrinsic.h" ]] \
+    && [[ -f "$deps/share/pkgconfig/xtrans.pc" || -f "$deps/lib/pkgconfig/xtrans.pc" ]]; then
     echo "[deps] X11 stack cache hit"
     export KOTV_SYNO_X11_PREFIX="$deps"
     return 0
   fi
   echo "[deps] building X11 stack into Toolkit deps"
+  # util-macros → xorg-macros.pc；xtrans 为 libX11 硬依赖
+  kotv_syno_dep_autotools util-macros "$SYNO_UTIL_MACROS_VER" \
+    "${x}/util/util-macros-${SYNO_UTIL_MACROS_VER}.tar.xz" \
+    "util-macros-${SYNO_UTIL_MACROS_VER}" "share/pkgconfig/xorg-macros.pc"
+  kotv_syno_export_deps_env
   kotv_syno_dep_autotools xorgproto "$SYNO_XORGPROTO_VER" \
     "${x}/proto/xorgproto-${SYNO_XORGPROTO_VER}.tar.xz" \
     "xorgproto-${SYNO_XORGPROTO_VER}" "include/X11/X.h"
+  kotv_syno_export_deps_env
+  kotv_syno_dep_autotools xtrans "$SYNO_XTRANS_VER" \
+    "${x}/lib/xtrans-${SYNO_XTRANS_VER}.tar.xz" \
+    "xtrans-${SYNO_XTRANS_VER}" "share/pkgconfig/xtrans.pc"
   kotv_syno_export_deps_env
   kotv_syno_dep_autotools libXau "$SYNO_LIBXAU_VER" \
     "${x}/lib/libXau-${SYNO_LIBXAU_VER}.tar.xz" \
@@ -622,7 +631,7 @@ kotv_syno_ensure_x11() {
     "${x}/lib/libXt-${SYNO_LIBXT_VER}.tar.xz" \
     "libXt-${SYNO_LIBXT_VER}" "include/X11/Intrinsic.h" \
     --enable-static --disable-shared
-  kotv_syno_dep_mark x11-stack "$SYNO_LIBX11_VER"
+  kotv_syno_dep_mark x11-stack "${SYNO_LIBX11_VER}+xtrans"
   export KOTV_SYNO_X11_PREFIX="$deps"
 }
 
