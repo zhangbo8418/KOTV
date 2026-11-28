@@ -409,25 +409,151 @@ kotv_syno_ensure_deps_ffmpeg() {
   kotv_syno_export_deps_env
 }
 
-# Chromium：官方 hermetic Debian sysroot（需已有 chromium src 树）
-kotv_syno_ensure_deps_chromium() {
-  local chrome_src="${1:-${KOTV_SYNO_CHROMIUM_SRC:-}}"
-  local arch_arg
-  case "${GN_CPU:-$TARGET_CPU}" in
-    x64|x86_64) arch_arg=amd64 ;;
-    arm64|armv8) arch_arg=arm64 ;;
-    *) arch_arg=amd64 ;;
+# Chromium：可写 Toolkit sysroot 副本（DSM glibc ABI）+ 自编补齐 pkg-config 包
+kotv_syno_chromium_sysroot() {
+  echo "${KOTV_SYNO_CHROMIUM_SYSROOT:-${ROOT:?}/.syno-deps/${PLATFORM:?}-chromium-sysroot}"
+}
+
+kotv_syno_chromium_meson_tc() {
+  # $1=outfile：强制 Toolkit CC + sysroot（原生 --native-file，交叉 --cross-file）
+  local out="$1" cpu_family cpu syno_sys
+  syno_sys="$(kotv_syno_chromium_sysroot)"
+  case "$PLATFORM" in
+    geminilake) cpu_family=x86_64; cpu=x86_64 ;;
+    rtd1296)    cpu_family=aarch64; cpu=aarch64 ;;
+    *) echo "ERROR: unknown PLATFORM=$PLATFORM" >&2; return 1 ;;
   esac
-  if [[ -z "$chrome_src" || ! -d "$chrome_src" ]]; then
-    echo "[deps] profile=chromium — src not ready yet (install-sysroot later)"
+  {
+    cat <<EOF
+[binaries]
+c = '${CC}'
+cpp = '${CXX}'
+ar = '${AR}'
+strip = '${STRIP}'
+pkg-config = 'pkg-config'
+
+[built-in options]
+c_args = ['--sysroot=${syno_sys}']
+cpp_args = ['--sysroot=${syno_sys}']
+c_link_args = ['--sysroot=${syno_sys}']
+cpp_link_args = ['--sysroot=${syno_sys}']
+EOF
+    if kotv_syno_is_cross "$PLATFORM"; then
+      cat <<EOF
+
+[host_machine]
+system = 'linux'
+cpu_family = '${cpu_family}'
+cpu = '${cpu}'
+endian = 'little'
+EOF
+    fi
+  } >"$out"
+}
+
+kotv_syno_chromium_meson_install() {
+  # $1=name $2=ver $3=url $4=dirname $5=probe_under_sysroot $6...=meson -Dopts
+  local name="$1" ver="$2" url="$3" dirname="$4" probe="$5"
+  shift 5
+  local sysroot jobs tarball src builddir tcf=()
+  sysroot="$(kotv_syno_chromium_sysroot)"
+  if [[ -e "$sysroot/$probe" ]] && [[ -f "$sysroot/.kotv-dep-${name}" ]] \
+    && [[ "$(cat "$sysroot/.kotv-dep-${name}" 2>/dev/null || true)" == "$ver" ]]; then
+    echo "[deps] chromium/$name $ver cache hit"
     return 0
   fi
-  echo "[deps] profile=chromium — hermetic Debian sysroot ($arch_arg)"
-  if [[ ! -f "$chrome_src/build/linux/sysroot_scripts/install-sysroot.py" ]]; then
-    echo "ERROR: missing install-sysroot.py under $chrome_src" >&2
+  if ! command -v meson >/dev/null 2>&1; then
+    echo "ERROR: meson required to build chromium sysroot dep $name" >&2
     return 1
   fi
-  (cd "$chrome_src" && python3 build/linux/sysroot_scripts/install-sysroot.py --arch="$arch_arg")
+  jobs="$(kotv_syno_njobs)"
+  tarball="$(kotv_syno_dep_fetch "$url")"
+  src="$(kotv_syno_dep_extract "$tarball" "$dirname")"
+  builddir="$src/out-syno"
+  rm -rf "$builddir"
+  mkdir -p "$builddir" "$sysroot"
+  kotv_syno_chromium_meson_tc "$builddir/tc.ini"
+  if kotv_syno_is_cross "$PLATFORM"; then
+    tcf=(--cross-file "$builddir/tc.ini")
+  else
+    tcf=(--native-file "$builddir/tc.ini")
+  fi
+  # pkg-config 只看见本 sysroot（已装的 libdrm 等），禁止宿主 /usr
+  export PKG_CONFIG_SYSROOT_DIR="$sysroot"
+  export PKG_CONFIG_LIBDIR="$sysroot/usr/lib/pkgconfig:$sysroot/usr/share/pkgconfig:$sysroot/usr/lib64/pkgconfig"
+  export PKG_CONFIG_PATH="$PKG_CONFIG_LIBDIR"
+  (
+    cd "$src"
+    meson setup "$builddir" \
+      --prefix=/usr \
+      --libdir=lib \
+      --buildtype=release \
+      "${tcf[@]}" \
+      "$@"
+    meson compile -C "$builddir" -j "$jobs"
+    DESTDIR="$sysroot" meson install -C "$builddir" --no-rebuild
+  )
+  echo "$ver" >"$sysroot/.kotv-dep-${name}"
+  echo "[deps] chromium/$name $ver → $sysroot"
+}
+
+kotv_syno_ensure_deps_chromium() {
+  # 参数 chrome_src 可忽略：Chromium 依赖是 Toolkit sysroot 闭包，不依赖 src 树
+  kotv_syno_load_versions
+  local sysroot stamp want
+  sysroot="$(kotv_syno_chromium_sysroot)"
+  export KOTV_SYNO_CHROMIUM_SYSROOT="$sysroot"
+  want="toolkit:${SYNO_LIBDRM_VER}:${SYNO_LIBXKBCOMMON_VER}:${SYNO_MESA_VER}"
+  stamp="$sysroot/.kotv-chromium-sysroot"
+  if [[ -f "$stamp" && "$(cat "$stamp" 2>/dev/null || true)" == "$want" ]] \
+    && [[ -f "$sysroot/usr/lib/pkgconfig/dri.pc" || -f "$sysroot/usr/share/pkgconfig/dri.pc" ]] \
+    && [[ -f "$sysroot/usr/lib/pkgconfig/xkbcommon.pc" || -f "$sysroot/usr/share/pkgconfig/xkbcommon.pc" ]]; then
+    echo "[deps] profile=chromium — Toolkit sysroot cache hit ($sysroot)"
+    return 0
+  fi
+  if [[ -z "${SYSROOT:-}" || ! -d "$SYSROOT" ]]; then
+    echo "ERROR: Toolkit SYSROOT required for chromium deps" >&2
+    return 1
+  fi
+  echo "[deps] profile=chromium — seed Toolkit sysroot → $sysroot"
+  mkdir -p "$sysroot"
+  # 以 Toolkit sysroot 为底（glibc 2.36 ABI），再装自编包；不 --delete，以免清掉已装 overlay
+  rsync -a "${SYSROOT}/" "$sysroot/"
+
+  kotv_syno_chromium_meson_install libdrm "$SYNO_LIBDRM_VER" \
+    "https://dri.freedesktop.org/libdrm/libdrm-${SYNO_LIBDRM_VER}.tar.xz" \
+    "libdrm-${SYNO_LIBDRM_VER}" "usr/include/xf86drm.h" \
+    -Dintel=disabled -Dradeon=disabled -Damdgpu=disabled -Dnouveau=disabled \
+    -Dvmwgfx=disabled -Dfreedreno=disabled -Detnaviv=disabled \
+    -Dvc4=disabled -Dfreedreno-kgsl=false -Dvalgrind=disabled \
+    -Dman-pages=disabled -Dtests=false
+
+  kotv_syno_chromium_meson_install xkbcommon "$SYNO_LIBXKBCOMMON_VER" \
+    "https://xkbcommon.org/download/libxkbcommon-${SYNO_LIBXKBCOMMON_VER}.tar.xz" \
+    "libxkbcommon-${SYNO_LIBXKBCOMMON_VER}" "usr/include/xkbcommon/xkbcommon.h" \
+    -Denable-x11=false -Denable-wayland=false -Denable-docs=false \
+    -Denable-tools=false -Denable-xkbregistry=false
+
+  # Mesa softpipe → 提供 dri.pc（use_sysroot=true 时 Chromium 必查）
+  kotv_syno_chromium_meson_install mesa "$SYNO_MESA_VER" \
+    "https://archive.mesa3d.org/mesa-${SYNO_MESA_VER}.tar.xz" \
+    "mesa-${SYNO_MESA_VER}" "usr/lib/pkgconfig/dri.pc" \
+    -Dplatforms=[] \
+    -Dgallium-drivers=softpipe \
+    -Dvulkan-drivers=[] \
+    -Dglx=disabled -Dllvm=disabled \
+    -Dgbm=enabled -Degl=disabled \
+    -Dmicrosoft-clc=disabled \
+    -Dlibunwind=disabled -Dvalgrind=disabled \
+    -Dbuild-tests=false
+
+  if [[ ! -f "$sysroot/usr/lib/pkgconfig/dri.pc" && ! -f "$sysroot/usr/share/pkgconfig/dri.pc" ]]; then
+    echo "ERROR: mesa install missing dri.pc under $sysroot" >&2
+    find "$sysroot" -name 'dri.pc' 2>/dev/null | head || true
+    return 1
+  fi
+  echo "$want" >"$stamp"
+  echo "[deps] profile=chromium ready: $sysroot"
 }
 
 # X11：始终编进 deps（完整闭包，避免 sysroot 半套头文件）

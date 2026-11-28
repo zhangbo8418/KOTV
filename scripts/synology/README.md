@@ -11,9 +11,9 @@
 | **Python** | Toolkit + `.syno-deps` | CPython optional：zlib/bzip2/xz/zstd(static)/libffi/openssl/sqlite/ncurses/readline/libuuid |
 | **JRE** | Toolkit + `.syno-deps` | OpenJDK 必选：alsa、cups、fontconfig(+expat/freetype)、X11 栈（始终自编） |
 | **ffmpeg** | Toolkit + `.syno-deps` | zlib、openssl（`--enable-openssl --enable-version3`） |
-| **Chromium** | **官方 hermetic Debian sysroot** | `install-sysroot.py` + `headless.gn` + third_party；Clang 仅作编译器，**不用** Toolkit sysroot（避免 dri/xkbcommon 缺啥补啥） |
+| **Chromium** | Clang + **Toolkit sysroot ABI** | 可写 Toolkit sysroot 副本；configure 前用 Toolkit 编齐 libdrm、xkbcommon、mesa(`dri.pc`)；`headless.gn` + `use_system_minigbm=false` |
 
-目标链接 **禁止宿主 `/usr`**。宿主只允许构建工具：Clang、boot JDK、交叉 build-python、Node 的 `CC_host`。
+目标链接 **禁止宿主 `/usr`**。宿主只允许构建工具：Clang、meson/ninja、boot JDK、交叉 build-python、Node 的 `CC_host`。
 
 共用：`common.sh`、`toolkit-deps.sh`（`kotv_syno_ensure_deps <profile>`）。
 

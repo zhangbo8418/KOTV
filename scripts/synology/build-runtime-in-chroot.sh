@@ -4,7 +4,7 @@
 # 产出: dist/syno-runtime-{x86_64|armv8}/
 #
 # Node/Python/JRE/ffmpeg：Toolkit GCC + .syno-deps overlay（禁止宿主 /usr）
-# Chromium：Clang + 官方 hermetic Debian sysroot（install-sysroot.py）+ headless.gn
+# Chromium：Clang 仅作编译器；目标 ABI = Toolkit sysroot（自编补齐 dri/xkbcommon/libdrm）+ headless.gn
 # CI：KOTV_SYNO_COMPONENTS=<一个组件>
 set -euo pipefail
 
@@ -396,14 +396,27 @@ build_chromium() {
     echo "[chromium] skip (cached $tag)"
     return 0
   fi
-  echo "[chromium] build headless_shell $tag for $ARCH_LABEL (Clang + hermetic Debian sysroot, -j$jobs)"
+  echo "[chromium] build headless_shell $tag for $ARCH_LABEL (Clang + Toolkit sysroot ABI, -j$jobs)"
 
   if ! command -v clang >/dev/null 2>&1; then
     echo "[chromium] installing clang on host (compiler only)..."
     sudo apt-get update -qq
-    sudo apt-get install -y -qq clang lld ninja-build pkg-config
+    sudo apt-get install -y -qq clang lld ninja-build pkg-config meson
   fi
   command -v ninja >/dev/null 2>&1 || sudo apt-get install -y -qq ninja-build
+  if ! command -v meson >/dev/null 2>&1; then
+    sudo apt-get install -y -qq meson || sudo pip3 install -q meson
+  fi
+
+  # configure 前：Toolkit sysroot 副本 + libdrm/xkbcommon/mesa(dri)
+  kotv_syno_ensure_deps chromium
+  local chrome_sysroot
+  chrome_sysroot="$(kotv_syno_chromium_sysroot)"
+  if [[ ! -d "$chrome_sysroot" ]] \
+    || { [[ ! -f "$chrome_sysroot/usr/lib/pkgconfig/dri.pc" ]] && [[ ! -f "$chrome_sysroot/usr/share/pkgconfig/dri.pc" ]]; }; then
+    echo "ERROR: chromium Toolkit sysroot incomplete: $chrome_sysroot" >&2
+    exit 1
+  fi
 
   local depot="$SRC_CACHE/depot_tools"
   if [[ ! -d "$depot/.git" ]]; then
@@ -462,8 +475,6 @@ EOF
   fi
 
   cd "$chrome_src"
-  # 官方 hermetic Debian sysroot（含 dri 等完整包集合；不用 Toolkit sysroot）
-  kotv_syno_ensure_deps chromium "$chrome_src"
 
   if [[ ! -f build/args/headless.gn ]]; then
     echo "ERROR: missing build/args/headless.gn in Chromium tree" >&2
@@ -476,7 +487,7 @@ EOF
   fi
   local out_dir="out/HeadlessSyno"
   mkdir -p "$out_dir"
-  # 不设 target_sysroot：使用 install-sysroot.py 装好的 //build/linux/debian_*_sysroot
+  # target_sysroot = Toolkit 副本（已补 dri/xkbcommon/libdrm）；Clang 只当编译器
   cat >"$out_dir/args.gn" <<EOF
 import("//build/args/headless.gn")
 is_debug = false
@@ -492,11 +503,13 @@ v8_enable_i18n_support = false
 target_os = "linux"
 target_cpu = "${GN_CPU}"
 use_sysroot = true
+target_sysroot = "${chrome_sysroot}"
 use_custom_libcxx = true
 is_clang = true
 clang_base_path = "${clang_base}"
 clang_use_chrome_plugins = false
 use_xkbcommon = false
+use_system_minigbm = false
 EOF
   gn gen "$out_dir"
   ninja -C "$out_dir" -j"$jobs" headless_shell chrome-headless-shell \

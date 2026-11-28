@@ -909,7 +909,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y git python3 python3-pip xz-utils cifs-utils \
-            build-essential clang lld ninja-build nasm pkg-config curl ca-certificates \
+            build-essential clang lld ninja-build meson nasm pkg-config curl ca-certificates \
             autoconf automake libtool cmake unzip zip rsync docker.io \
             gperf bison flex gettext
           sudo systemctl start docker || sudo service docker start || true
@@ -927,7 +927,7 @@ jobs:
             .toolkit/build_env
             .syno-src-cache
             .syno-deps
-          key: syno-toolkit-7.2-${{ matrix.toolkit_plat }}-${{ hashFiles('scripts/synology/versions.env', 'scripts/synology/toolkit-deps.sh') }}-v8
+          key: syno-toolkit-7.2-${{ matrix.toolkit_plat }}-${{ hashFiles('scripts/synology/versions.env', 'scripts/synology/toolkit-deps.sh') }}-v9
           restore-keys: |
             syno-toolkit-7.2-${{ matrix.toolkit_plat }}-
             syno-toolkit-7.2-
