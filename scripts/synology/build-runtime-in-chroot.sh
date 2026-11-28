@@ -551,12 +551,16 @@ use_custom_libcxx = true
 is_clang = true
 clang_base_path = "${clang_base}"
 clang_use_chrome_plugins = false
-# headless 不碰系统输入/GBM；Toolkit sysroot 无 NSS → 关证书 NSS
+# headless 不碰系统输入/GBM
 use_xkbcommon = false
 use_system_minigbm = false
 ozone_platform_x11 = false
 ozone_platform_wayland = false
 ozone_platform_drm = false
+# Toolkit sysroot 无 libnss：关掉 client/server 两边（仅设 use_nss_certs 会被派生覆盖）
+# TLS 仍走 BoringSSL；根证书用 Chrome Root Store，HTTPS 可用
+use_nss_client_certs = false
+use_nss_server_certs = false
 use_nss_certs = false
 extra_cflags = "${extra_c}"
 extra_cxxflags = "${extra_c}"
@@ -594,7 +598,7 @@ build_ffmpeg() {
   local dest="$OUT/ffmpeg"
   local jobs
   jobs="$(comp_jobs)"
-  local stamp_ver="jellyfin-${ver}-hwa6"
+  local stamp_ver="jellyfin-${ver}-hwa7"
   if stamp_ok ffmpeg "$stamp_ver" && [[ -x "$dest/ffmpeg" ]]; then
     echo "[ffmpeg] skip (cached $stamp_ver)"
     return 0
@@ -622,7 +626,9 @@ build_ffmpeg() {
   export PKG_CONFIG_LIBDIR="${deps}/lib/pkgconfig:${deps}/lib64/pkgconfig:${deps}/share/pkgconfig"
   export PKG_CONFIG_PATH="$PKG_CONFIG_LIBDIR"
   unset PKG_CONFIG_PATH_FOR_TARGET || true
-  if ! command -v pkg-config >/dev/null 2>&1; then
+  local pkg_config_bin
+  pkg_config_bin="$(command -v pkg-config || true)"
+  if [[ -z "$pkg_config_bin" ]]; then
     echo "ERROR: pkg-config required for ffmpeg" >&2
     exit 1
   fi
@@ -640,12 +646,16 @@ build_ffmpeg() {
     exit 1
   }
 
-  local ff_cflags="-I${deps}/include --sysroot=${SYSROOT} -O2 -pipe"
-  local ff_ldflags="-L${deps}/lib -L${deps}/lib64 --sysroot=${SYSROOT} -Wl,-O1 -Wl,-rpath-link,${deps}/lib $(kotv_syno_origin_rpath_flags)"
+  # deps 头文件必须压过 sysroot 旧 openssl；--sysroot 放前面，-I deps 随后
+  local ff_cflags="--sysroot=${SYSROOT} -I${deps}/include -O2 -pipe"
+  local ff_ldflags="--sysroot=${SYSROOT} -L${deps}/lib -L${deps}/lib64 -Wl,-O1 -Wl,-rpath-link,${deps}/lib $(kotv_syno_origin_rpath_flags)"
+  # 交叉时 configure 默认找 ${cross_prefix}pkg-config；找不到会把 pkg_config=false，
+  # 于是 openssl>=3 探测失败却误报成「OpenSSL <3.0.0 is incompatible with the gpl」
   local ff_cfg=(
     --prefix=/opt/kotv-ffmpeg
     --target-os=linux
     --extra-version=KOTV
+    --pkg-config="$pkg_config_bin"
     --enable-gpl
     --enable-version3
     --enable-shared
@@ -691,25 +701,8 @@ build_ffmpeg() {
       exit 1
     }
     ff_cfg+=(--enable-rkmpp)
-    # rkrga：上游 debian 补丁注入 configure 选项
-    local rga_patch=""
-    rga_patch="$(ls debian/patches/*rkrga* debian/patches/*rockchip*rga* 2>/dev/null | head -1 || true)"
-    [[ -z "$rga_patch" ]] && rga_patch="$(ls debian/patches/0042-*rockchip* 2>/dev/null | head -1 || true)"
-    if [[ -n "$rga_patch" && -f "$rga_patch" ]]; then
-      echo "[ffmpeg] apply $rga_patch (rkrga)"
-      if patch -p1 --forward --dry-run <"$rga_patch" >/dev/null 2>&1 \
-        || patch -p1 --forward --dry-run <"$rga_patch" 2>&1 | grep -q 'previously applied'; then
-        patch -p1 --forward <"$rga_patch" || true
-      else
-        echo "[ffmpeg] WARN: rkrga patch dry-run failed; skip" >&2
-        rga_patch=""
-      fi
-    fi
-    if [[ -n "$rga_patch" ]] && grep -q 'enable-rkrga' configure && pkg-config --exists librga; then
-      ff_cfg+=(--enable-rkrga)
-    else
-      echo "[ffmpeg] rkrga not enabled (patch/pc missing); rkmpp only" >&2
-    fi
+    kotv_syno_ffmpeg_enable_rkrga || exit 1
+    ff_cfg+=(--enable-rkrga)
   else
     ff_cfg+=(--arch=x86_64)
     pkg-config --exists vpl || {
@@ -719,9 +712,13 @@ build_ffmpeg() {
     ff_cfg+=(--enable-libvpl)
   fi
 
-  if ! printf '%s\n' '#include <openssl/ssl.h>' 'int main(void){OPENSSL_init_ssl(0,0);return 0;}' \
-    | $CC $ff_cflags -x c - -o /tmp/kotv-ossl-link $ff_ldflags -lssl -lcrypto -ldl -lpthread -lz 2>/tmp/kotv-ossl-link.err; then
-    echo "ERROR: openssl link probe failed (cross/native)" >&2
+  # 与 jellyfin configure 同源符号：DTLS_get_data_mtu（openssl >= 3 探测）
+  local ossl_libs
+  ossl_libs="$(pkg-config --libs openssl)"
+  # shellcheck disable=SC2086
+  if ! printf '%s\n' '#include <openssl/ssl.h>' 'int main(void){return (int)DTLS_get_data_mtu(0);}' \
+    | $CC $ff_cflags -x c - -o /tmp/kotv-ossl-link $ff_ldflags $ossl_libs -ldl -lpthread -lz 2>/tmp/kotv-ossl-link.err; then
+    echo "ERROR: openssl DTLS_get_data_mtu probe failed (need deps OpenSSL>=3)" >&2
     cat /tmp/kotv-ossl-link.err >&2 || true
     exit 1
   fi
@@ -731,7 +728,7 @@ build_ffmpeg() {
   # 验收 configure 真正打开了 HWA（勿只看命令行）
   local cfgh="ffbuild/config.h"
   [[ -f "$cfgh" ]] || cfgh="config.h"
-  for macro in CONFIG_VAAPI CONFIG_CUDA; do
+  for macro in CONFIG_VAAPI CONFIG_CUDA CONFIG_OPENSSL; do
     if ! grep -qE "^#define ${macro} 1$" "$cfgh" 2>/dev/null; then
       echo "ERROR: ffmpeg $macro not enabled (see $cfgh)" >&2
       grep -E "$macro" "$cfgh" 2>/dev/null | head -5 >&2 || true
@@ -749,6 +746,8 @@ build_ffmpeg() {
   else
     grep -qE '^#define CONFIG_RKMPP 1$' "$cfgh" \
       || { echo "ERROR: CONFIG_RKMPP not enabled" >&2; exit 1; }
+    grep -qE '^#define CONFIG_RKRGA 1$' "$cfgh" \
+      || { echo "ERROR: CONFIG_RKRGA not enabled" >&2; exit 1; }
   fi
   echo "[ffmpeg] config.h HWA OK"
 
@@ -772,17 +771,23 @@ build_ffmpeg() {
     fi
   done
   if [[ "$CROSS" -eq 0 ]]; then
-    if ! ls "$dest/lib"/libvpl.so* >/dev/null 2>&1; then
-      echo "ERROR: ffmpeg package missing Toolkit libvpl.so* (QSV)" >&2
-      miss=1
-    fi
+    for f in libvpl libigdgmm libpciaccess; do
+      if ! ls "$dest/lib/${f}.so"* >/dev/null 2>&1; then
+        echo "ERROR: ffmpeg package missing Toolkit ${f}.so* (QSV/VAAPI)" >&2
+        miss=1
+      fi
+    done
     if [[ ! -f "$dest/lib/dri/iHD_drv_video.so" ]]; then
       echo "ERROR: ffmpeg package missing lib/dri/iHD_drv_video.so (media-driver)" >&2
       miss=1
     fi
-  elif ! ls "$dest/lib"/librockchip_mpp.so* >/dev/null 2>&1; then
-    echo "ERROR: ffmpeg package missing Toolkit librockchip_mpp.so* (rkmpp)" >&2
-    miss=1
+  else
+    for f in librockchip_mpp librga; do
+      if ! ls "$dest/lib/${f}.so"* >/dev/null 2>&1; then
+        echo "ERROR: ffmpeg package missing Toolkit ${f}.so*" >&2
+        miss=1
+      fi
+    done
   fi
   if [[ "$miss" -ne 0 ]]; then
     ls -la "$dest/lib" | head -80 >&2 || true

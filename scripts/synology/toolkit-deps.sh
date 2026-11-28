@@ -181,13 +181,23 @@ kotv_syno_bundle_libs() {
   done
 }
 
-# 组件 install 后唯一打包入口：扫 dest ELF → Toolkit .so 闭包 → dest/lib + rpath
-# 其余参数：相对 deps 的额外目录（如 lib/dri）；deps/lib/dri 若存在会自动带上
+# 组件 install 后唯一打包入口：
+# 1) 先把 deps 额外目录（默认含 lib/dri）拷进 dest
+# 2) 再扫 dest 全部 ELF（含刚拷的 iHD 等）做 DT_NEEDED 闭包 → dest/lib + rpath
+# 其余参数：相对 deps 的额外目录；deps/lib/dri 若存在会自动带上
 kotv_syno_bundle_component() {
   local dest="$1"
   shift
   local dest_lib="$dest/lib" deps extra f n
   mkdir -p "$dest_lib"
+  deps="$(kotv_syno_deps_prefix)"
+  for extra in "$@" lib/dri; do
+    [[ -d "$deps/$extra" ]] || continue
+    mkdir -p "$dest/lib/$(basename "$extra")"
+    cp -a "$deps/$extra"/. "$dest/lib/$(basename "$extra")/"
+    echo "[bundle] shipped $extra"
+  done
+
   local -a elves=()
   while IFS= read -r f; do
     kotv_syno_is_elf "$f" || continue
@@ -201,17 +211,9 @@ kotv_syno_bundle_component() {
   echo "[bundle] $(basename "$dest"): ${#elves[@]} ELF → Toolkit .so → $dest_lib"
   kotv_syno_bundle_libs "$dest_lib" "${elves[@]}"
 
-  deps="$(kotv_syno_deps_prefix)"
-  for extra in "$@" lib/dri; do
-    [[ -d "$deps/$extra" ]] || continue
-    mkdir -p "$dest/lib/$(basename "$extra")"
-    cp -a "$deps/$extra"/. "$dest/lib/$(basename "$extra")/"
-    echo "[bundle] shipped $extra"
-  done
-
   while IFS= read -r f; do
     kotv_syno_bundle_set_rpath "$f"
-  done < <(find "$dest_lib" -type f \( -name '*.so' -o -name '*.so.*' \) 2>/dev/null)
+  done < <(find "$dest" -type f \( -name '*.so' -o -name '*.so.*' \) 2>/dev/null)
 
   n="$(find "$dest_lib" -maxdepth 1 \( -name '*.so' -o -name '*.so.*' \) 2>/dev/null | wc -l | tr -d ' ')"
   echo "[bundle] $(basename "$dest"): lib/ has ${n} .so*"
@@ -631,6 +633,8 @@ kotv_syno_dep_libpciaccess() {
 }
 
 # meson 构建入口（函数内可用 local；交叉写 cross-file，c_args 带 Toolkit sysroot）
+# 原生/交叉都把 deps -I/-L/-rpath-link 写进 built-in，避免 env CFLAGS 被 --sysroot=…-gnu 拆坏，
+# 也避免清空 LDFLAGS 后链不上 deps 里的 libpciaccess 等。
 kotv_syno_meson_build() {
   local src="${1:?}" deps jobs xf
   shift
@@ -644,8 +648,8 @@ kotv_syno_meson_build() {
     --default-library=shared
     "$@"
   )
+  xf="$BUILD_ROOT/meson-kotv-${PLATFORM}.txt"
   if [[ "$PLATFORM" == rtd1296 ]]; then
-    xf="$BUILD_ROOT/meson-cross-${PLATFORM}.txt"
     cat >"$xf" <<EOF
 [binaries]
 c = '$CC'
@@ -662,13 +666,29 @@ endian = 'little'
 
 [built-in options]
 c_args = ['--sysroot=${SYSROOT}', '-I${deps}/include']
-c_link_args = ['--sysroot=${SYSROOT}', '-L${deps}/lib']
+c_link_args = ['--sysroot=${SYSROOT}', '-L${deps}/lib', '-Wl,-rpath-link,${deps}/lib']
 cpp_args = ['--sysroot=${SYSROOT}', '-I${deps}/include', '-fpermissive']
-cpp_link_args = ['--sysroot=${SYSROOT}', '-L${deps}/lib']
+cpp_link_args = ['--sysroot=${SYSROOT}', '-L${deps}/lib', '-Wl,-rpath-link,${deps}/lib']
 EOF
     mconf+=(--cross-file="$xf")
+  else
+    # 原生 geminilake：仍用 Toolkit gcc；只注入 deps 搜索路径（勿塞环境 CFLAGS）
+    cat >"$xf" <<EOF
+[binaries]
+c = '$CC'
+cpp = '$CXX'
+ar = '${AR:-ar}'
+strip = '${STRIP:-strip}'
+pkg-config = '$(command -v pkg-config)'
+
+[built-in options]
+c_args = ['--sysroot=${SYSROOT}', '-I${deps}/include']
+c_link_args = ['--sysroot=${SYSROOT}', '-L${deps}/lib', '-Wl,-rpath-link,${deps}/lib']
+cpp_args = ['--sysroot=${SYSROOT}', '-I${deps}/include']
+cpp_link_args = ['--sysroot=${SYSROOT}', '-L${deps}/lib', '-Wl,-rpath-link,${deps}/lib']
+EOF
+    mconf+=(--native-file="$xf")
   fi
-  # 与 cmake 相同：勿让环境 CFLAGS 里的 --sysroot=…-gnu/… 被拆坏后注入
   (
     cd "$src"
     env -u CFLAGS -u CXXFLAGS -u LDFLAGS -u CPPFLAGS \
@@ -699,17 +719,17 @@ kotv_syno_dep_meson_lib() {
 
 kotv_syno_dep_libdrm() {
   kotv_syno_load_versions
-  local upstream="$SYNO_LIBDRM_VER" stamp="$SYNO_LIBDRM_VER" intel_opt=enabled
+  local upstream="$SYNO_LIBDRM_VER" stamp="${SYNO_LIBDRM_VER}-notest" intel_opt=enabled
   kotv_syno_export_deps_env
-  # arm（rtd1296）无 Intel GPU；开 intel 会编 test_decode 且交叉链不上 libpciaccess
+  # arm 无 Intel GPU；两端都关 tests（test_decode 交叉/原生都易链不上 pciaccess）
   if [[ "$PLATFORM" == rtd1296 ]]; then
     intel_opt=disabled
-    stamp="${upstream}-nointel"
+    stamp="${upstream}-nointel-notest"
   fi
   kotv_syno_dep_meson_lib libdrm "$stamp" \
     "https://dri.freedesktop.org/libdrm/libdrm-${upstream}.tar.xz" \
     "libdrm-${upstream}" "include/libdrm/drm.h" \
-    -Dudev=false -Dcairo-tests=disabled -Dvalgrind=disabled \
+    -Dudev=false -Dtests=false -Dcairo-tests=disabled -Dvalgrind=disabled \
     -Dexynos=disabled -Dfreedreno=disabled -Domap=disabled -Detnaviv=disabled \
     -Dintel="$intel_opt" -Dnouveau=disabled -Dradeon=disabled -Damdgpu=disabled \
     -Dinstall-test-programs=false
@@ -891,6 +911,50 @@ struct sync_file_info {
 #endif
 EOF
   kotv_syno_dep_mark linux-uapi "$ver"
+}
+
+# jellyfin-ffmpeg 源树上启用 rkrga：打 debian/0042，并修补树内缺 AV_HWDEVICE_TYPE_NB 的枚举。
+# 须在 jellyfin-ffmpeg 源码根目录调用；成功则 configure 含 --enable-rkrga 且 librga.pc 可用。
+kotv_syno_ffmpeg_enable_rkrga() {
+  local patch f
+  pkg-config --exists librga || {
+    echo "ERROR: librga.pc missing (build rkrga deps first)" >&2
+    return 1
+  }
+  patch="$(ls debian/patches/0042-*rockchip* 2>/dev/null | head -1 || true)"
+  [[ -n "$patch" && -f "$patch" ]] || {
+    echo "ERROR: jellyfin rockchip/rkrga debian patch not found" >&2
+    return 1
+  }
+  echo "[ffmpeg] apply $patch (rkrga pipeline)"
+  # 树内 hwcontext.h 无 AV_HWDEVICE_TYPE_NB，与补丁上下文差 1 行；--batch 跳过该 hunk，下面手补枚举
+  patch -p1 --batch --forward <"$patch" >/tmp/kotv-rkrga-patch.log 2>&1 || true
+  if ! grep -q 'enable-rkrga' configure; then
+    echo "ERROR: rkrga patch did not inject --enable-rkrga into configure" >&2
+    cat /tmp/kotv-rkrga-patch.log >&2 || true
+    return 1
+  fi
+  for f in libavfilter/vf_vpp_rkrga.c libavfilter/rkrga_common.c libavutil/hwcontext_rkmpp.c; do
+    [[ -f "$f" ]] || {
+      echo "ERROR: rkrga patch missing source $f" >&2
+      return 1
+    }
+  done
+  if ! grep -q 'AV_HWDEVICE_TYPE_RKMPP' libavutil/hwcontext.h; then
+    # 插到 OHCODEC 后、枚举结束前
+    if grep -q 'AV_HWDEVICE_TYPE_OHCODEC' libavutil/hwcontext.h; then
+      sed -i '/AV_HWDEVICE_TYPE_OHCODEC,/a\    AV_HWDEVICE_TYPE_RKMPP,' libavutil/hwcontext.h
+    else
+      echo "ERROR: cannot inject AV_HWDEVICE_TYPE_RKMPP into hwcontext.h" >&2
+      return 1
+    fi
+  fi
+  grep -q 'AV_HWDEVICE_TYPE_RKMPP' libavutil/hwcontext.h || {
+    echo "ERROR: AV_HWDEVICE_TYPE_RKMPP still missing" >&2
+    return 1
+  }
+  echo "[ffmpeg] rkrga sources + configure ready"
+  return 0
 }
 
 # rkrga：Rockchip RGA（与 rkmpp 配对）
