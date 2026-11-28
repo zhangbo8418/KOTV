@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
-# 从上游 media 仓库（默认 release-1.11.0-fongmi）编译 Media3，覆盖 maven-webhtv 残缺产物。
+# 从上游 media 仓库编译 Media3，覆盖 maven-webhtv 残缺产物。
 # 补齐 DecodeTrackSelector / DolbyVisionOutputPolicy / media3-ui（字幕）等 API。
 #
 # 本地与 CI：package-flutter-android.sh 在 fetch-android-exo-av3a.sh 之后调用本脚本。
 # 已含完整 API 时跳过（可用 KOTV_FORCE_FONGMI_MEDIA3=1 强制重编）。
+#
+# 上游曾用分支 release-1.11.0-fongmi；该分支已删除，默认钉其 tip commit。
+# 可用 KOTV_FONGMI_MEDIA_COMMIT / KOTV_FONGMI_MEDIA_BRANCH 覆盖。
 #
 # 上游缺 smbj 等 POM 类型声明、且全量模块依赖 test-utils；须先打
 # scripts/patches/fongmi-media3-kotv.patch（缺类型声明时的固定补丁）。
@@ -12,7 +15,8 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SRC="${KOTV_FONGMI_MEDIA:-$ROOT/.tmp/fongmi-media}"
 DEST="$ROOT/flutter/android/third_party/maven-webhtv"
 VER="1.11.0-alpha01-fongmi"
-BRANCH="${KOTV_FONGMI_MEDIA_BRANCH:-release-1.11.0-fongmi}"
+# tip of deleted release-1.11.0-fongmi（仍含 DecodeTrackSelector / MpvPlayer 等）
+REF="${KOTV_FONGMI_MEDIA_COMMIT:-${KOTV_FONGMI_MEDIA_BRANCH:-3c2cbe8ac742c2fe15eff52f03eeb3b1b648848d}}"
 REPO_URL="${KOTV_FONGMI_MEDIA_URL:-https://github.com/FongMi/media.git}"
 PATCH="$ROOT/scripts/patches/fongmi-media3-kotv.patch"
 
@@ -47,27 +51,24 @@ fi
 
 [[ -f "$PATCH" ]] || { echo "ERROR: missing $PATCH" >&2; exit 1; }
 
-prepare_fongmi_src() {
-  if [[ ! -d "$SRC/.git" ]]; then
-    echo "==> clone media ($BRANCH) → $SRC"
-    mkdir -p "$(dirname "$SRC")"
-    rm -rf "$SRC"
-    git clone --filter=blob:none --depth 1 -b "$BRANCH" "$REPO_URL" "$SRC"
-  else
-    echo "==> refresh media ($BRANCH) → $SRC"
-    git -C "$SRC" fetch --depth 1 origin "$BRANCH"
-    git -C "$SRC" reset --hard FETCH_HEAD
-    git -C "$SRC" clean -fd
-  fi
+prepare_media_src() {
+  # 分支已删：按 commit / 仍可达 ref 浅取（与原先 --filter=blob:none 同量级）。
+  echo "==> prepare media @$REF → $SRC"
+  mkdir -p "$(dirname "$SRC")"
+  rm -rf "$SRC"
+  mkdir -p "$SRC"
+  git -C "$SRC" init
+  git -C "$SRC" remote add origin "$REPO_URL"
+  git -C "$SRC" fetch --depth 1 --filter=blob:none origin "$REF"
+  git -C "$SRC" checkout --force FETCH_HEAD
   echo "==> apply KOTV patch (smbj POM + module subset)"
   git -C "$SRC" apply "$PATCH"
-  # Ensure version coordinate matches KOTV
   if ! grep -q "releaseVersion = \"$VER\"" "$SRC/gradle/libs.versions.toml" 2>/dev/null; then
     perl -i -pe "s/^releaseVersion = \".*\"/releaseVersion = \"$VER\"/" "$SRC/gradle/libs.versions.toml"
   fi
 }
 
-prepare_fongmi_src
+prepare_media_src
 
 # JDK：macOS 优先 17；CI / Linux 用 JAVA_HOME 或 PATH 里的 java。
 if [[ -z "${JAVA_HOME:-}" ]]; then
