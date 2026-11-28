@@ -1,6 +1,6 @@
 # Apple（macOS / iOS）mpv 补丁，按行顺序应用。
 # 来源 edde746/mpv-build patches/mpv/pool（版本见仓库根 mpv-build.lock.json）；
-# 0031a 与 0099 是本仓库为 FongMi mpv 接口差异写的适配。
+# 0031a 与 0099 是本仓库为上游 mpv tip 接口差异写的适配。
 
 # 字幕提前渲染管线，vo_avfoundation 依赖它。
 0031-vo-osd-ahead-shared-subtitle-render-pipeline.patch

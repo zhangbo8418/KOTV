@@ -63,7 +63,7 @@ chmod +x "$ROOT/scripts/kotv-exclude-fvp-plugin.sh"
 "$ROOT/scripts/kotv-exclude-fvp-plugin.sh" android
 chmod +x "$ROOT/scripts/patch-android-plugin-namespaces.sh"
 "$ROOT/scripts/patch-android-plugin-namespaces.sh"
-echo "==> fetch Exo AV3A stack (webhtv nextlib + Media3 fongmi)"
+echo "==> fetch Exo AV3A stack (nextlib + Media3)"
 chmod +x "$ROOT/scripts/fetch-android-exo-av3a.sh"
 "$ROOT/scripts/fetch-android-exo-av3a.sh"
 # webhtv 二进制缺 DecodeTrackSelector / DolbyVisionOutputPolicy；用 build-fongmi-media3.sh 覆盖。

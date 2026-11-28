@@ -6,6 +6,7 @@ on:
 
 env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  # 与 scripts/kotv-flutter-pins.sh / github-action.yml 主线一致
   FLUTTER_VERSION: "3.50.1"
 
 jobs:
@@ -96,7 +97,7 @@ jobs:
           restore-keys: |
             android-mpv-native-
 
-      - name: Cache FongMi Media3 maven + checkout
+      - name: Cache Media3 maven + checkout
         uses: actions/cache@v4
         with:
           path: |

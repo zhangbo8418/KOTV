@@ -92,10 +92,9 @@ source "$ROOT/scripts/kotv-flutter-asset-engines.sh"
 kotv_flutter_asset_engines_hide
 trap kotv_flutter_asset_engines_restore EXIT
 
-# Win8+（x64 / arm64）：灌入 DComp 补丁引擎（与钉死的 Flutter 3.47.1 同 stamp；制品含双架构）。Win7 跳过。
+# Win8+（x64 / arm64）：灌入 DComp 引擎（版本见 kotv-flutter-pins.sh）。Win7 跳过。
 if [[ "${KOTV_WIN7:-}" != "1" ]]; then
   echo "==> install DComp Windows engine ($PLAT)"
-  chmod +x "$ROOT/scripts/install-flutter-windows-dcomp-engine.sh"
   "$ROOT/scripts/install-flutter-windows-dcomp-engine.sh"
 fi
 

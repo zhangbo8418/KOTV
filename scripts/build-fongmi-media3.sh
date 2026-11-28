@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 从 FongMi/media (release-1.11.0-fongmi) 编译 Media3，覆盖 maven-webhtv 残缺产物。
+# 从上游 media 仓库（默认 release-1.11.0-fongmi）编译 Media3，覆盖 maven-webhtv 残缺产物。
 # 补齐 DecodeTrackSelector / DolbyVisionOutputPolicy / media3-ui（字幕）等 API。
 #
 # 本地与 CI：package-flutter-android.sh 在 fetch-android-exo-av3a.sh 之后调用本脚本。
@@ -41,7 +41,7 @@ media3_has_tv_apis() {
 }
 
 if [[ "${KOTV_FORCE_FONGMI_MEDIA3:-0}" != "1" ]] && media3_has_tv_apis; then
-  echo "ok FongMi Media3 $VER already has TV APIs + media3-mpvplayer"
+  echo "ok Media3 $VER already has TV APIs + media3-mpvplayer"
   exit 0
 fi
 
@@ -49,12 +49,12 @@ fi
 
 prepare_fongmi_src() {
   if [[ ! -d "$SRC/.git" ]]; then
-    echo "==> clone FongMi/media ($BRANCH) → $SRC"
+    echo "==> clone media ($BRANCH) → $SRC"
     mkdir -p "$(dirname "$SRC")"
     rm -rf "$SRC"
     git clone --filter=blob:none --depth 1 -b "$BRANCH" "$REPO_URL" "$SRC"
   else
-    echo "==> refresh FongMi/media ($BRANCH) → $SRC"
+    echo "==> refresh media ($BRANCH) → $SRC"
     git -C "$SRC" fetch --depth 1 origin "$BRANCH"
     git -C "$SRC" reset --hard FETCH_HEAD
     git -C "$SRC" clean -fd
@@ -86,7 +86,7 @@ export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Library/Android/s
 printf 'sdk.dir=%s\n' "$ANDROID_HOME" >"$SRC/local.properties"
 
 cd "$SRC"
-echo "==> publish FongMi Media3 $VER → $DEST"
+echo "==> publish Media3 $VER → $DEST"
 ./gradlew \
   :lib-common:publishReleasePublicationToMavenRepository \
   :lib-container:publishReleasePublicationToMavenRepository \

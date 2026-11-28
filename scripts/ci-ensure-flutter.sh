@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 # CI：确保 PATH 上有可用的 Flutter（arm64 runner 常无预编译 SDK 包，改 git clone）。
-# 用法: FLUTTER_VERSION=3.50.1 ./scripts/ci-ensure-flutter.sh
+# 用法: FLUTTER_VERSION=… ./scripts/ci-ensure-flutter.sh
+# 未设 FLUTTER_VERSION 时用 kotv-flutter-pins.sh 主线默认。
 # 成功后把 flutter/bin 追加到 $GITHUB_PATH（若在 Actions 中）。
 set -euo pipefail
 
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=kotv-flutter-pins.sh
+source "$ROOT/scripts/kotv-flutter-pins.sh"
 VER="${FLUTTER_VERSION:?set FLUTTER_VERSION}"
 DEST="${KOTV_FLUTTER_HOME:-${RUNNER_TEMP:-/tmp}/flutter-${VER}}"
 
