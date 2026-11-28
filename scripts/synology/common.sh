@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 群晖 Toolkit 共用：平台映射、sysroot / 交叉编译器探测。
+# 群晖 Toolkit 共用：平台映射、sysroot / 交叉编译器、并行调度、引擎校验。
 # 由其它 scripts/synology/*.sh source，勿直接执行。
 # shellcheck shell=bash
 
@@ -21,6 +21,18 @@ kotv_syno_plat_meta() {
       echo "unsupported toolkit platform: $1 (want geminilake|rtd1296)" >&2
       return 1
       ;;
+  esac
+}
+
+# 是否在交叉编（Toolkit 目标 arch ≠ 宿主）
+kotv_syno_is_cross() {
+  case "$1" in
+    rtd1296)
+      local host
+      host="$(uname -m 2>/dev/null || true)"
+      [[ "$host" != "aarch64" && "$host" != "arm64" ]]
+      ;;
+    *) return 1 ;;
   esac
 }
 
@@ -107,4 +119,100 @@ kotv_syno_export_toolchain() {
   export PKG_CONFIG_SYSROOT_DIR="$SYSROOT"
   export PKG_CONFIG_PATH="${SYSROOT}/usr/lib/pkgconfig:${SYSROOT}/usr/local/lib/pkgconfig"
   echo "toolchain CC=$CC SYSROOT=$SYSROOT"
+}
+
+# 宿主可用的并行度（可用 KOTV_SYNO_JOBS 覆盖）
+kotv_syno_njobs() {
+  echo "${KOTV_SYNO_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
+}
+
+# 多任务并行时均分 make/ninja -j，避免 N 路各占满核
+# 用法: kotv_syno_jobs_budget <并行任务数>
+kotv_syno_jobs_budget() {
+  local n="${1:-1}" total
+  total="$(kotv_syno_njobs)"
+  if [[ "$n" -lt 1 ]]; then n=1; fi
+  local per=$(( total / n ))
+  if [[ "$per" -lt 1 ]]; then per=1; fi
+  echo "$per"
+}
+
+# 并行跑若干命令；任一失败则整体失败。日志前缀为任务名。
+# 用法: kotv_syno_parallel "name1:cmd1" "name2:cmd2" ...
+# cmd 在当前 shell 函数可见范围内执行（需 export -f 或外部脚本）。
+kotv_syno_parallel() {
+  local -a specs=("$@")
+  local -a pids=() names=()
+  local i spec name cmd logdir rc=0 pid
+  if [[ ${#specs[@]} -eq 0 ]]; then
+    return 0
+  fi
+  logdir="${KOTV_SYNO_PARALLEL_LOGDIR:-$(kotv_syno_root)/.syno-build/parallel-logs}"
+  mkdir -p "$logdir"
+  echo "==> parallel (${#specs[@]}): ${specs[*]%%:*}"
+  for spec in "${specs[@]}"; do
+    name="${spec%%:*}"
+    cmd="${spec#*:}"
+    if [[ -z "$name" || "$name" == "$spec" || -z "$cmd" ]]; then
+      echo "ERROR: kotv_syno_parallel want name:command, got: $spec" >&2
+      return 1
+    fi
+    names+=("$name")
+    (
+      set -euo pipefail
+      echo "[$name] start"
+      # shellcheck disable=SC2086
+      eval "$cmd"
+    ) >"$logdir/${name}.log" 2>&1 &
+    pids+=("$!")
+  done
+  for i in "${!pids[@]}"; do
+    pid="${pids[$i]}"
+    name="${names[$i]}"
+    if wait "$pid"; then
+      echo "[$name] ok"
+      # 成功时只回显末尾，减少 CI 刷屏；失败时整份日志
+      tail -n 40 "$logdir/${name}.log" 2>/dev/null || true
+    else
+      rc=1
+      echo "[$name] FAILED (see $logdir/${name}.log)" >&2
+      cat "$logdir/${name}.log" >&2 || true
+    fi
+  done
+  return "$rc"
+}
+
+# 断言引擎为 Toolkit 动态链 glibc（交叉产物勿用宿主 ldd 判定）
+kotv_syno_assert_dynamic_engine() {
+  local eng="$1"
+  local info
+  if [[ ! -x "$eng" ]]; then
+    echo "ERROR: missing engine: $eng" >&2
+    return 1
+  fi
+  info="$(file -b "$eng" 2>/dev/null || true)"
+  case "$info" in
+    *statically\ linked*)
+      echo "ERROR: engine is statically linked; Synology SPK needs Toolkit dynamic engine" >&2
+      echo "$info" >&2
+      return 1
+      ;;
+  esac
+  if [[ "$info" != *"dynamically linked"* ]]; then
+    echo "ERROR: expected dynamically linked engine, got: ${info:-unknown}" >&2
+    return 1
+  fi
+  if [[ "$info" == *musl* ]]; then
+    echo "ERROR: musl-linked engine not allowed for Synology SPK" >&2
+    return 1
+  fi
+  if command -v readelf >/dev/null 2>&1; then
+    if ! readelf -l "$eng" 2>/dev/null | grep -q 'INTERP'; then
+      echo "ERROR: engine missing INTERP (not a dynamic ELF)" >&2
+      return 1
+    fi
+    echo "engine dynamic deps (readelf):"
+    readelf -d "$eng" 2>/dev/null | grep -E 'NEEDED|Shared library' | head -20 || true
+  fi
+  return 0
 }

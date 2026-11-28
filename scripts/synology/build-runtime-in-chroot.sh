@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# 在 Synology DSM 7.2 Toolkit sysroot 下编译 Node / Python / JRE / Chromium(headless)
+# 在 Synology DSM 7.2 Toolkit sysroot 下并行编译 Node / Python / JRE / Chromium / ffmpeg
 # 用法: ./scripts/synology/build-runtime-in-chroot.sh <geminilake|rtd1296>
 # 产出: dist/syno-runtime-{x86_64|armv8}/
 #
-# Node/Python/OpenJDK：Toolkit GCC + sysroot
+# Node/Python/OpenJDK/ffmpeg：Toolkit GCC + sysroot（armv8 在 x86 runner 上交叉）
 # Chromium：主机 Clang + Toolkit sysroot（现代 Chromium 不支持 GCC）
+# 组件默认并行；可用 KOTV_SYNO_COMPONENTS 筛选，KOTV_SYNO_RUNTIME_SERIAL=1 强制串行。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -15,13 +16,15 @@ kotv_syno_load_versions
 PLATFORM="${1:?usage: build-runtime-in-chroot.sh <geminilake|rtd1296>}"
 read -r ARCH_LABEL _GOARCH TARGET_CPU <<<"$(kotv_syno_plat_meta "$PLATFORM")"
 GN_CPU="$TARGET_CPU"
+CROSS=0
+if kotv_syno_is_cross "$PLATFORM"; then CROSS=1; fi
 
 DSM_VER="${SYNO_DSM_VER}"
 ENV_DIR="$(kotv_syno_env_dir "$PLATFORM")"
 OUT="$ROOT/dist/syno-runtime-${ARCH_LABEL}"
 SRC_CACHE="${KOTV_SYNO_SRC_CACHE:-$ROOT/.syno-src-cache}"
 BUILD_ROOT="${KOTV_SYNO_BUILD_ROOT:-$ROOT/.syno-build/${PLATFORM}}"
-JOBS="${KOTV_SYNO_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
+JOBS_TOTAL="$(kotv_syno_njobs)"
 
 mkdir -p "$OUT" "$SRC_CACHE" "$BUILD_ROOT"
 chmod +x "$ROOT/scripts/synology/"*.sh
@@ -36,7 +39,7 @@ if [[ ! -d "$ENV_DIR" ]]; then
 fi
 
 kotv_syno_export_toolchain "$ENV_DIR"
-echo "==> platform=$PLATFORM arch=$ARCH_LABEL sysroot=$SYSROOT"
+echo "==> platform=$PLATFORM arch=$ARCH_LABEL cross=$CROSS sysroot=$SYSROOT"
 
 download() {
   local url="$1" dest="$2"
@@ -62,7 +65,6 @@ download() {
 }
 
 stamp_ok() {
-  # 勿写 local a="$1" b="$OUT/$a"：set -u 下同句展开会 unbound
   local name ver marker
   name="$1"
   ver="$2"
@@ -77,15 +79,32 @@ write_stamp() {
   echo "$ver" >"$OUT/.kotv-syno-${name}"
 }
 
+# 当前组件可用的 -j（并行调度时由外层注入 KOTV_SYNO_COMP_JOBS）
+comp_jobs() {
+  echo "${KOTV_SYNO_COMP_JOBS:-$JOBS_TOTAL}"
+}
+
+host_python() {
+  local p
+  p="$(command -v python3 || true)"
+  if [[ -z "$p" || ! -x "$p" ]]; then
+    echo "ERROR: host python3 required" >&2
+    return 1
+  fi
+  echo "$p"
+}
+
 # ---------- Node ----------
 build_node() {
   local ver="${SYNO_NODE_VER}"
   local dest="$OUT/node"
+  local jobs
+  jobs="$(comp_jobs)"
   if stamp_ok node "$ver" && [[ -x "$dest/node" ]]; then
     echo "[node] skip (cached $ver)"
     return 0
   fi
-  echo "[node] build $ver for $ARCH_LABEL"
+  echo "[node] build $ver for $ARCH_LABEL (-j$jobs)"
   local tarball="$SRC_CACHE/node-${ver}.tar.gz"
   download "https://nodejs.org/dist/${ver}/node-${ver}.tar.gz" "$tarball"
   local src="$BUILD_ROOT/node-${ver}"
@@ -93,7 +112,6 @@ build_node() {
   mkdir -p "$BUILD_ROOT"
   tar -xzf "$tarball" -C "$BUILD_ROOT"
   cd "$src"
-  # Node：强制 Toolkit GCC；armv8 在 x86 runner 上交叉编译
   local cfg=(
     --prefix=/opt/kotv-node
     --without-npm
@@ -102,9 +120,8 @@ build_node() {
   local host_cc host_cxx
   host_cc="${CC_host:-gcc}"
   host_cxx="${CXX_host:-g++}"
-  if [[ "$PLATFORM" == "rtd1296" ]]; then
+  if [[ "$CROSS" -eq 1 ]]; then
     cfg+=(--cross-compiling)
-    # icupkg 等 host 工具必须是 x86_64；否则 Exec format error
     if ! command -v "$host_cc" >/dev/null 2>&1; then
       echo "ERROR: host C compiler required for Node cross-build: $host_cc" >&2
       exit 1
@@ -113,15 +130,13 @@ build_node() {
   fi
   CC="$CC" CXX="$CXX" CC_host="$host_cc" CXX_host="$host_cxx" \
     AR_host="${AR_host:-ar}" ./configure "${cfg[@]}"
-  make -j"$JOBS"
+  make -j"$jobs"
   rm -rf "$dest"
   mkdir -p "$dest"
-  # 只取 node 二进制
-  cp -a "$src/out/Release/node" "$dest/node" 2>/dev/null || cp -a "$src/out/Release/node" "$dest/node"
+  cp -a "$src/out/Release/node" "$dest/node"
   chmod +x "$dest/node"
   if [[ -f "$src/LICENSE" ]]; then cp "$src/LICENSE" "$dest/LICENSE"; fi
   write_stamp node "$ver"
-  # 释盘
   rm -rf "$src"
   echo "[node] ready: $dest/node"
 }
@@ -130,11 +145,13 @@ build_node() {
 build_python() {
   local ver="${SYNO_PYTHON_VER}"
   local dest="$OUT/python"
+  local jobs build_py
+  jobs="$(comp_jobs)"
   if stamp_ok python "$ver" && [[ -x "$dest/bin/python3" || -x "$dest/bin/python" ]]; then
     echo "[python] skip (cached $ver)"
     return 0
   fi
-  echo "[python] build $ver for $ARCH_LABEL"
+  echo "[python] build $ver for $ARCH_LABEL (-j$jobs)"
   local tarball="$SRC_CACHE/Python-${ver}.tgz"
   download "https://www.python.org/ftp/python/${ver}/Python-${ver}.tgz" "$tarball"
   local src="$BUILD_ROOT/Python-${ver}"
@@ -147,8 +164,9 @@ build_python() {
     --with-ensurepip=install
     --disable-test-modules
   )
-  if [[ "$PLATFORM" == "rtd1296" ]]; then
-    # 交叉：不能在 host 跑解释器；ensurepip 延后
+  if [[ "$CROSS" -eq 1 ]]; then
+    build_py="$(host_python)"
+    # Python 3.12+：交叉编必须提供宿主可执行的 build-python
     py_cfg=(
       --prefix=/opt/kotv-python
       --enable-shared
@@ -156,17 +174,18 @@ build_python() {
       --disable-test-modules
       --host=aarch64-unknown-linux-gnu
       --build=x86_64-pc-linux-gnu
+      --with-build-python="$build_py"
     )
+    echo "[python] cross-compile with --with-build-python=$build_py"
   fi
   CC="$CC" CXX="$CXX" \
     ac_cv_file__dev_ptmx=yes ac_cv_file__dev_ptc=no \
     ./configure "${py_cfg[@]}"
-  make -j"$JOBS"
+  make -j"$jobs"
   make DESTDIR="$BUILD_ROOT/python-dest" install
   rm -rf "$dest"
   mkdir -p "$dest"
   cp -a "$BUILD_ROOT/python-dest/opt/kotv-python/." "$dest/"
-  # 安装 spider 依赖（若交叉编无法跑 pip，则在可执行时再装；同架构 host 可直接 pip）
   if [[ -x "$dest/bin/python3" ]]; then
     if "$dest/bin/python3" -c 'import sys; print(sys.version)' >/dev/null 2>&1; then
       "$dest/bin/python3" -m pip install --upgrade pip wheel || true
@@ -184,39 +203,27 @@ build_python() {
 build_jre() {
   local ver="${SYNO_JDK_FEATURE}"
   local dest="$OUT/jre"
+  local jobs
+  jobs="$(comp_jobs)"
   if stamp_ok jre "$ver" && [[ -x "$dest/bin/java" && -f "$dest/lib/server/libjvm.so" ]]; then
     echo "[jre] skip (cached $ver)"
     return 0
   fi
-  echo "[jre] build OpenJDK ${ver} JRE for $ARCH_LABEL"
-  # 使用宿主机 boot JDK + Toolkit 工具链交叉/本地编
+  echo "[jre] build OpenJDK ${ver} JRE for $ARCH_LABEL (-j$jobs)"
   if ! command -v java >/dev/null 2>&1; then
     echo "ERROR: host java (boot JDK) required to build OpenJDK" >&2
     exit 1
   fi
-  local tag="jdk-${ver}+35"
-  # 固定源码包：Eclipse Temurin / OpenJDK 构建源
-  local src_url="https://github.com/openjdk/jdk${ver}u/archive/refs/heads/master.tar.gz"
-  # 更可复现：用 jdk21u-dev 某次 snapshot 太飘；改官方 source bundle 若可得
-  local tarball="$SRC_CACHE/openjdk-${ver}-src.tar.gz"
-  if [[ ! -f "$tarball" ]]; then
-    # fallback：clone shallow
-    local gitdir="$SRC_CACHE/jdk${ver}u"
-    if [[ ! -d "$gitdir/.git" ]]; then
-      git clone --depth 1 --branch "jdk${ver}u" \
-        "https://github.com/openjdk/jdk${ver}u.git" "$gitdir" \
-        || git clone --depth 1 "https://github.com/openjdk/jdk${ver}u.git" "$gitdir"
-    fi
-    local src="$BUILD_ROOT/jdk${ver}u"
-    rm -rf "$src"
-    mkdir -p "$BUILD_ROOT"
-    cp -a "$gitdir" "$src"
-  else
-    local src="$BUILD_ROOT/jdk${ver}-src"
-    rm -rf "$src"
-    mkdir -p "$src"
-    tar -xzf "$tarball" -C "$src" --strip-components=1
+  local gitdir="$SRC_CACHE/jdk${ver}u"
+  if [[ ! -d "$gitdir/.git" ]]; then
+    git clone --depth 1 --branch "jdk${ver}u" \
+      "https://github.com/openjdk/jdk${ver}u.git" "$gitdir" \
+      || git clone --depth 1 "https://github.com/openjdk/jdk${ver}u.git" "$gitdir"
   fi
+  local src="$BUILD_ROOT/jdk${ver}u"
+  rm -rf "$src"
+  mkdir -p "$BUILD_ROOT"
+  cp -a "$gitdir" "$src"
   cd "$src"
   local boot="${JAVA_HOME:-}"
   if [[ -z "$boot" || ! -x "$boot/bin/java" ]]; then
@@ -235,14 +242,14 @@ build_jre() {
     --with-extra-cxxflags="$CXXFLAGS"
     --with-extra-ldflags="$LDFLAGS"
   )
-  if [[ "$PLATFORM" == "rtd1296" ]]; then
+  if [[ "$CROSS" -eq 1 ]]; then
     jdk_cfg+=(--openjdk-target=aarch64-unknown-linux-gnu)
   fi
   bash configure "${jdk_cfg[@]}" CC="$CC" CXX="$CXX" || {
     echo "ERROR: OpenJDK configure failed" >&2
     exit 1
   }
-  make images JOBS="$JOBS" || make product-images JOBS="$JOBS"
+  make images JOBS="$jobs" || make product-images JOBS="$jobs"
   local jre_src
   jre_src="$(find "$src/build" -type d -path '*/images/jdk' | head -1 || true)"
   if [[ -z "$jre_src" ]]; then
@@ -255,7 +262,6 @@ build_jre() {
   fi
   rm -rf "$dest"
   mkdir -p "$dest"
-  # 若是完整 jdk，用 jlink 缩成 JRE
   if [[ -x "$jre_src/bin/jlink" ]]; then
     "$jre_src/bin/jlink" \
       --add-modules ALL-MODULE-PATH \
@@ -268,7 +274,6 @@ build_jre() {
     cp -a "$jre_src/." "$dest/"
   fi
   write_stamp jre "$ver"
-  # 释盘：保留 git cache，删 build
   rm -rf "$src"
   echo "[jre] ready: $dest"
 }
@@ -292,7 +297,6 @@ PY
     echo "$ver"
     return 0
   fi
-  # 回落：chromium src 远端主分支 tip
   ver="$(git ls-remote --heads https://chromium.googlesource.com/chromium/src.git main \
     | awk '{print $1; exit}')"
   if [[ -n "$ver" ]]; then
@@ -308,6 +312,8 @@ build_chromium() {
   local tag="${SYNO_CHROMIUM_TAG:-latest}"
   local commit="${SYNO_CHROMIUM_COMMIT:-}"
   local dest="$OUT/chromium"
+  local jobs
+  jobs="$(comp_jobs)"
 
   if [[ -n "$commit" ]]; then
     tag="$commit"
@@ -320,7 +326,7 @@ build_chromium() {
     echo "[chromium] skip (cached $tag)"
     return 0
   fi
-  echo "[chromium] build headless_shell $tag for $ARCH_LABEL (Clang + Toolkit sysroot)"
+  echo "[chromium] build headless_shell $tag for $ARCH_LABEL (Clang + Toolkit sysroot, -j$jobs)"
 
   if ! command -v clang >/dev/null 2>&1; then
     echo "[chromium] installing clang on host..."
@@ -339,8 +345,7 @@ build_chromium() {
   mkdir -p "$BUILD_ROOT/chromium"
   cd "$BUILD_ROOT/chromium"
   if [[ ! -f "$chrome_src/.gclient" && ! -d "$chrome_src" ]]; then
-    echo "[chromium] fetch (this is large; disk must suffice)"
-    # 用精简 fetch：只要 headless 相关
+    echo "[chromium] fetch (large; disk must suffice)"
     cat > .gclient <<EOF
 solutions = [
   {
@@ -352,14 +357,12 @@ solutions = [
   },
 ]
 EOF
-    # 首次：gclient sync 可能极慢；允许 KOTV_SYNO_CHROMIUM_TARBALL 指向预打包 src
     if [[ -n "${KOTV_SYNO_CHROMIUM_TARBALL:-}" && -f "${KOTV_SYNO_CHROMIUM_TARBALL}" ]]; then
       echo "[chromium] extract KOTV_SYNO_CHROMIUM_TARBALL"
       mkdir -p src
       tar -xf "$KOTV_SYNO_CHROMIUM_TARBALL" -C src --strip-components=1
     else
       fetch --nohooks --no-history chromium || {
-        # fetch 失败时尝试手动 clone：版本 tag 或 commit
         if [[ "$tag" =~ ^[0-9a-f]{40}$ ]]; then
           git clone --depth 1 https://chromium.googlesource.com/chromium/src.git src
           git -C src fetch --depth 1 origin "$tag" && git -C src checkout "$tag"
@@ -373,7 +376,7 @@ EOF
             }
         fi
       }
-      (cd src && gclient sync --nohooks --no-history -D -j"$JOBS" || true)
+      (cd src && gclient sync --nohooks --no-history -D -j"$jobs" || true)
       (cd src && gclient runhooks || true)
     fi
   elif [[ -d "$chrome_src/.git" ]]; then
@@ -384,11 +387,10 @@ EOF
     git -C "$chrome_src" checkout "$tag" 2>/dev/null \
       || git -C "$chrome_src" checkout FETCH_HEAD 2>/dev/null \
       || true
-    (cd "$chrome_src" && gclient sync --nohooks --no-history -D -j"$JOBS" || true)
+    (cd "$chrome_src" && gclient sync --nohooks --no-history -D -j"$jobs" || true)
   fi
 
   cd "$chrome_src"
-  # 释盘：去掉不必要的大目录
   rm -rf third_party/llvm-build 2>/dev/null || true
 
   local out_dir="out/HeadlessSyno"
@@ -412,15 +414,9 @@ EOF
     "use_custom_libcxx=true"
     "is_clang=true"
   )
-  # 生成
-  if [[ ! -f tools/gn/bin/gn ]] && ! command -v gn >/dev/null 2>&1; then
-    # chromium 自带 gn
-    if [[ -x "$depot/gn" ]]; then
-      :
-    fi
-  fi
   gn gen "$out_dir" --args="${args[*]}"
-  ninja -C "$out_dir" headless_shell chrome-headless-shell || ninja -C "$out_dir" headless_shell
+  ninja -C "$out_dir" -j"$jobs" headless_shell chrome-headless-shell \
+    || ninja -C "$out_dir" -j"$jobs" headless_shell
 
   rm -rf "$dest"
   mkdir -p "$dest"
@@ -433,50 +429,57 @@ EOF
   fi
   cp -a "$bin" "$dest/chrome-headless-shell"
   chmod +x "$dest/chrome-headless-shell"
-  # 同名入口，兼容探测
   ln -sfn chrome-headless-shell "$dest/chrome"
-  # 拷必要 .so / pak（同目录）
   find "$(dirname "$bin")" -maxdepth 1 -type f \( -name '*.pak' -o -name '*.bin' -o -name '*.dat' -o -name '*.so' -o -name 'icudtl.dat' -o -name 'v8_context_snapshot.bin' -o -name 'lib*.so*' \) \
     -exec cp -a {} "$dest/" \; 2>/dev/null || true
   write_stamp chromium "$tag"
-
-  # 释盘：删 out 中间物，保留 src 供 cache
   rm -rf "$out_dir"
   echo "[chromium] ready: $dest/chrome-headless-shell"
 }
 
-# ---------- ffmpeg（可选，便于嗅探/转码旁路） ----------
+# ---------- ffmpeg ----------
 build_ffmpeg() {
   local ver="6.1.1"
   local dest="$OUT/ffmpeg"
+  local jobs
+  jobs="$(comp_jobs)"
   if stamp_ok ffmpeg "$ver" && [[ -x "$dest/ffmpeg" ]]; then
     echo "[ffmpeg] skip (cached $ver)"
     return 0
   fi
-  echo "[ffmpeg] build $ver"
+  echo "[ffmpeg] build $ver for $ARCH_LABEL (-j$jobs)"
   local tarball="$SRC_CACHE/ffmpeg-${ver}.tar.xz"
   download "https://ffmpeg.org/releases/ffmpeg-${ver}.tar.xz" "$tarball"
   local src="$BUILD_ROOT/ffmpeg-${ver}"
   rm -rf "$src"
   tar -xJf "$tarball" -C "$BUILD_ROOT"
   cd "$src"
-  ./configure \
-    --prefix=/opt/kotv-ffmpeg \
-    --enable-gpl \
-    --enable-shared \
-    --disable-doc \
-    --disable-debug \
-    --cc="$CC" \
-    --cxx="$CXX" \
-    --extra-cflags="$CFLAGS" \
+  local ff_cfg=(
+    --prefix=/opt/kotv-ffmpeg
+    --enable-gpl
+    --enable-shared
+    --disable-doc
+    --disable-debug
+    --cc="$CC"
+    --cxx="$CXX"
+    --extra-cflags="$CFLAGS"
     --extra-ldflags="$LDFLAGS"
-  make -j"$JOBS"
+  )
+  if [[ "$CROSS" -eq 1 ]]; then
+    ff_cfg+=(
+      --enable-cross-compile
+      --arch=aarch64
+      --target-os=linux
+      --cross-prefix="$(dirname "$CC")/$(basename "$CC" | sed 's/gcc$//')"
+    )
+  fi
+  ./configure "${ff_cfg[@]}"
+  make -j"$jobs"
   make DESTDIR="$BUILD_ROOT/ffmpeg-dest" install
   rm -rf "$dest"
   mkdir -p "$dest"
   cp -a "$BUILD_ROOT/ffmpeg-dest/opt/kotv-ffmpeg/bin/ffmpeg" "$dest/ffmpeg"
   chmod +x "$dest/ffmpeg"
-  # 共享库
   mkdir -p "$dest/lib"
   cp -a "$BUILD_ROOT/ffmpeg-dest/opt/kotv-ffmpeg/lib/"*.so* "$dest/lib/" 2>/dev/null || true
   write_stamp ffmpeg "$ver"
@@ -484,19 +487,43 @@ build_ffmpeg() {
   echo "[ffmpeg] ready: $dest/ffmpeg"
 }
 
-echo "======== syno runtime build: $PLATFORM → $OUT ========"
-COMPONENTS="${KOTV_SYNO_COMPONENTS:-node python jre chromium ffmpeg}"
-for c in $COMPONENTS; do
-  case "$c" in
+run_component() {
+  case "$1" in
     node) build_node ;;
     python) build_python ;;
     jre) build_jre ;;
     chromium) build_chromium ;;
     ffmpeg) build_ffmpeg ;;
-    *) echo "unknown component: $c" >&2; exit 1 ;;
+    *) echo "unknown component: $1" >&2; return 1 ;;
   esac
-done
+}
 
+echo "======== syno runtime build: $PLATFORM → $OUT ========"
+COMPONENTS="${KOTV_SYNO_COMPONENTS:-node python jre chromium ffmpeg}"
+# shellcheck disable=SC2206
+COMP_ARR=($COMPONENTS)
+N_COMP=${#COMP_ARR[@]}
+# 并行时均分 -j；子 shell 继承本脚本函数定义（无需 export -f）
+KOTV_SYNO_COMP_JOBS="$(kotv_syno_jobs_budget "$N_COMP")"
+export KOTV_SYNO_COMP_JOBS
+
+if [[ "${KOTV_SYNO_RUNTIME_SERIAL:-0}" == "1" ]]; then
+  echo "==> runtime serial (${COMPONENTS})"
+  for c in "${COMP_ARR[@]}"; do
+    run_component "$c"
+  done
+else
+  echo "==> runtime parallel (${COMPONENTS}); per-component -j${KOTV_SYNO_COMP_JOBS} (total cores ${JOBS_TOTAL})"
+  specs=()
+  for c in "${COMP_ARR[@]}"; do
+    specs+=("${c}:run_component ${c}")
+  done
+  export KOTV_SYNO_PARALLEL_LOGDIR="$BUILD_ROOT/runtime-logs"
+  kotv_syno_parallel "${specs[@]}"
+fi
+
+_parallel_flag=1
+if [[ "${KOTV_SYNO_RUNTIME_SERIAL:-0}" == "1" ]]; then _parallel_flag=0; fi
 cat >"$OUT/.kotv-runtime" <<EOF
 platform=synology-${ARCH_LABEL}
 toolkit_platform=${PLATFORM}
@@ -504,7 +531,9 @@ dsm=${DSM_VER}
 prepared=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 sysroot=${SYSROOT}
 cc=${CC}
+parallel=${_parallel_flag}
 EOF
+unset _parallel_flag
 
 echo "======== done: $OUT ========"
 du -sh "$OUT"/* 2>/dev/null || ls -la "$OUT"

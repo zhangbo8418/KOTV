@@ -8,8 +8,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 # shellcheck source=../kotv-release-name.sh
 source "$ROOT/scripts/kotv-release-name.sh"
-# shellcheck source=versions.env
-source "$ROOT/scripts/synology/versions.env"
+# shellcheck source=common.sh
+source "$ROOT/scripts/synology/common.sh"
+kotv_syno_load_versions
 
 ARCH="${1:?usage: package-spk.sh <x86_64|armv8> --engine E --webapp W --runtime-dir R}"
 shift || true
@@ -67,14 +68,7 @@ echo "    engine=$ENGINE"
 echo "    webapp=$WEBAPP"
 echo "    runtime=$RUNTIME_DIR"
 
-if [[ ! -x "$ENGINE" ]]; then
-  echo "ERROR: missing Toolkit engine: $ENGINE（先跑 build-engine.sh）" >&2
-  exit 1
-fi
-if command -v ldd >/dev/null 2>&1 && ! ldd "$ENGINE" >/dev/null 2>&1; then
-  echo "ERROR: $ENGINE 为静态链接；SPK 引擎须由 Toolkit 动态编译" >&2
-  exit 1
-fi
+kotv_syno_assert_dynamic_engine "$ENGINE"
 if [[ ! -f "$WEBAPP/index.html" ]]; then
   echo "ERROR: missing webapp: $WEBAPP/index.html" >&2
   exit 1

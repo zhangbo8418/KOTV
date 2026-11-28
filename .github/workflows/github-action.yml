@@ -924,10 +924,10 @@ jobs:
           chmod +x bridge/build.sh scripts/*.sh scripts/synology/*.sh
           ./scripts/synology/build-spk.sh "${{ matrix.toolkit_plat }}"
           ls -lh dist/KO影视-*-synology-*.spk
-          # 确认引擎为动态链接（Toolkit），非 musl 静态
+          # 交叉产物勿用宿主 ldd；file/readelf 在 package/build-engine 已校验
           eng="dist/syno-engine-${{ matrix.arch_label }}/kotv-engine"
           file "$eng"
-          ldd "$eng" | head -20
+          readelf -d "$eng" 2>/dev/null | grep -E 'NEEDED|Shared library' | head -20 || true
           rm -rf .syno-build/${{ matrix.toolkit_plat }} || true
 
       - uses: actions/upload-artifact@v4
