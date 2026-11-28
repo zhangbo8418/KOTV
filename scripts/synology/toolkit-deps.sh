@@ -491,23 +491,45 @@ kotv_syno_chromium_fill_gcc_rt() {
 }
 
 kotv_syno_chromium_fill_hwcap2() {
-  # Toolkit 旧 asm/hwcap.h 无 HWCAP2_BTI/MTE；partition_alloc/aarch64_support.h 硬依赖
-  local sysroot="$1" h
-  local needle=$'#ifndef HWCAP2_BTI\n#define HWCAP2_BTI (1 << 17)\n#endif\n#ifndef HWCAP2_MTE\n#define HWCAP2_MTE (1 << 18)\n#endif\n'
-  local found=0
-  while IFS= read -r -d '' h; do
-    found=1
-    if grep -q 'HWCAP2_BTI' "$h" 2>/dev/null && grep -q 'HWCAP2_MTE' "$h" 2>/dev/null; then
-      continue
-    fi
-    printf '%s' "$needle" >>"$h"
-    echo "[deps] chromium: patched HWCAP2_* → $h"
-  done < <(find "$sysroot" \( -path '*/asm/hwcap.h' -o -path '*/bits/hwcap.h' \) -print0 2>/dev/null)
-  if [[ "$found" -eq 0 ]]; then
-    mkdir -p "$sysroot/usr/include/asm"
-    printf '%s' "$needle" >"$sysroot/usr/include/asm/hwcap.h"
-    echo "[deps] chromium: wrote $sysroot/usr/include/asm/hwcap.h"
-  fi
+  # Toolkit 头文件缺 HWCAP2_*/PR_MTE_*；原地 patch 常 Permission denied（只读 sysroot）。
+  # 写可写 compat 头，由 GN extra_cflags -include 强制注入（避免 tagging.cc 本地 #define 触发 -Wunused-macros）。
+  local sysroot="$1" compat
+  mkdir -p "$sysroot/usr/include"
+  compat="$sysroot/usr/include/kotv-chromium-compat.h"
+  cat >"$compat" <<'EOF'
+/* KOTV: Toolkit glibc headers may lack these; force-included for Chromium partition_alloc. */
+#pragma once
+#ifndef HWCAP2_BTI
+#define HWCAP2_BTI (1 << 17)
+#endif
+#ifndef HWCAP2_MTE
+#define HWCAP2_MTE (1 << 18)
+#endif
+#ifndef PR_MTE_TCF_SHIFT
+#define PR_MTE_TCF_SHIFT 1
+#endif
+#ifndef PR_MTE_TCF_NONE
+#define PR_MTE_TCF_NONE (0UL << PR_MTE_TCF_SHIFT)
+#endif
+#ifndef PR_MTE_TCF_SYNC
+#define PR_MTE_TCF_SYNC (1UL << PR_MTE_TCF_SHIFT)
+#endif
+#ifndef PR_MTE_TCF_ASYNC
+#define PR_MTE_TCF_ASYNC (2UL << PR_MTE_TCF_SHIFT)
+#endif
+#ifndef PR_MTE_TCF_MASK
+#define PR_MTE_TCF_MASK (3UL << PR_MTE_TCF_SHIFT)
+#endif
+#ifndef PR_MTE_TAG_SHIFT
+#define PR_MTE_TAG_SHIFT 3
+#endif
+#ifndef PR_MTE_TAG_MASK
+#define PR_MTE_TAG_MASK (0xffffUL << PR_MTE_TAG_SHIFT)
+#endif
+EOF
+  export KOTV_SYNO_CHROMIUM_COMPAT_H="$compat"
+  echo "$compat" >"$sysroot/.kotv-chromium-compat-h"
+  echo "[deps] chromium: wrote compat header $compat"
 }
 
 kotv_syno_chromium_fill_dri_pc() {
@@ -555,23 +577,14 @@ kotv_syno_chromium_verify_sysroot() {
       missing+=("$p (glibc)")
     fi
   done
-  if [[ "$PLATFORM" == rtd1296 ]]; then
-    if ! find "$sysroot" \( -path '*/asm/hwcap.h' -o -path '*/bits/hwcap.h' \) \
-      -exec grep -l 'HWCAP2_BTI' {} \; 2>/dev/null | head -1 | grep -q .; then
-      missing+=("HWCAP2_BTI in asm/bits hwcap.h")
-    fi
-    if ! find "$sysroot" \( -path '*/asm/hwcap.h' -o -path '*/bits/hwcap.h' \) \
-      -exec grep -l 'HWCAP2_MTE' {} \; 2>/dev/null | head -1 | grep -q .; then
-      missing+=("HWCAP2_MTE in asm/bits hwcap.h")
-    fi
+  if [[ ! -f "$sysroot/usr/include/kotv-chromium-compat.h" ]]; then
+    missing+=("usr/include/kotv-chromium-compat.h")
   fi
   echo "[deps] chromium sysroot audit ($sysroot):"
   echo "  crtbeginS.o=$([[ -f $sysroot/usr/lib/crtbeginS.o ]] && echo OK || echo MISS)"
   echo "  libgcc=$(ls "$sysroot/usr/lib"/libgcc* 2>/dev/null | tr '\n' ' ' || echo MISS)"
   echo "  dri.pc=$([[ -f $sysroot/usr/lib/pkgconfig/dri.pc ]] && echo OK || echo MISS)"
-  if [[ "$PLATFORM" == rtd1296 ]]; then
-    echo "  HWCAP2=$(find "$sysroot" \( -path '*/asm/hwcap.h' -o -path '*/bits/hwcap.h' \) -print 2>/dev/null | head -3 | tr '\n' ' ')"
-  fi
+  echo "  compat.h=$([[ -f $sysroot/usr/include/kotv-chromium-compat.h ]] && echo OK || echo MISS)"
   if ((${#missing[@]})); then
     echo "ERROR: chromium Toolkit sysroot incomplete:" >&2
     printf '  - %s\n' "${missing[@]}" >&2
@@ -585,7 +598,7 @@ kotv_syno_ensure_deps_chromium() {
   sysroot="$(kotv_syno_chromium_sysroot)"
   export KOTV_SYNO_CHROMIUM_SYSROOT="$sysroot"
   # stamp：清单版本；改清单必须 bump
-  want="toolkit-headless:gcc-rt3:dri-pc2:hwcap2"
+  want="toolkit-headless:gcc-rt3:dri-pc2:compat-h1"
   stamp="$sysroot/.kotv-chromium-sysroot"
   if [[ -f "$stamp" && "$(cat "$stamp" 2>/dev/null || true)" == "$want" ]] \
     && kotv_syno_chromium_verify_sysroot "$sysroot"; then
@@ -593,6 +606,10 @@ kotv_syno_ensure_deps_chromium() {
     if [[ -f "$sysroot/.kotv-gcc-libdir" ]]; then
       export KOTV_SYNO_CHROMIUM_GCC_LIBDIR
       KOTV_SYNO_CHROMIUM_GCC_LIBDIR="$(cat "$sysroot/.kotv-gcc-libdir")"
+    fi
+    if [[ -f "$sysroot/.kotv-chromium-compat-h" ]]; then
+      export KOTV_SYNO_CHROMIUM_COMPAT_H
+      KOTV_SYNO_CHROMIUM_COMPAT_H="$(cat "$sysroot/.kotv-chromium-compat-h")"
     fi
     return 0
   fi
@@ -607,6 +624,8 @@ kotv_syno_ensure_deps_chromium() {
   echo "[deps] profile=chromium — seed Toolkit sysroot + fill checklist → $sysroot"
   mkdir -p "$sysroot"
   rsync -a "${SYSROOT}/" "$sysroot/"
+  # overlay 可写：dri.pc / compat / gcc crt 拷贝
+  chmod -R u+w "$sysroot" 2>/dev/null || true
 
   kotv_syno_chromium_fill_gcc_rt "$sysroot"
   kotv_syno_chromium_fill_hwcap2 "$sysroot"

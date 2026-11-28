@@ -135,31 +135,19 @@ build_node() {
   mkdir -p "$BUILD_ROOT"
   tar -xzf "$tarball" -C "$BUILD_ROOT"
   cd "$src"
-  # --shared-* 指向 Toolkit overlay；brotli 用树内（1.1.0 缺 Node 22 所需 BLOCK_SWITCH 常量）
+  # brotli 始终树内。交叉时 --shared-* 会进 host 链接行（aarch64 .so → host ld 失败），
+  # 故交叉用树内 openssl/zlib/cares/nghttp2（仍是 Toolkit GCC+sysroot 编）；原生用 overlay shared。
   local cfg=(
     --prefix=/opt/kotv-node
     --without-npm
     --dest-cpu="${TARGET_CPU}"
     --with-intl=full-icu
-    --shared-openssl
-    --shared-openssl-includes="$deps/include"
-    --shared-openssl-libpath="$deps/lib"
-    --shared-zlib
-    --shared-zlib-includes="$deps/include"
-    --shared-zlib-libpath="$deps/lib"
-    --shared-cares
-    --shared-cares-includes="$deps/include"
-    --shared-cares-libpath="$deps/lib"
-    --shared-nghttp2
-    --shared-nghttp2-includes="$deps/include"
-    --shared-nghttp2-libpath="$deps/lib"
   )
   local host_cc host_cxx target_ldflags target_cppflags
   host_cc="${CC_host:-gcc}"
   host_cxx="${CXX_host:-g++}"
   target_ldflags="${LDFLAGS:-}"
   target_cppflags="${CPPFLAGS:-}"
-  # 交叉：host 工具绝不能吃到目标 --sysroot / -L.syno-deps（否则链上 aarch64 .so）
   local host_cflags="-O2 -pipe" host_ldflags="-Wl,-O1"
   if [[ "$CROSS" -eq 1 ]]; then
     cfg+=(--cross-compiling)
@@ -167,26 +155,53 @@ build_node() {
       echo "ERROR: host C compiler required for Node cross-build: $host_cc" >&2
       exit 1
     fi
-    echo "[node] cross-compile: CC=$CC CC_host=$host_cc dest-cpu=${TARGET_CPU}"
+    echo "[node] cross-compile: CC=$CC CC_host=$host_cc dest-cpu=${TARGET_CPU} (bundled deps; no --shared-*)"
+  else
+    cfg+=(
+      --shared-openssl
+      --shared-openssl-includes="$deps/include"
+      --shared-openssl-libpath="$deps/lib"
+      --shared-zlib
+      --shared-zlib-includes="$deps/include"
+      --shared-zlib-libpath="$deps/lib"
+      --shared-cares
+      --shared-cares-includes="$deps/include"
+      --shared-cares-libpath="$deps/lib"
+      --shared-nghttp2
+      --shared-nghttp2-includes="$deps/include"
+      --shared-nghttp2-libpath="$deps/lib"
+    )
   fi
-  CC="$CC" CXX="$CXX" CC_host="$host_cc" CXX_host="$host_cxx" \
-    AR_host="${AR_host:-ar}" \
-    CFLAGS_host="$host_cflags" CXXFLAGS_host="$host_cflags" \
-    LDFLAGS_host="$host_ldflags" \
-    PKG_CONFIG_PATH="${PKG_CONFIG_PATH:-}" \
-    PKG_CONFIG_LIBDIR="${PKG_CONFIG_LIBDIR:-}" \
-    PKG_CONFIG_SYSROOT_DIR="" \
-    CPPFLAGS="$target_cppflags" LDFLAGS="$target_ldflags" \
-    ./configure "${cfg[@]}"
-  make -j"$jobs" \
-    CFLAGS_host="$host_cflags" CXXFLAGS_host="$host_cflags" \
-    LDFLAGS_host="$host_ldflags" \
-    LIBRARY_PATH=
+  # 交叉：清空环境里的目标 LDFLAGS/CPPFLAGS，避免 host 工具吃到 -L.syno-deps
+  if [[ "$CROSS" -eq 1 ]]; then
+    env -u LIBRARY_PATH \
+      CC="$CC" CXX="$CXX" CC_host="$host_cc" CXX_host="$host_cxx" \
+      AR_host="${AR_host:-ar}" \
+      CFLAGS_host="$host_cflags" CXXFLAGS_host="$host_cflags" \
+      LDFLAGS_host="$host_ldflags" \
+      PKG_CONFIG_SYSROOT_DIR="" \
+      CPPFLAGS="$target_cppflags" LDFLAGS="$target_ldflags" \
+      ./configure "${cfg[@]}"
+    env -u LIBRARY_PATH \
+      make -j"$jobs" \
+      CFLAGS_host="$host_cflags" CXXFLAGS_host="$host_cflags" \
+      LDFLAGS_host="$host_ldflags"
+  else
+    CC="$CC" CXX="$CXX" \
+      PKG_CONFIG_PATH="${PKG_CONFIG_PATH:-}" \
+      PKG_CONFIG_LIBDIR="${PKG_CONFIG_LIBDIR:-}" \
+      PKG_CONFIG_SYSROOT_DIR="" \
+      CPPFLAGS="$target_cppflags" LDFLAGS="$target_ldflags" \
+      ./configure "${cfg[@]}"
+    make -j"$jobs"
+  fi
   rm -rf "$dest"
   mkdir -p "$dest/lib"
   cp -a "$src/out/Release/node" "$dest/node"
   chmod +x "$dest/node"
-  kotv_syno_deps_ship_shared "$dest/lib" ssl crypto z cares nghttp2
+  if [[ "$CROSS" -eq 0 ]]; then
+    kotv_syno_deps_ship_shared "$dest/lib" ssl crypto z cares nghttp2
+  fi
   if [[ -f "$src/LICENSE" ]]; then cp "$src/LICENSE" "$dest/LICENSE"; fi
   write_stamp node "$ver"
   rm -rf "$src"
@@ -234,20 +249,14 @@ build_python() {
   fi
   py_cfg+=(--with-ensurepip="$ensurepip")
 
-  # 交叉：跳过 getaddrinfo 运行时探测
-  local py_ac=(
-    ac_cv_file__dev_ptmx=yes
-    ac_cv_file__dev_ptc=no
-  )
+  # 交叉：跳过 getaddrinfo；用 export（数组展开加引号不会被当成 VAR=value）
+  export ac_cv_file__dev_ptmx=yes
+  export ac_cv_file__dev_ptc=no
   if [[ "$CROSS" -eq 1 ]]; then
-    py_ac+=(
-      ac_cv_func_getaddrinfo=yes
-      ac_cv_buggy_getaddrinfo=no
-    )
+    export ac_cv_func_getaddrinfo=yes
+    export ac_cv_buggy_getaddrinfo=no
   fi
-  CC="$CC" CXX="$CXX" \
-    "${py_ac[@]}" \
-    ./configure "${py_cfg[@]}"
+  CC="$CC" CXX="$CXX" ./configure "${py_cfg[@]}"
   make -j"$jobs"
   make DESTDIR="$BUILD_ROOT/python-dest" install
   rm -rf "$dest"
@@ -348,8 +357,9 @@ build_jre() {
     exit 1
   fi
   rm -rf "$dest"
-  mkdir -p "$dest"
-  if [[ -x "$jre_src/bin/jlink" ]]; then
+  # 交叉：目标 jlink 是 aarch64，宿主不能执行 → 直接拷 images/jdk
+  # 原生：jlink 要求 --output 目录尚不存在（勿先 mkdir）
+  if [[ "$CROSS" -eq 0 && -x "$jre_src/bin/jlink" ]]; then
     "$jre_src/bin/jlink" \
       --add-modules ALL-MODULE-PATH \
       --strip-debug \
@@ -358,7 +368,11 @@ build_jre() {
       --compress=2 \
       --output "$dest"
   else
+    mkdir -p "$dest"
     cp -a "$jre_src/." "$dest/"
+    if [[ "$CROSS" -eq 1 ]]; then
+      echo "[jre] cross: shipped images/jdk (host cannot run target jlink)"
+    fi
   fi
   kotv_syno_deps_ship_shared "$dest/lib" asound
   write_stamp jre "$ver"
@@ -423,14 +437,19 @@ build_chromium() {
   fi
   command -v ninja >/dev/null 2>&1 || sudo apt-get install -y -qq ninja-build
 
-  # configure 前：Toolkit sysroot + 清单补齐（GCC crt/libgcc、dri.pc、HWCAP2）并验收
+  # configure 前：Toolkit sysroot + 清单补齐（GCC crt/libgcc、dri.pc、compat.h）并验收
   kotv_syno_ensure_deps chromium
-  local chrome_sysroot gcc_libdir
+  local chrome_sysroot gcc_libdir compat_h
   chrome_sysroot="$(kotv_syno_chromium_sysroot)"
   gcc_libdir="${KOTV_SYNO_CHROMIUM_GCC_LIBDIR:-}"
+  compat_h="${KOTV_SYNO_CHROMIUM_COMPAT_H:-}"
   if [[ -z "$gcc_libdir" && -f "$chrome_sysroot/.kotv-gcc-libdir" ]]; then
     gcc_libdir="$(cat "$chrome_sysroot/.kotv-gcc-libdir")"
   fi
+  if [[ -z "$compat_h" && -f "$chrome_sysroot/.kotv-chromium-compat-h" ]]; then
+    compat_h="$(cat "$chrome_sysroot/.kotv-chromium-compat-h")"
+  fi
+  [[ -n "$compat_h" ]] || compat_h="$chrome_sysroot/usr/include/kotv-chromium-compat.h"
   kotv_syno_chromium_verify_sysroot "$chrome_sysroot" || exit 1
 
   local depot="$SRC_CACHE/depot_tools"
@@ -502,11 +521,12 @@ EOF
   fi
   local out_dir="out/HeadlessSyno"
   mkdir -p "$out_dir"
-  # target_sysroot = Toolkit 副本；-B/-L 指向 Toolkit GCC libdir（双保险找 crt/libgcc）
+  # target_sysroot = Toolkit 副本；-B/-L 找 crt/libgcc；-include compat 补 HWCAP2/PR_MTE
   local extra_ld="-L${chrome_sysroot}/usr/lib -L${chrome_sysroot}/lib"
   if [[ -n "$gcc_libdir" ]]; then
     extra_ld+=" -B${gcc_libdir} -L${gcc_libdir}"
   fi
+  local extra_c="-include ${compat_h}"
   cat >"$out_dir/args.gn" <<EOF
 import("//build/args/headless.gn")
 is_debug = false
@@ -533,6 +553,8 @@ use_system_minigbm = false
 ozone_platform_x11 = false
 ozone_platform_wayland = false
 ozone_platform_drm = false
+extra_cflags = "${extra_c}"
+extra_cxxflags = "${extra_c}"
 extra_ldflags = "${extra_ld}"
 EOF
   gn gen "$out_dir"
@@ -579,10 +601,23 @@ build_ffmpeg() {
   rm -rf "$src"
   tar -xJf "$tarball" -C "$BUILD_ROOT"
   cd "$src"
-  # OpenSSL ≥3 + GPL 需要 --enable-version3；-I deps 必须压过 Toolkit sysroot 旧 openssl 1.1
-  # 勿 --pkg-config-flags=--static：shared openssl 下会失败并回落到 sysroot 1.1
+  # OpenSSL ≥3 + GPL 需要 --enable-version3；严禁扫到 Toolkit sysroot 的 OpenSSL 1.1
+  # 勿 --pkg-config-flags=--static；PKG_CONFIG_* 只看见 deps
+  export PKG_CONFIG_SYSROOT_DIR=""
+  export PKG_CONFIG_LIBDIR="${deps}/lib/pkgconfig:${deps}/lib64/pkgconfig"
+  export PKG_CONFIG_PATH="$PKG_CONFIG_LIBDIR"
   export OPENSSL_CFLAGS="-I${deps}/include"
   export OPENSSL_LIBS="-L${deps}/lib -lssl -lcrypto"
+  # 探针：编译单元必须看到 OPENSSL_VERSION_MAJOR>=3
+  if ! printf '%s\n' '#include <openssl/opensslv.h>' 'int x[OPENSSL_VERSION_MAJOR >= 3 ? 1 : -1];' \
+    | $CC -I"${deps}/include" -c -x c - -o /tmp/kotv-ossl-probe.o 2>/dev/null; then
+    echo "ERROR: deps OpenSSL headers are not ≥3.0 under -I${deps}/include" >&2
+    ls -la "${deps}/include/openssl" 2>/dev/null | head || true
+    exit 1
+  fi
+  rm -f /tmp/kotv-ossl-probe.o
+  # CFLAGS 去掉可能带进的旧 -I；只保留 sysroot + deps
+  local ff_cflags="--sysroot=${SYSROOT} -O2 -pipe -I${deps}/include"
   local ff_cfg=(
     --prefix=/opt/kotv-ffmpeg
     --enable-gpl
@@ -593,8 +628,8 @@ build_ffmpeg() {
     --disable-debug
     --cc="$CC"
     --cxx="$CXX"
-    --extra-cflags="-I${deps}/include ${CFLAGS} ${CPPFLAGS:-}"
-    --extra-ldflags="-L${deps}/lib -L${deps}/lib64 ${LDFLAGS}"
+    --extra-cflags="$ff_cflags"
+    --extra-ldflags="-L${deps}/lib -L${deps}/lib64 --sysroot=${SYSROOT} -Wl,-O1"
   )
   # Toolkit 交叉/CI 环境常无 nasm；禁用 x86asm 仍可出 ffmpeg 二进制
   if ! command -v nasm >/dev/null 2>&1 && ! command -v yasm >/dev/null 2>&1; then

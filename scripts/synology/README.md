@@ -7,7 +7,7 @@
 | 组件 | 目标链接 | 依赖闭包（configure 前一次编齐） |
 |------|----------|----------------------------------|
 | **engine** | Toolkit GCC+sysroot **全静态** | 无外部 .so |
-| **Node** | Toolkit + `.syno-deps` | zlib、c-ares、nghttp2、openssl（`--shared-*`）；brotli/ICU 用树内（与源码对齐） |
+| **Node** | Toolkit + `.syno-deps` | 原生：zlib/c-ares/nghttp2/openssl `--shared-*`；交叉：树内 deps（避免 host 链目标 .so）；brotli/ICU 树内 |
 | **Python** | Toolkit + `.syno-deps` | CPython optional：zlib/bzip2/xz/zstd(static+PIC)/libffi/openssl/sqlite/ncurses/readline/libuuid |
 | **JRE** | Toolkit + `.syno-deps` | OpenJDK 必选：alsa、cups、fontconfig(+expat/freetype)、X11 栈（含 libXfixes；交叉 `--disable-malloc0returnsnull`） |
 | **ffmpeg** | Toolkit + `.syno-deps` | zlib、openssl≥3（`--enable-openssl --enable-version3`；pkg-config 不走 `--static`） |
