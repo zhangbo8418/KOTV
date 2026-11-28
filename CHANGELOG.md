@@ -4,7 +4,7 @@
 
 - 新增群晖 DSM 7.2 SPK（x86_64 / armv8）：Web 服务形态（engine + webapp）；**引擎与** Node/Python/JRE/Chromium 均由官方 Toolkit 在 CI 编译（x86_64 用 `geminilake`，armv8 用 `rtd1296`；非 musl / 非 Liberica 预编译）。Chromium 解析 CFT Stable 最新版编 headless_shell。
 - CI 新增 Windows aarch64、Linux aarch64 桌面包；Linux x64 job 更名为 `build-linux-amd64`。
-- 依赖：Go `1.27.4`（含 go-legacy-win7）；chromedp `0.24.0` / cdproto `0.160.12`；quickjs-go `0.7.8`；anacrolix/torrent `1.63.0`；golang.org/x/* 与 modernc.org/sqlite 跟最新。Flutter 钉死收拢到 `scripts/kotv-flutter-pins.sh`：主线 `3.50.1`；Win8+ x64/arm64 `3.47.1` + DComp（仅 `package-flutter-windows.sh` 灌入，CI 不再重复装）；Win7 `3.19.6`。Flutter 包：`video_player`/`wakelock_plus`/`window_manager 0.5.2` 等跟 Dart 3.13 上限；`html 0.15.6`、`flutter_riverpod 2.6`、`fvp 0.40.0` 不动。CI Windows 工具链步骤收拢为 `ci-install-go-legacy-win7.ps1` / `ci-install-mingw-msvcrt.ps1` / `ci-ensure-windows-mpv-host-deps.sh`。
+- 依赖：Go `1.27.4`（含 go-legacy-win7）；chromedp `0.24.0` / cdproto `0.160.12`；quickjs-go `0.7.8`；anacrolix/torrent `1.63.0`；golang.org/x/* 与 modernc.org/sqlite 跟最新；torrent 传递依赖可升则升（roaring/bitset/pion webrtc 等），`anacrolix/stm` 停在 `0.5.0`（`0.6` 与 dht/v2 不兼容）。Flutter 钉死收拢到 `scripts/kotv-flutter-pins.sh`：主线 `3.50.1`；Win8+ x64/arm64 `3.47.1` + DComp；Win7 `3.19.6`。Flutter 包与 `pubspec.lock` 同步到 Dart 3.13 上限（`wakelock_plus 1.8.2`、`window_manager 0.5.2`、`flutter_lints 6`、`video_player_android 2.13` 等）；`html 0.15.6`、`flutter_riverpod 2.6`、`fvp 0.40.0`、`path_provider_android 2.2.23` 及 `window_manager`/`riverpod` 大版本不动。CI Windows 工具链收拢为专用脚本。
 - 版本号同源升至 `0.3.6`（pubspec `0.3.6+46`）。
 
 ## v0.3.5

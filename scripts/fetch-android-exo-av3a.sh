@@ -4,7 +4,7 @@
 # 注意：webhtv 的 media3-*-1.11.0-alpha01-fongmi 二进制缺 DecodeTrackSelector /
 # DolbyVisionOutputPolicy。package-flutter-android.sh 会接着跑：
 #   ./scripts/build-fongmi-media3.sh
-# 从 FongMi/media（release-1.11.0-fongmi）编译完整 AAR 覆盖残缺产物（本地/CI 同脚本）。
+# 从上游 media（release-1.11.0-fongmi）编译完整 AAR 覆盖残缺产物（本地/CI 同脚本）。
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DEST="$ROOT/flutter/android/third_party/maven-webhtv"

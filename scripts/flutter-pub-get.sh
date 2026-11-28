@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# 统一 flutter pub get：Win7 / Dart 3.3 线自动先跑 adapt，避免 video_player_android 2.11 要 SDK ^3.10。
-# 主线：fvp 跟 pub.dev 最新（与 runtime Chromium 跟仓库最新同一策略）。
+# 统一 flutter pub get：Win7 / Dart 3.3 线自动先跑 adapt，避免 video_player_android 要过高 SDK。
+# 主线：fvp 跟 pub.dev 最新。
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
