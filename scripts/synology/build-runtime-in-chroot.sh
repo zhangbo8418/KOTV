@@ -593,12 +593,12 @@ build_ffmpeg() {
   local dest="$OUT/ffmpeg"
   local jobs
   jobs="$(comp_jobs)"
-  local stamp_ver="jellyfin-${ver}-hwa4"
+  local stamp_ver="jellyfin-${ver}-hwa5"
   if stamp_ok ffmpeg "$stamp_ver" && [[ -x "$dest/ffmpeg" ]]; then
     echo "[ffmpeg] skip (cached $stamp_ver)"
     return 0
   fi
-  echo "[ffmpeg] build $ver for $ARCH_LABEL (Toolkit + VAAPI/CUDA/QSV/rkmpp, -j$jobs)"
+  echo "[ffmpeg] build $ver for $ARCH_LABEL (Toolkit + VAAPI/media-driver/CUDA/QSV/rkmpp, -j$jobs)"
   kotv_syno_ensure_deps ffmpeg
   kotv_syno_export_deps_env
   local deps
@@ -727,6 +727,30 @@ build_ffmpeg() {
   rm -f /tmp/kotv-ossl-link /tmp/kotv-ossl-link.err
 
   ./configure "${ff_cfg[@]}"
+  # 验收 configure 真正打开了 HWA（勿只看命令行）
+  local cfgh="ffbuild/config.h"
+  [[ -f "$cfgh" ]] || cfgh="config.h"
+  for macro in CONFIG_VAAPI CONFIG_CUDA; do
+    if ! grep -qE "^#define ${macro} 1$" "$cfgh" 2>/dev/null; then
+      echo "ERROR: ffmpeg $macro not enabled (see $cfgh)" >&2
+      grep -E "$macro" "$cfgh" 2>/dev/null | head -5 >&2 || true
+      exit 1
+    fi
+  done
+  if ! grep -qE '^#define CONFIG_(FFNVCODEC|NVENC|CUVID|NVDEC) 1$' "$cfgh" 2>/dev/null; then
+    echo "ERROR: ffmpeg ffnvcodec/NVENC path not enabled" >&2
+    grep -E 'CONFIG_(FFNVCODEC|NVENC|CUVID|NVDEC)' "$cfgh" 2>/dev/null | head -10 >&2 || true
+    exit 1
+  fi
+  if [[ "$CROSS" -eq 0 ]]; then
+    grep -qE '^#define CONFIG_LIBVPL 1$' "$cfgh" \
+      || { echo "ERROR: CONFIG_LIBVPL not enabled" >&2; exit 1; }
+  else
+    grep -qE '^#define CONFIG_RKMPP 1$' "$cfgh" \
+      || { echo "ERROR: CONFIG_RKMPP not enabled" >&2; exit 1; }
+  fi
+  echo "[ffmpeg] config.h HWA OK"
+
   make -j"$jobs"
   make DESTDIR="$BUILD_ROOT/ffmpeg-dest" install
   rm -rf "$dest"
@@ -738,7 +762,7 @@ build_ffmpeg() {
   mkdir -p "$dest/lib"
   cp -a "$BUILD_ROOT/ffmpeg-dest/opt/kotv-ffmpeg/lib/"*.so* "$dest/lib/" 2>/dev/null || true
   kotv_syno_bundle_component "$dest"
-  # 验收：HWA 相关 Toolkit .so 必须进包（CUDA 为运行时 dlopen，不在此列）
+  # 验收：HWA Toolkit .so / dri 进包（CUDA 专有运行时不随包）
   local miss=0
   for f in libssl libdrm libva; do
     if ! ls "$dest/lib/${f}.so"* >/dev/null 2>&1; then
@@ -751,22 +775,27 @@ build_ffmpeg() {
       echo "ERROR: ffmpeg package missing Toolkit libvpl.so* (QSV)" >&2
       miss=1
     fi
+    if [[ ! -f "$dest/lib/dri/iHD_drv_video.so" ]]; then
+      echo "ERROR: ffmpeg package missing lib/dri/iHD_drv_video.so (media-driver)" >&2
+      miss=1
+    fi
   elif ! ls "$dest/lib"/librockchip_mpp.so* >/dev/null 2>&1; then
     echo "ERROR: ffmpeg package missing Toolkit librockchip_mpp.so* (rkmpp)" >&2
     miss=1
   fi
   if [[ "$miss" -ne 0 ]]; then
     ls -la "$dest/lib" | head -80 >&2 || true
+    ls -la "$dest/lib/dri" 2>/dev/null | head -40 >&2 || true
     exit 1
   fi
   cat >"$dest/README-hwa.txt" <<'EOF'
 KOTV ffmpeg (Synology Toolkit-built)
-Enabled: VAAPI/DRM, CUDA/NVENC/NVDEC (ffnvcodec), QSV (libvpl, x86), rkmpp/rkrga (arm backup).
-Shipped: Toolkit .so under lib/ (+ lib/dri when present); rpath=$ORIGIN/lib.
-Runtime (DSM-provided, not shipped):
-  - CUDA: NVIDIA driver (libcuda / libnvidia-encode)
-  - QSV: Intel oneVPL/MediaSDK GPU runtime
-  - VAAPI: /dev/dri; optional LIBVA_DRIVERS_PATH=.../lib/dri
+Build-time: VAAPI/DRM, CUDA/NVENC/NVDEC (ffnvcodec headers), QSV (libvpl, x86), rkmpp/rkrga (arm).
+Shipped under lib/: Toolkit .so + lib/dri/iHD_drv_video.so (x86); rpath=$ORIGIN/lib.
+Runtime on DSM (not shipped):
+  - CUDA: NVIDIA libcuda / libnvidia-encode
+  - QSV: Intel GPU runtime implementing oneVPL
+  - VAAPI: /dev/dri; LIBVA_DRIVERS_PATH=.../lib/dri LIBVA_DRIVER_NAME=iHD
 EOF
   write_stamp ffmpeg "$stamp_ver"
   rm -rf "$src" "$BUILD_ROOT/ffmpeg-dest"

@@ -222,6 +222,55 @@ kotv_syno_origin_rpath_flags() {
   printf '%s' '-Wl,-rpath,$ORIGIN/lib -Wl,-rpath,$ORIGIN -Wl,-rpath,$ORIGIN/../lib'
 }
 
+# Toolkit CMake：sysroot 走 CMAKE_SYSROOT（独立路径变量），勿把含 -gnu 的路径塞进
+# CMAKE_C_FLAGS 字符串——否则会被拆成 --sysroot=…/aarch64-unknown-linux 与 -gnu/…。
+kotv_syno_cmake_toolchain_file() {
+  local out="${1:?}" deps proc
+  deps="$(kotv_syno_deps_prefix)"
+  case "${PLATFORM:?}" in
+    geminilake) proc=x86_64 ;;
+    rtd1296)    proc=aarch64 ;;
+    *)          proc="$(uname -m)" ;;
+  esac
+  mkdir -p "$(dirname "$out")"
+  cat >"$out" <<EOF
+set(CMAKE_SYSTEM_NAME Linux)
+set(CMAKE_SYSTEM_PROCESSOR ${proc})
+set(CMAKE_SYSROOT "${SYSROOT}")
+set(CMAKE_C_COMPILER "${CC}")
+set(CMAKE_CXX_COMPILER "${CXX}")
+set(CMAKE_AR "${AR:-ar}")
+set(CMAKE_RANLIB "${RANLIB:-ranlib}")
+set(CMAKE_C_FLAGS_INIT "-O2 -pipe -I${deps}/include")
+set(CMAKE_CXX_FLAGS_INIT "-O2 -pipe -I${deps}/include")
+set(CMAKE_EXE_LINKER_FLAGS_INIT "-L${deps}/lib -Wl,-O1")
+set(CMAKE_SHARED_LINKER_FLAGS_INIT "-L${deps}/lib -Wl,-O1")
+list(APPEND CMAKE_FIND_ROOT_PATH "${SYSROOT}" "${deps}")
+set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
+set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
+set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
+EOF
+}
+
+# 用法：kotv_syno_cmake_build <src> <builddir> [额外 -D…]
+kotv_syno_cmake_build() {
+  local src="${1:?}" bdir="${2:?}" deps jobs tf
+  shift 2
+  deps="$(kotv_syno_deps_prefix)"
+  jobs="$(kotv_syno_njobs)"
+  tf="$BUILD_ROOT/cmake-toolchain-${PLATFORM}.cmake"
+  kotv_syno_cmake_toolchain_file "$tf"
+  mkdir -p "$deps" "$bdir"
+  cmake -GNinja -S "$src" -B "$bdir" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX="$deps" \
+    -DCMAKE_TOOLCHAIN_FILE="$tf" \
+    "$@"
+  ninja -C "$bdir" -j"$jobs"
+  ninja -C "$bdir" install
+}
+
 
 # ---------- stamp / 解压 / autotools ----------
 
@@ -429,36 +478,13 @@ kotv_syno_dep_openssl() {
 
 kotv_syno_dep_brotli() {
   kotv_syno_load_versions
-  local ver="$SYNO_BROTLI_VER" deps jobs tarball src
+  local ver="$SYNO_BROTLI_VER" tarball src
   if kotv_syno_dep_ok brotli "$ver" "include/brotli/decode.h"; then
     echo "[deps] brotli $ver cache hit"; return 0
   fi
-  deps="$(kotv_syno_deps_prefix)"; jobs="$(kotv_syno_njobs)"
   tarball="$(kotv_syno_dep_fetch "https://github.com/google/brotli/archive/refs/tags/v${ver}.tar.gz")"
-  # archive 解出 brotli-1.1.0
   src="$(kotv_syno_dep_extract "$tarball" "brotli-${ver}")"
-  mkdir -p "$deps"
-  local cmake_x=()
-  if [[ "$PLATFORM" == rtd1296 ]]; then
-    cmake_x=(-DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=aarch64)
-  fi
-  (
-    cd "$src"
-    mkdir -p out && cd out
-    cmake .. \
-      "${cmake_x[@]}" \
-      -DCMAKE_BUILD_TYPE=Release \
-      -DCMAKE_INSTALL_PREFIX="$deps" \
-      -DCMAKE_C_COMPILER="$CC" \
-      -DCMAKE_CXX_COMPILER="$CXX" \
-      -DCMAKE_C_FLAGS="$CFLAGS" \
-      -DCMAKE_CXX_FLAGS="$CXXFLAGS" \
-      -DCMAKE_EXE_LINKER_FLAGS="$LDFLAGS" \
-      -DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS" \
-      -DBUILD_SHARED_LIBS=ON
-    make -j"$jobs"
-    make install
-  )
+  kotv_syno_cmake_build "$src" "$src/out" -DBUILD_SHARED_LIBS=ON
   kotv_syno_dep_mark brotli "$ver"
 }
 
@@ -599,38 +625,23 @@ kotv_syno_dep_libpciaccess() {
     -Dzlib=disabled
 }
 
-kotv_syno_dep_meson_lib() {
-  # $1=name $2=ver $3=url $4=dirname $5=probe 其余=meson 选项
-  local name="$1" ver="$2" url="$3" dirname="$4" probe="$5"
-  shift 5
-  local deps host jobs tarball src
-  if kotv_syno_dep_ok "$name" "$ver" "$probe"; then
-    echo "[deps] $name $ver cache hit"
-    return 0
-  fi
-  if ! command -v meson >/dev/null 2>&1 || ! command -v ninja >/dev/null 2>&1; then
-    echo "ERROR: meson+ninja required to build $name" >&2
-    return 1
-  fi
+# meson 构建入口（函数内可用 local；交叉写 cross-file，c_args 带 Toolkit sysroot）
+kotv_syno_meson_build() {
+  local src="${1:?}" deps jobs xf
+  shift
   deps="$(kotv_syno_deps_prefix)"
-  host="$(kotv_syno_deps_host_triple)"
   jobs="$(kotv_syno_njobs)"
-  tarball="$(kotv_syno_dep_fetch "$url")"
-  src="$(kotv_syno_dep_extract "$tarball" "$dirname")"
   mkdir -p "$deps"
-  (
-    cd "$src"
-    local mconf=(
-      --prefix="$deps"
-      --libdir=lib
-      --buildtype=release
-      --default-library=shared
-      "$@"
-    )
-    if [[ "$PLATFORM" == rtd1296 ]]; then
-      # 交叉：写临时 meson cross file
-      local xf="$BUILD_ROOT/meson-cross-${PLATFORM}.txt"
-      cat >"$xf" <<EOF
+  local mconf=(
+    --prefix="$deps"
+    --libdir=lib
+    --buildtype=release
+    --default-library=shared
+    "$@"
+  )
+  if [[ "$PLATFORM" == rtd1296 ]]; then
+    xf="$BUILD_ROOT/meson-cross-${PLATFORM}.txt"
+    cat >"$xf" <<EOF
 [binaries]
 c = '$CC'
 cpp = '$CXX'
@@ -647,15 +658,35 @@ endian = 'little'
 [built-in options]
 c_args = ['--sysroot=${SYSROOT}', '-I${deps}/include']
 c_link_args = ['--sysroot=${SYSROOT}', '-L${deps}/lib']
-cpp_args = ['--sysroot=${SYSROOT}', '-I${deps}/include']
+cpp_args = ['--sysroot=${SYSROOT}', '-I${deps}/include', '-fpermissive']
 cpp_link_args = ['--sysroot=${SYSROOT}', '-L${deps}/lib']
 EOF
-      mconf+=(--cross-file="$xf")
-    fi
+    mconf+=(--cross-file="$xf")
+  fi
+  (
+    cd "$src"
     meson setup build "${mconf[@]}"
     ninja -C build -j"$jobs"
     ninja -C build install
   )
+}
+
+kotv_syno_dep_meson_lib() {
+  # $1=name $2=ver $3=url $4=dirname $5=probe 其余=meson 选项
+  local name="$1" ver="$2" url="$3" dirname="$4" probe="$5"
+  shift 5
+  local tarball src
+  if kotv_syno_dep_ok "$name" "$ver" "$probe"; then
+    echo "[deps] $name $ver cache hit"
+    return 0
+  fi
+  if ! command -v meson >/dev/null 2>&1 || ! command -v ninja >/dev/null 2>&1; then
+    echo "ERROR: meson+ninja required to build $name" >&2
+    return 1
+  fi
+  tarball="$(kotv_syno_dep_fetch "$url")"
+  src="$(kotv_syno_dep_extract "$tarball" "$dirname")"
+  kotv_syno_meson_build "$src" "$@"
   kotv_syno_dep_mark "$name" "$ver"
 }
 
@@ -710,10 +741,10 @@ kotv_syno_dep_ffnvcodec() {
   kotv_syno_dep_mark ffnvcodec "$ver"
 }
 
-# QSV：Intel oneVPL（仅 geminilake）；运行时需 DSM 上的 VPL/MediaSDK GPU runtime
+# QSV：Intel oneVPL dispatcher（仅 geminilake）
 kotv_syno_dep_libvpl() {
   kotv_syno_load_versions
-  local ver="$SYNO_LIBVPL_VER" deps jobs tarball src
+  local ver="$SYNO_LIBVPL_VER" deps tarball src
   if [[ "$PLATFORM" != geminilake ]]; then
     echo "[deps] libvpl skip (QSV x86 only, PLATFORM=$PLATFORM)"
     return 0
@@ -721,51 +752,76 @@ kotv_syno_dep_libvpl() {
   if kotv_syno_dep_ok libvpl "$ver" "lib/pkgconfig/vpl.pc"; then
     echo "[deps] libvpl $ver cache hit"; return 0
   fi
-  if ! command -v cmake >/dev/null 2>&1 || ! command -v ninja >/dev/null 2>&1; then
-    echo "ERROR: cmake+ninja required for libvpl" >&2
-    return 1
-  fi
-  deps="$(kotv_syno_deps_prefix)"; jobs="$(kotv_syno_njobs)"
+  deps="$(kotv_syno_deps_prefix)"
   tarball="$(kotv_syno_dep_fetch "https://github.com/intel/libvpl/archive/refs/tags/v${ver}.tar.gz")"
   src="$(kotv_syno_dep_extract "$tarball" "libvpl-${ver}")"
-  mkdir -p "$deps"
-  (
-    cd "$src"
-    cmake -GNinja -S . -B build \
-      -DCMAKE_BUILD_TYPE=Release \
-      -DCMAKE_INSTALL_PREFIX="$deps" \
-      -DCMAKE_C_COMPILER="$CC" \
-      -DCMAKE_CXX_COMPILER="$CXX" \
-      -DCMAKE_SYSROOT="$SYSROOT" \
-      -DCMAKE_C_FLAGS="$CFLAGS" \
-      -DCMAKE_CXX_FLAGS="$CXXFLAGS" \
-      -DCMAKE_EXE_LINKER_FLAGS="$LDFLAGS" \
-      -DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS" \
-      -DINSTALL_DEV=ON -DINSTALL_LIB=ON -DINSTALL_EXAMPLES=OFF \
-      -DBUILD_EXAMPLES=OFF -DBUILD_EXPERIMENTAL=OFF \
-      -DBUILD_SHARED_LIBS=ON -DBUILD_TESTS=OFF
-    ninja -C build -j"$jobs"
-    ninja -C build install
-    # ffmpeg check_pkg_config 找 mfxvideo.h（无 vpl/ 前缀）→ 补 -I…/vpl
-    if [[ -f "$deps/lib/pkgconfig/vpl.pc" ]]; then
-      if ! grep -q 'includedir}/vpl' "$deps/lib/pkgconfig/vpl.pc"; then
-        if grep -q '^Cflags:' "$deps/lib/pkgconfig/vpl.pc"; then
-          sed -i 's|^Cflags: \(.*\)|Cflags: \1 -I${includedir}/vpl|' "$deps/lib/pkgconfig/vpl.pc"
-        else
-          echo 'Cflags: -I${includedir} -I${includedir}/vpl' >>"$deps/lib/pkgconfig/vpl.pc"
-        fi
+  kotv_syno_cmake_build "$src" "$src/build" \
+    -DINSTALL_DEV=ON -DINSTALL_LIB=ON -DINSTALL_EXAMPLES=OFF \
+    -DBUILD_EXAMPLES=OFF -DBUILD_EXPERIMENTAL=OFF \
+    -DBUILD_SHARED_LIBS=ON -DBUILD_TESTS=OFF
+  # ffmpeg check_pkg_config 找 mfxvideo.h（无 vpl/ 前缀）→ 补 -I…/vpl
+  if [[ -f "$deps/lib/pkgconfig/vpl.pc" ]]; then
+    if ! grep -q 'includedir}/vpl' "$deps/lib/pkgconfig/vpl.pc"; then
+      if grep -q '^Cflags:' "$deps/lib/pkgconfig/vpl.pc"; then
+        sed -i 's|^Cflags: \(.*\)|Cflags: \1 -I${includedir}/vpl|' "$deps/lib/pkgconfig/vpl.pc"
+      else
+        echo 'Cflags: -I${includedir} -I${includedir}/vpl' >>"$deps/lib/pkgconfig/vpl.pc"
       fi
-      grep -q 'lstdc++' "$deps/lib/pkgconfig/vpl.pc" \
-        || echo "Libs.private: -lstdc++" >>"$deps/lib/pkgconfig/vpl.pc"
     fi
-  )
+    grep -q 'lstdc++' "$deps/lib/pkgconfig/vpl.pc" \
+      || echo "Libs.private: -lstdc++" >>"$deps/lib/pkgconfig/vpl.pc"
+  fi
   kotv_syno_dep_mark libvpl "$ver"
 }
 
-# rkmpp：Rockchip MPP（rtd1296 备用；nyanmisaka/rk-mirrors）
+# VAAPI 用户态驱动 iHD（仅 geminilake）；装到 deps/lib/dri，随 ffmpeg bundle
+kotv_syno_dep_gmmlib() {
+  kotv_syno_load_versions
+  local ver="$SYNO_GMMLIB_VER" tarball src
+  if [[ "$PLATFORM" != geminilake ]]; then
+    echo "[deps] gmmlib skip (x86 only)"; return 0
+  fi
+  if kotv_syno_dep_ok gmmlib "$ver" "lib/pkgconfig/igdgmm.pc"; then
+    echo "[deps] gmmlib $ver cache hit"; return 0
+  fi
+  tarball="$(kotv_syno_dep_fetch "https://github.com/intel/gmmlib/archive/refs/tags/intel-gmmlib-${ver}.tar.gz")"
+  src="$(kotv_syno_dep_extract "$tarball" "gmmlib-intel-gmmlib-${ver}")"
+  kotv_syno_cmake_build "$src" "$src/build" -DRUN_TEST_SUITE=OFF
+  kotv_syno_dep_mark gmmlib "$ver"
+}
+
+kotv_syno_dep_media_driver() {
+  kotv_syno_load_versions
+  local ver="$SYNO_MEDIA_DRIVER_VER" deps tarball src
+  if [[ "$PLATFORM" != geminilake ]]; then
+    echo "[deps] media-driver skip (x86 only)"; return 0
+  fi
+  if kotv_syno_dep_ok media-driver "$ver" "lib/dri/iHD_drv_video.so"; then
+    echo "[deps] media-driver $ver cache hit"; return 0
+  fi
+  deps="$(kotv_syno_deps_prefix)"
+  kotv_syno_export_deps_env
+  tarball="$(kotv_syno_dep_fetch "https://github.com/intel/media-driver/archive/refs/tags/intel-media-${ver}.tar.gz")"
+  src="$(kotv_syno_dep_extract "$tarball" "media-driver-intel-media-${ver}")"
+  mkdir -p "$deps/lib/dri"
+  kotv_syno_cmake_build "$src" "$BUILD_ROOT/media-driver-build" \
+    -DLIBVA_DRIVERS_PATH="$deps/lib/dri" \
+    -DINSTALL_DRIVER_SYSCONF=OFF \
+    -DBUILD_CMRTLIB=ON \
+    -DENABLE_PRODUCTION_KMD=OFF
+  if [[ ! -f "$deps/lib/dri/iHD_drv_video.so" ]]; then
+    echo "ERROR: media-driver did not install iHD_drv_video.so to $deps/lib/dri" >&2
+    find "$deps" -name 'iHD*' 2>/dev/null | head -20 >&2 || true
+    return 1
+  fi
+  kotv_syno_dep_mark media-driver "$ver"
+}
+
+# rkmpp：Rockchip MPP（rtd1296；nyanmisaka/rk-mirrors）
 kotv_syno_dep_rkmpp() {
   kotv_syno_load_versions
-  local ver="$SYNO_RKMPP_COMMIT" deps jobs tarball src
+  # stamp 后缀：强制失效旧的错误 --sysroot 缓存
+  local ver="${SYNO_RKMPP_COMMIT}-tc3" deps tarball src
   if [[ "$PLATFORM" != rtd1296 ]]; then
     echo "[deps] rkmpp skip (arm only, PLATFORM=$PLATFORM)"
     return 0
@@ -773,51 +829,22 @@ kotv_syno_dep_rkmpp() {
   if kotv_syno_dep_ok rkmpp "$ver" "lib/pkgconfig/rockchip_mpp.pc"; then
     echo "[deps] rkmpp $ver cache hit"; return 0
   fi
-  if ! command -v cmake >/dev/null 2>&1 || ! command -v ninja >/dev/null 2>&1; then
-    echo "ERROR: cmake+ninja required for rkmpp" >&2
-    return 1
+  deps="$(kotv_syno_deps_prefix)"
+  tarball="$(kotv_syno_dep_fetch "https://github.com/nyanmisaka/rk-mirrors/archive/${SYNO_RKMPP_COMMIT}.tar.gz")"
+  src="$(kotv_syno_dep_extract "$tarball" "rk-mirrors-${SYNO_RKMPP_COMMIT}")"
+  kotv_syno_cmake_build "$src" "$src/build" \
+    -DBUILD_TEST=OFF -DBUILD_SHARED_LIBS=ON
+  if [[ -f "$deps/lib/pkgconfig/rockchip_mpp.pc" ]]; then
+    grep -q 'lstdc++' "$deps/lib/pkgconfig/rockchip_mpp.pc" \
+      || echo "Libs.private: -lstdc++" >>"$deps/lib/pkgconfig/rockchip_mpp.pc"
   fi
-  deps="$(kotv_syno_deps_prefix)"; jobs="$(kotv_syno_njobs)"
-  tarball="$(kotv_syno_dep_fetch "https://github.com/nyanmisaka/rk-mirrors/archive/${ver}.tar.gz")"
-  # github：rk-mirrors-<commit>
-  src="$(kotv_syno_dep_extract "$tarball" "rk-mirrors-${ver}")"
-  mkdir -p "$deps"
-  (
-    cd "$src"
-    # 勿单靠 CMAKE_SYSROOT（部分目标丢 --sysroot → 找不到 stdio.h）；flags 显式带 Toolkit sysroot
-    local cfl="--sysroot=${SYSROOT} -O2 -pipe -I${deps}/include"
-    local lfl="--sysroot=${SYSROOT} -L${deps}/lib -Wl,-O1"
-    cmake -GNinja -S . -B build \
-      -DCMAKE_BUILD_TYPE=Release \
-      -DCMAKE_INSTALL_PREFIX="$deps" \
-      -DCMAKE_SYSTEM_NAME=Linux \
-      -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
-      -DCMAKE_C_COMPILER="$CC" \
-      -DCMAKE_CXX_COMPILER="$CXX" \
-      -DCMAKE_C_FLAGS="$cfl" \
-      -DCMAKE_CXX_FLAGS="$cfl" \
-      -DCMAKE_EXE_LINKER_FLAGS="$lfl" \
-      -DCMAKE_SHARED_LINKER_FLAGS="$lfl" \
-      -DCMAKE_FIND_ROOT_PATH="$SYSROOT;$deps" \
-      -DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER \
-      -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
-      -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
-      -DBUILD_TEST=OFF \
-      -DBUILD_SHARED_LIBS=ON
-    ninja -C build -j"$jobs"
-    ninja -C build install
-    if [[ -f "$deps/lib/pkgconfig/rockchip_mpp.pc" ]]; then
-      grep -q 'lstdc++' "$deps/lib/pkgconfig/rockchip_mpp.pc" \
-        || echo "Libs.private: -lstdc++" >>"$deps/lib/pkgconfig/rockchip_mpp.pc"
-    fi
-  )
   kotv_syno_dep_mark rkmpp "$ver"
 }
 
 # rkrga：Rockchip RGA（与 rkmpp 配对）
 kotv_syno_dep_rkrga() {
   kotv_syno_load_versions
-  local ver="$SYNO_RKRGA_COMMIT" deps jobs tarball src
+  local ver="$SYNO_RKRGA_COMMIT" deps tarball src
   if [[ "$PLATFORM" != rtd1296 ]]; then
     echo "[deps] rkrga skip (arm only, PLATFORM=$PLATFORM)"
     return 0
@@ -825,57 +852,21 @@ kotv_syno_dep_rkrga() {
   if kotv_syno_dep_ok rkrga "$ver" "lib/pkgconfig/librga.pc"; then
     echo "[deps] rkrga $ver cache hit"; return 0
   fi
-  deps="$(kotv_syno_deps_prefix)"; jobs="$(kotv_syno_njobs)"
+  deps="$(kotv_syno_deps_prefix)"
   tarball="$(kotv_syno_dep_fetch "https://github.com/nyanmisaka/rk-mirrors/archive/${ver}.tar.gz")"
   src="$(kotv_syno_dep_extract "$tarball" "rk-mirrors-${ver}")"
   kotv_syno_export_deps_env
-  (
-    cd "$src"
-    # 保持 meson 默认 shared
-    local mextra=()
-    # 复用 meson_lib 的交叉文件逻辑：直接调 meson
-    if [[ "$PLATFORM" == rtd1296 ]]; then
-      local xf="$BUILD_ROOT/meson-cross-${PLATFORM}-rga.txt"
-      cat >"$xf" <<EOF
-[binaries]
-c = '$CC'
-cpp = '$CXX'
-ar = '${AR:-ar}'
-strip = '${STRIP:-strip}'
-pkg-config = '$(command -v pkg-config)'
-
-[host_machine]
-system = 'linux'
-cpu_family = 'aarch64'
-cpu = 'aarch64'
-endian = 'little'
-
-[built-in options]
-c_args = ['--sysroot=${SYSROOT}', '-I${deps}/include', '-fpermissive']
-c_link_args = ['--sysroot=${SYSROOT}', '-L${deps}/lib']
-cpp_args = ['--sysroot=${SYSROOT}', '-I${deps}/include', '-fpermissive']
-cpp_link_args = ['--sysroot=${SYSROOT}', '-L${deps}/lib']
-EOF
-      mextra+=(--cross-file="$xf")
-    fi
-    meson setup build \
-      --prefix="$deps" --libdir=lib --buildtype=release \
-      --default-library=shared \
-      -Dlibdrm=false -Dlibrga_demo=false \
-      "${mextra[@]}"
-    ninja -C build -j"$jobs"
-    ninja -C build install
-    if [[ -f "$deps/lib/pkgconfig/librga.pc" ]]; then
-      grep -q 'lstdc++' "$deps/lib/pkgconfig/librga.pc" \
-        || echo "Libs.private: -lstdc++" >>"$deps/lib/pkgconfig/librga.pc"
-    fi
-  )
+  kotv_syno_meson_build "$src" -Dlibdrm=false -Dlibrga_demo=false
+  if [[ -f "$deps/lib/pkgconfig/librga.pc" ]]; then
+    grep -q 'lstdc++' "$deps/lib/pkgconfig/librga.pc" \
+      || echo "Libs.private: -lstdc++" >>"$deps/lib/pkgconfig/librga.pc"
+  fi
   kotv_syno_dep_mark rkrga "$ver"
 }
 
 kotv_syno_ensure_deps_ffmpeg() {
   kotv_syno_load_versions
-  echo "[deps] profile=ffmpeg (VAAPI + CUDA/ffnvcodec + QSV/libvpl + rkmpp/rkrga)"
+  echo "[deps] profile=ffmpeg (VAAPI/media-driver + CUDA/ffnvcodec + QSV/libvpl + rkmpp/rkrga)"
   kotv_syno_dep_zlib
   kotv_syno_dep_openssl
   kotv_syno_export_deps_env
@@ -885,13 +876,17 @@ kotv_syno_ensure_deps_ffmpeg() {
   kotv_syno_export_deps_env
   kotv_syno_dep_libva
   kotv_syno_export_deps_env
-  # 全架构：CUDA 头（群晖 NVIDIA 机型运行时加载）
+  # CUDA/NVENC：仅头文件；运行时 dlopen 群晖 NVIDIA .so（专有，不随包）
   kotv_syno_dep_ffnvcodec
   kotv_syno_export_deps_env
-  # x86：QSV
+  # x86：QSV dispatcher + VAAPI iHD 驱动
   kotv_syno_dep_libvpl
   kotv_syno_export_deps_env
-  # arm：rkmpp/rkrga 备用
+  kotv_syno_dep_gmmlib
+  kotv_syno_export_deps_env
+  kotv_syno_dep_media_driver
+  kotv_syno_export_deps_env
+  # arm：rkmpp/rkrga
   kotv_syno_dep_rkmpp
   kotv_syno_export_deps_env
   kotv_syno_dep_rkrga
@@ -973,15 +968,15 @@ kotv_syno_chromium_fill_gcc_rt() {
 }
 
 kotv_syno_chromium_fill_hwcap2() {
-  # Toolkit 头文件缺 HWCAP2_*/PR_MTE_*/SYS_pkey_*。
-  # Chromium GN 把 extra_cflags 整串当成单个 argv → 必须用无空格的 -includePATH；
-  # 同时把宏写进可写 sysroot 头，并在 checkout 后 patch 源码（三保险）。
+  # Toolkit 头缺 HWCAP2/PR_MTE/SYS_pkey/__NR_pidfd_*。
+  # GN 把 extra_cflags 整串当单个 argv → 必须无空格 -includePATH；compat 内关 -Wunused-macros。
   local sysroot="$1" compat hwcap_bits
   mkdir -p "$sysroot/usr/include"
   compat="$sysroot/usr/include/kotv-chromium-compat.h"
   cat >"$compat" <<'EOF'
-/* KOTV: Toolkit glibc headers may lack these; force-included for Chromium partition_alloc. */
+/* KOTV: Toolkit glibc headers may lack symbols Chromium needs. Force-included. */
 #pragma once
+#pragma clang diagnostic ignored "-Wunused-macros"
 #ifndef HWCAP2_BTI
 #define HWCAP2_BTI (1 << 17)
 #endif
@@ -1009,7 +1004,6 @@ kotv_syno_chromium_fill_hwcap2() {
 #ifndef PR_MTE_TAG_MASK
 #define PR_MTE_TAG_MASK (0xffffUL << PR_MTE_TAG_SHIFT)
 #endif
-/* memory-protection keys syscalls (Toolkit headers may omit) */
 #if defined(__x86_64__)
 #ifndef SYS_pkey_mprotect
 #define SYS_pkey_mprotect 329
@@ -1031,13 +1025,22 @@ kotv_syno_chromium_fill_hwcap2() {
 #define SYS_pkey_free 290
 #endif
 #endif
+/* pidfd (base/process/process_posix.cc); numbers stable on x86_64/aarch64 */
+#ifndef __NR_pidfd_open
+#define __NR_pidfd_open 434
+#endif
+#ifndef __NR_pidfd_getfd
+#define __NR_pidfd_getfd 438
+#endif
+#ifndef __NR_pidfd_send_signal
+#define __NR_pidfd_send_signal 424
+#endif
 EOF
-  # 直接补进 bits/hwcap.h（rsync 副本可写），不依赖 -include
   hwcap_bits="$sysroot/usr/include/bits/hwcap.h"
   if [[ -f "$hwcap_bits" ]] && ! grep -q 'KOTV_HWCAP2' "$hwcap_bits"; then
     cat >>"$hwcap_bits" <<'EOF'
 
-/* KOTV_HWCAP2: Toolkit glibc too old for Chromium partition_alloc */
+/* KOTV_HWCAP2 */
 #ifndef HWCAP2_BTI
 #define HWCAP2_BTI (1 << 17)
 #endif
@@ -1052,12 +1055,12 @@ EOF
   echo "[deps] chromium: wrote compat header $compat"
 }
 
-# checkout 后：补 HWCAP2/SYS_pkey；对易触发 -Wunused-macros 的 TU 关该告警（Toolkit 头过旧）
+# checkout 后：仅补 aarch64_support.h（compat -include 覆盖其余）
 kotv_syno_chromium_patch_src() {
-  local src="${1:?}" f
+  local src="${1:?}" f tmp
   f="$src/base/allocator/partition_allocator/src/partition_alloc/aarch64_support.h"
   if [[ -f "$f" ]] && ! grep -q 'KOTV_HWCAP2' "$f"; then
-    local tmp; tmp="$(mktemp)"
+    tmp="$(mktemp)"
     {
       echo '/* KOTV_HWCAP2 */'
       echo '#ifndef HWCAP2_BTI'
@@ -1070,43 +1073,6 @@ kotv_syno_chromium_patch_src() {
     } >"$tmp"
     mv "$tmp" "$f"
     echo "[chromium] patched aarch64_support.h (HWCAP2)"
-  fi
-  for f in \
-    "$src/base/allocator/partition_allocator/src/partition_alloc/tagging.cc" \
-    "$src/base/allocator/partition_allocator/src/partition_alloc/thread_isolation/pkey.cc"
-  do
-    [[ -f "$f" ]] || continue
-    if ! grep -q 'KOTV_Wunused_macros' "$f"; then
-      local tmp; tmp="$(mktemp)"
-      {
-        echo '/* KOTV_Wunused_macros: Toolkit headers vs Chromium fallback macros */'
-        echo '#pragma clang diagnostic ignored "-Wunused-macros"'
-        cat "$f"
-      } >"$tmp"
-      mv "$tmp" "$f"
-      echo "[chromium] patched $(basename "$f") (-Wunused-macros)"
-    fi
-  done
-  f="$src/base/allocator/partition_allocator/src/partition_alloc/thread_isolation/pkey.cc"
-  if [[ -f "$f" ]] && ! grep -q 'KOTV_SYS_PKEY' "$f"; then
-    local tmp; tmp="$(mktemp)"
-    {
-      echo '/* KOTV_SYS_PKEY */'
-      echo '#ifndef SYS_pkey_mprotect'
-      echo '# if defined(__x86_64__)'
-      echo '#  define SYS_pkey_mprotect 329'
-      echo '#  define SYS_pkey_alloc 330'
-      echo '#  define SYS_pkey_free 331'
-      echo '# elif defined(__aarch64__)'
-      echo '#  define SYS_pkey_mprotect 288'
-      echo '#  define SYS_pkey_alloc 289'
-      echo '#  define SYS_pkey_free 290'
-      echo '# endif'
-      echo '#endif'
-      cat "$f"
-    } >"$tmp"
-    mv "$tmp" "$f"
-    echo "[chromium] patched pkey.cc (SYS_pkey_*)"
   fi
 }
 
@@ -1176,7 +1142,7 @@ kotv_syno_ensure_deps_chromium() {
   sysroot="$(kotv_syno_chromium_sysroot)"
   export KOTV_SYNO_CHROMIUM_SYSROOT="$sysroot"
   # stamp：清单版本；改清单必须 bump
-  want="toolkit-headless:gcc-rt3:dri-pc2:compat-h2-pkey"
+  want="toolkit-headless:gcc-rt3:dri-pc2:compat-h3-pidfd"
   stamp="$sysroot/.kotv-chromium-sysroot"
   if [[ -f "$stamp" && "$(cat "$stamp" 2>/dev/null || true)" == "$want" ]] \
     && kotv_syno_chromium_verify_sysroot "$sysroot"; then
